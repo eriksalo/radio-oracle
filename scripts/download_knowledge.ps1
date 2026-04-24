@@ -21,37 +21,37 @@ $ErrorActionPreference = "Stop"
 $Sources = @{
     "wiki" = @{
         Name    = "Wikipedia EN (text, no images)"
-        Url     = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_latest.zim"
-        Size    = "22 GB"
-        Pattern = "wikipedia_en_all*nopic*.zim"
+        Url     = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-03.zim"
+        Size    = "48 GB"
+        Pattern = "wikipedia_en_all*.zim"
     }
     "ifixit" = @{
         Name    = "iFixit repair guides"
-        Url     = "https://download.kiwix.org/zim/other/ifixit_en_all_latest.zim"
+        Url     = "https://download.kiwix.org/zim/other/ifixit_en_all_2022-06.zim"
         Size    = "2.5 GB"
         Pattern = "ifixit_en_all*.zim"
     }
     "wikibooks" = @{
-        Name    = "Wikibooks"
-        Url     = "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_latest.zim"
-        Size    = "2 GB"
+        Name    = "Wikibooks (text, no images)"
+        Url     = "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_nopic_2026-01.zim"
+        Size    = "2.9 GB"
         Pattern = "wikibooks_en_all*.zim"
     }
     "wikimed" = @{
         Name    = "WikiMed medical encyclopedia"
-        Url     = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_medicine_nopic_latest.zim"
-        Size    = "1 GB"
+        Url     = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_medicine_maxi_2026-04.zim"
+        Size    = "454 MB"
         Pattern = "wikipedia_en_medicine*.zim"
     }
     "crashcourse" = @{
         Name    = "CrashCourse educational videos"
-        Url     = "https://download.kiwix.org/zim/other/crashcourse_en_all_latest.zim"
+        Url     = "https://download.kiwix.org/zim/other/crashcourse_en_all_2022-07.zim"
         Size    = "44 GB"
         Pattern = "crashcourse_en_all*.zim"
     }
     "gutenberg" = @{
         Name    = "Project Gutenberg books"
-        Url     = "https://download.kiwix.org/zim/gutenberg/gutenberg_mul_all_latest.zim"
+        Url     = "https://download.kiwix.org/zim/gutenberg/gutenberg_mul_all_2022-07.zim"
         Size    = "75 GB"
         Pattern = "gutenberg_mul_all*.zim"
     }
