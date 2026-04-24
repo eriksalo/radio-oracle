@@ -1,12 +1,12 @@
 # Radio Oracle - Download Knowledge Bases (Windows)
 # Usage:
-#   .\download_knowledge.ps1              # download all missing files
+#   .\download_knowledge.ps1              # download all
 #   .\download_knowledge.ps1 -DryRun      # preview only
 #   .\download_knowledge.ps1 -Source wiki  # download one source
 #
 # Drop this script into your knowledge folder and run it there.
-# It downloads to the current directory and detects existing ZIM files
-# (even older versions with different filenames).
+# Downloads the latest versions of all ZIM files to the current directory.
+# Already-downloaded files (exact same filename) are skipped.
 
 param(
     [switch]$DryRun,
@@ -16,44 +16,38 @@ param(
 $ErrorActionPreference = "Stop"
 
 # -- Source definitions -------------------------------------------------------
-# Each source has a glob pattern to detect existing files (any version)
+# URLs verified against Kiwix directory listings, April 2026
 
 $Sources = @{
     "wiki" = @{
-        Name    = "Wikipedia EN (text, no images)"
-        Url     = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-03.zim"
-        Size    = "48 GB"
-        Pattern = "wikipedia_en_all*.zim"
+        Name = "Wikipedia EN (text, no images)"
+        Url  = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-03.zim"
+        Size = "48 GB"
     }
     "ifixit" = @{
-        Name    = "iFixit repair guides"
-        Url     = "https://download.kiwix.org/zim/other/ifixit_en_all_2022-06.zim"
-        Size    = "2.5 GB"
-        Pattern = "ifixit_en_all*.zim"
+        Name = "iFixit repair guides"
+        Url  = "https://download.kiwix.org/zim/ifixit/ifixit_en_all_2025-12.zim"
+        Size = "3.3 GB"
     }
     "wikibooks" = @{
-        Name    = "Wikibooks (text, no images)"
-        Url     = "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_nopic_2026-01.zim"
-        Size    = "2.9 GB"
-        Pattern = "wikibooks_en_all*.zim"
+        Name = "Wikibooks (text, no images)"
+        Url  = "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_nopic_2026-01.zim"
+        Size = "2.9 GB"
     }
     "wikimed" = @{
-        Name    = "WikiMed medical encyclopedia"
-        Url     = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_medicine_maxi_2026-04.zim"
-        Size    = "454 MB"
-        Pattern = "wikipedia_en_medicine*.zim"
+        Name = "WikiMed medical encyclopedia"
+        Url  = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_medicine_maxi_2026-04.zim"
+        Size = "454 MB"
     }
     "crashcourse" = @{
-        Name    = "CrashCourse educational videos"
-        Url     = "https://download.kiwix.org/zim/other/crashcourse_en_all_2022-07.zim"
-        Size    = "44 GB"
-        Pattern = "crashcourse_en_all*.zim"
+        Name = "CrashCourse educational videos"
+        Url  = "https://download.kiwix.org/zim/other/crashcourse_en_all_2026-02.zim"
+        Size = "21 GB"
     }
     "gutenberg" = @{
-        Name    = "Project Gutenberg books"
-        Url     = "https://download.kiwix.org/zim/gutenberg/gutenberg_mul_all_2022-07.zim"
-        Size    = "75 GB"
-        Pattern = "gutenberg_mul_all*.zim"
+        Name = "Project Gutenberg books"
+        Url  = "https://download.kiwix.org/zim/gutenberg/gutenberg_mul_all_2025-11.zim"
+        Size = "236 GB"
     }
 }
 
@@ -91,7 +85,8 @@ function Download-File {
     )
 
     if (Test-Path $Destination) {
-        Write-Host "  SKIP  $Label - already exists" -ForegroundColor Yellow
+        $existSize = [math]::Round((Get-Item $Destination).Length / 1MB, 1)
+        Write-Host "  SKIP  $Label - $Destination already exists ($existSize MB)" -ForegroundColor Yellow
         return
     }
 
@@ -103,7 +98,15 @@ function Download-File {
     }
 
     $tempFile = "$Destination.downloading"
-    Write-Host "  DOWNLOADING  $Label (~$Size)..." -ForegroundColor Green
+
+    # Resume if a partial download exists
+    if (Test-Path $tempFile) {
+        $partialMB = [math]::Round((Get-Item $tempFile).Length / 1MB, 1)
+        Write-Host "  RESUMING  $Label ($partialMB MB already downloaded)..." -ForegroundColor Magenta
+    }
+    else {
+        Write-Host "  DOWNLOADING  $Label (~$Size)..." -ForegroundColor Green
+    }
     Write-Host "    $Url"
 
     try {
@@ -132,7 +135,8 @@ function Download-File {
     }
     catch {
         Write-Host "    FAILED: $_" -ForegroundColor Red
-        if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+        Write-Host "    Partial file kept at: $tempFile" -ForegroundColor Red
+        Write-Host "    Re-run the script to retry." -ForegroundColor Red
     }
 }
 
@@ -196,16 +200,6 @@ foreach ($key in $toDownload) {
     }
 
     $s = $Sources[$key]
-
-    # Check if any version of this source already exists
-    $existing = Get-ChildItem -Path . -Filter $s.Pattern -ErrorAction SilentlyContinue
-    if ($existing) {
-        $sizeGB = [math]::Round($existing[0].Length / 1GB, 1)
-        Write-Host "  SKIP  $($s.Name) - found existing: $($existing[0].Name) ($sizeGB GB)" -ForegroundColor Yellow
-        continue
-    }
-
-    # Download latest version
     $uri = New-Object System.Uri($s.Url)
     $filename = [System.IO.Path]::GetFileName($uri.LocalPath)
     Download-File -Url $s.Url -Destination $filename -Label $s.Name -Size $s.Size
@@ -220,6 +214,13 @@ $allZims = Get-ChildItem -Path . -Filter "*.zim" -ErrorAction SilentlyContinue
 if ($allZims) {
     $totalGB = [math]::Round(($allZims | Measure-Object -Property Length -Sum).Sum / 1GB, 1)
     Write-Host "  $($allZims.Count) ZIM files, $totalGB GB total" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Old 2022 files can be deleted after you verify the new ones:" -ForegroundColor Gray
+    foreach ($f in $allZims) {
+        if ($f.Name -match "2022") {
+            Write-Host "    del `"$($f.Name)`"" -ForegroundColor Gray
+        }
+    }
 }
 
 Write-Host ""
