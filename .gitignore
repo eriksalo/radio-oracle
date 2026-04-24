@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.venv/
+.env
+.envrc
+
+# Data & models (large, not tracked)
+data/
+models/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ChromaDB
+chroma_data/

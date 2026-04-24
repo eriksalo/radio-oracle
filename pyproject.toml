@@ -1,0 +1,60 @@
+[project]
+name = "radio-oracle"
+version = "0.1.0"
+description = "Fully offline voice assistant in a vintage radio enclosure"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Erik Salo" }]
+dependencies = [
+    "loguru>=0.7",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+voice = [
+    "sounddevice>=0.4",
+    "scipy>=1.12",
+]
+rag = [
+    "chromadb>=0.5",
+    "sentence-transformers>=3.0",
+]
+tts = [
+    "piper-tts>=1.2",
+]
+dev = [
+    "ruff>=0.4",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+ingest = [
+    "libzim>=3.4",
+    "selectolax>=0.3",
+]
+all = [
+    "radio-oracle[voice,rag,tts]",
+]
+
+[project.scripts]
+oracle = "oracle.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["oracle*", "config*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,30 @@
+[Unit]
+Description=Radio Oracle - Offline Voice Assistant
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/radio-oracle
+ExecStart=/opt/radio-oracle/.venv/bin/python -m oracle --mode voice
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+EnvironmentFile=-/opt/radio-oracle/.env
+Environment=ORACLE_LOG_LEVEL=INFO
+Environment=ORACLE_MODE=voice
+
+# Resource limits
+MemoryMax=7G
+CPUQuota=90%
+
+# GPIO access
+SupplementaryGroups=gpio audio
+
+[Install]
+WantedBy=multi-user.target
