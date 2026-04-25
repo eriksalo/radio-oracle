@@ -72,6 +72,16 @@ fi
 
 # 6. Pull LLM model
 echo "6. Pulling LLM model..."
+if [[ "$DRY_RUN" != true ]]; then
+    # Ollama's installer enables the systemd unit, but the daemon may still be
+    # binding to 127.0.0.1:11434 when we try to pull. Wait up to 30s.
+    for i in {1..30}; do
+        if curl -sf http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+fi
 run_cmd ollama pull llama3.2:3b
 
 # 7. Download voice models
