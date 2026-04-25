@@ -55,6 +55,12 @@ if [[ -z "$UV_BIN" ]]; then
     echo "  ERROR: uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
 fi
+# Install Python under /opt so it's readable by the oracle service user, not in
+# /root/.local/share/uv/ where sudo would put it by default.
+export UV_PYTHON_INSTALL_DIR=/opt/uv-python
+run_cmd mkdir -p "$UV_PYTHON_INSTALL_DIR"
+run_cmd chmod 0755 "$UV_PYTHON_INSTALL_DIR"
+run_cmd "$UV_BIN" python install 3.11
 run_cmd "$UV_BIN" venv --seed --python 3.11 "$INSTALL_DIR/.venv"
 run_cmd "$INSTALL_DIR/.venv/bin/pip" install -e "$INSTALL_DIR[all,dev]"
 
