@@ -45,9 +45,17 @@ if [[ ! -d "$INSTALL_DIR" ]]; then
     echo "  Clone the repo to $INSTALL_DIR or rsync from workstation"
 fi
 
-# 4. Python venv
+# 4. Python venv (uv-managed Python 3.11)
 echo "4. Creating Python virtual environment..."
-run_cmd python3 -m venv "$INSTALL_DIR/.venv"
+UV_BIN="$(command -v uv || true)"
+if [[ -z "$UV_BIN" && -x "/home/erik/.local/bin/uv" ]]; then
+    UV_BIN="/home/erik/.local/bin/uv"
+fi
+if [[ -z "$UV_BIN" ]]; then
+    echo "  ERROR: uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
+fi
+run_cmd "$UV_BIN" venv --python 3.11 "$INSTALL_DIR/.venv"
 run_cmd "$INSTALL_DIR/.venv/bin/pip" install -e "$INSTALL_DIR[all,dev]"
 
 # 5. Install Ollama
