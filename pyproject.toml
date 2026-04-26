@@ -25,6 +25,9 @@ rag = [
 tts = [
     "piper-tts>=1.2",
 ]
+stt = [
+    "pywhispercpp>=1.4",
+]
 dev = [
     "ruff>=0.4",
     "pytest>=8.0",
@@ -35,7 +38,7 @@ ingest = [
     "selectolax>=0.3",
 ]
 all = [
-    "radio-oracle[voice,rag,tts]",
+    "radio-oracle[voice,rag,tts,stt]",
 ]
 
 [project.scripts]

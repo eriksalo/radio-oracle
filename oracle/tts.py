@@ -50,7 +50,7 @@ class PiperTTS:
 
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
-            self._voice.synthesize(text, wf)
+            self._voice.synthesize_wav(text, wf)
 
         buf.seek(0)
         with wave.open(buf, "rb") as wf:

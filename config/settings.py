@@ -23,7 +23,7 @@ class OracleSettings(BaseSettings):
     # Audio
     audio_sample_rate: int = 16000
     audio_channels: int = 1
-    vad_energy_threshold: float = 0.01
+    vad_energy_threshold: float = 0.004
     vad_silence_duration: float = 1.5
 
     # RAG

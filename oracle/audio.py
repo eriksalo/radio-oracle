@@ -56,7 +56,18 @@ def record_until_silence(
 
     audio = np.concatenate(frames, axis=0).flatten()
     duration = len(audio) / sr
-    logger.info(f"Recorded {duration:.1f}s of audio")
+    # Boost gain so quiet USB mics still produce signal Whisper can transcribe.
+    # Target peak ~0.5; cap gain at 50x to avoid blowing up pure noise.
+    peak = float(np.max(np.abs(audio)))
+    if peak > 1e-5:
+        gain = min(0.5 / peak, 50.0)
+        if gain > 1.0:
+            audio = (audio * gain).astype(np.float32)
+            logger.info(f"Recorded {duration:.1f}s of audio (peak {peak:.3f}, applied {gain:.0f}x gain)")
+        else:
+            logger.info(f"Recorded {duration:.1f}s of audio (peak {peak:.3f})")
+    else:
+        logger.info(f"Recorded {duration:.1f}s of audio (silent)")
     return audio
 
 
