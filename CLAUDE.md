@@ -33,6 +33,16 @@ make test       # pytest
 - Knowledge ingestion runs on workstation, rsync ChromaDB to Jetson
 - Config via env vars with `ORACLE_` prefix (direnv-compatible)
 
+## Workstreams
+
+Project is split into 5 independent workstreams. See `docs/workstreams/README.md` for details.
+
+1. **RAG Ingest** — `scripts/ingest_*.py`, `oracle/rag/` (runs on workstation)
+2. **Music Player** — `oracle/music/` (new, not yet implemented)
+3. **TTS & Conversation** — `oracle/core.py`, `oracle/tts.py`, `oracle/stt.py`, `oracle/llm.py`, `oracle/memory/`
+4. **Electronics & Wiring** — `oracle/hardware/`
+5. **Updates & Reliability** — `systemd/`, `oracle/health.py`, `scripts/setup_jetson.sh`
+
 ## Conventions
 
 - All Python: snake_case, type hints required
