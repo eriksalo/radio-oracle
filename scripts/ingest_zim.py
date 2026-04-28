@@ -152,12 +152,49 @@ def flush_batch(
     )
 
 
-def load_existing_ids(collection) -> set[str]:
-    """Load all existing doc IDs from a collection for fast skip-checking."""
+def load_existing_ids(collection, db_path: str) -> set[str]:
+    """Load all existing doc IDs from a collection for fast skip-checking.
+
+    Reads directly from chroma.sqlite3 (METADATA segment) — orders of magnitude
+    faster than collection.get() with offset pagination, which is O(n^2) on
+    large collections (9.86M IDs takes ~2 hours via API vs ~25s via SQL).
+    Falls back to the API if the direct read fails for any reason.
+    """
+    import sqlite3
+
+    sqlite_path = Path(db_path) / "chroma.sqlite3"
+    if not sqlite_path.exists():
+        logger.warning(f"SQLite not found at {sqlite_path}, falling back to API")
+        return _load_existing_ids_via_api(collection)
+
+    try:
+        t0 = time.time()
+        conn = sqlite3.connect(str(sqlite_path))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT e.embedding_id
+            FROM embeddings e
+            JOIN segments s ON s.id = e.segment_id
+            JOIN collections c ON c.id = s.collection
+            WHERE c.name = ? AND s.scope = 'METADATA'
+            """,
+            (collection.name,),
+        )
+        ids = {row[0] for row in cur.fetchall()}
+        conn.close()
+        logger.info(f"Loaded {len(ids)} existing IDs via SQL in {time.time() - t0:.1f}s")
+        return ids
+    except Exception as e:
+        logger.warning(f"Direct SQL ID load failed ({e}), falling back to API")
+        return _load_existing_ids_via_api(collection)
+
+
+def _load_existing_ids_via_api(collection) -> set[str]:
     count = collection.count()
     if count == 0:
         return set()
-    logger.info(f"Loading {count} existing IDs for resume...")
+    logger.info(f"Loading {count} existing IDs via API (slow path)...")
     all_ids: set[str] = set()
     batch = 10_000
     for offset in range(0, count, batch):
@@ -165,6 +202,55 @@ def load_existing_ids(collection) -> set[str]:
         all_ids.update(result["ids"])
     logger.info(f"Loaded {len(all_ids)} existing IDs")
     return all_ids
+
+
+def load_existing_urls(collection_name: str, db_path: str) -> set[str]:
+    """Load every URL that already has stored chunks, so we can skip
+    extract_text/chunk_text on resume. URLs are stored truncated to 500 chars
+    in metadata — caller must compare against url[:500].
+
+    Tradeoff: if a previous run was killed mid-article, that one in-progress
+    article's remaining chunks will be lost on resume. Acceptable for RAG.
+    """
+    import sqlite3
+
+    sqlite_path = Path(db_path) / "chroma.sqlite3"
+    if not sqlite_path.exists():
+        return set()
+
+    try:
+        t0 = time.time()
+        conn = sqlite3.connect(str(sqlite_path))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT s.id FROM segments s
+            JOIN collections c ON c.id = s.collection
+            WHERE c.name = ? AND s.scope = 'METADATA'
+            """,
+            (collection_name,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            conn.close()
+            return set()
+        segment_id = row[0]
+        cur.execute(
+            """
+            SELECT DISTINCT em.string_value
+            FROM embedding_metadata em
+            JOIN embeddings e ON e.id = em.id
+            WHERE em.key = 'url' AND e.segment_id = ?
+            """,
+            (segment_id,),
+        )
+        urls = {row[0] for row in cur.fetchall() if row[0] is not None}
+        conn.close()
+        logger.info(f"Loaded {len(urls)} existing URLs via SQL in {time.time() - t0:.1f}s")
+        return urls
+    except Exception as e:
+        logger.warning(f"URL load failed ({e}); URL-skip disabled, will rely on chunk-level skip")
+        return set()
 
 
 # ---------------------------------------------------------------------------
@@ -186,23 +272,29 @@ def ingest_zim(
     if not dry_run:
         collection = get_chroma_collection(db_path, collection_name)
         embedder = build_embedder()
-        existing_ids = load_existing_ids(collection)
-        logger.info(f"Collection '{collection_name}' has {len(existing_ids)} existing chunks")
+        existing_ids = load_existing_ids(collection, db_path)
+        existing_urls = load_existing_urls(collection_name, db_path)
+        logger.info(f"Collection '{collection_name}' has {len(existing_ids)} existing chunks across {len(existing_urls)} URLs")
     else:
         logger.info("DRY RUN — will not embed or store anything")
         existing_ids = set()
+        existing_urls = set()
 
     total_articles = 0
     total_chunks = 0
     new_chunks = 0
     skipped_short = 0
     skipped_existing = 0
+    skipped_url = 0
     batch_ids: list[str] = []
     batch_texts: list[str] = []
     batch_metas: list[dict] = []
     t0 = time.time()
 
     for url, title, html in iter_zim_articles(zim_path):
+        if url[:500] in existing_urls:
+            skipped_url += 1
+            continue
         text = extract_text(html)
         if len(text) < 100:
             skipped_short += 1
@@ -258,7 +350,7 @@ def ingest_zim(
     logger.info(
         f"  Articles: {total_articles} | Total chunks: {total_chunks} | "
         f"New: {new_chunks} | Skipped existing: {skipped_existing} | "
-        f"Skipped short: {skipped_short}"
+        f"Skipped URL: {skipped_url} | Skipped short: {skipped_short}"
     )
     rate = new_chunks / elapsed if elapsed > 0 else 0
     logger.info(f"  Time: {elapsed / 60:.1f} min | Rate: {rate:.0f} new chunks/sec")
