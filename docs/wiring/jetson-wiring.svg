@@ -8,10 +8,10 @@
     Radio Oracle — Jetson Orin Nano Wiring
   </text>
   <text x="750" y="68" text-anchor="middle" font-size="14" fill="#555">
-    LEDs · Push-to-Talk Button · Volume Potentiometer (via ADS1115 I²C ADC)
+    RGB LED · Momentary Action Button · Power Toggle Switch · Volume Potentiometer (via ADS1115 I²C ADC)
   </text>
   <text x="750" y="88" text-anchor="middle" font-size="12" fill="#777" font-style="italic">
-    Pin numbers are BCM (matches oracle/config/settings.py); header position numbers shown in parentheses
+    Pin numbers are BCM (matches config/settings.py); header position numbers shown in parentheses
   </text>
 
   <!-- ==================== defs ==================== -->
@@ -20,28 +20,15 @@
       <stop offset="0%" stop-color="#1f4d2c"/>
       <stop offset="100%" stop-color="#0e3318"/>
     </linearGradient>
-    <linearGradient id="metalGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#bbb"/>
-      <stop offset="100%" stop-color="#777"/>
-    </linearGradient>
     <linearGradient id="goldPin" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#ffe48a"/>
       <stop offset="100%" stop-color="#b78a1a"/>
     </linearGradient>
-    <radialGradient id="ledRed" cx="0.35" cy="0.35" r="0.7">
-      <stop offset="0%" stop-color="#ffb3b3"/>
-      <stop offset="60%" stop-color="#e23"/>
-      <stop offset="100%" stop-color="#700"/>
-    </radialGradient>
-    <radialGradient id="ledAmber" cx="0.35" cy="0.35" r="0.7">
-      <stop offset="0%" stop-color="#fff0a8"/>
-      <stop offset="60%" stop-color="#f5a623"/>
-      <stop offset="100%" stop-color="#7a4400"/>
-    </radialGradient>
-    <radialGradient id="ledGreen" cx="0.35" cy="0.35" r="0.7">
-      <stop offset="0%" stop-color="#c5f5c5"/>
-      <stop offset="60%" stop-color="#3c3"/>
-      <stop offset="100%" stop-color="#063"/>
+    <radialGradient id="rgbDome" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.9"/>
+      <stop offset="35%" stop-color="#ffd6f6" stop-opacity="0.8"/>
+      <stop offset="65%" stop-color="#a3e3ff" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#bff5c1" stop-opacity="0.7"/>
     </radialGradient>
   </defs>
 
@@ -60,15 +47,16 @@
     <rect x="105" y="220" width="170" height="170" rx="6" fill="#1a1a1a" stroke="#444"/>
     <text x="190" y="313" text-anchor="middle" font-size="13" fill="#aaa">NVIDIA Tegra</text>
 
-    <!-- USB-A stack (stylized) -->
+    <!-- USB-A stack (still on the board, just not wired in this diagram) -->
     <g transform="translate(80, 720)">
       <rect x="0" y="0" width="70" height="55" rx="3" fill="#222" stroke="#000"/>
       <rect x="6" y="8" width="58" height="18" fill="#888"/>
       <rect x="6" y="32" width="58" height="18" fill="#888"/>
       <text x="35" y="78" text-anchor="middle" font-size="10" fill="#ccc">USB-A ×2</text>
+      <text x="35" y="92" text-anchor="middle" font-size="9" fill="#999" font-style="italic">DAC plugs in here</text>
     </g>
 
-    <!-- Network / power placeholders -->
+    <!-- Network / power -->
     <rect x="170" y="730" width="80" height="35" rx="3" fill="#222" stroke="#000"/>
     <text x="210" y="785" text-anchor="middle" font-size="10" fill="#ccc">RJ45</text>
     <rect x="280" y="735" width="40" height="25" rx="3" fill="#222" stroke="#000"/>
@@ -76,13 +64,9 @@
   </g>
 
   <!-- ==================== 40-pin header ==================== -->
-  <!-- header sits at the right edge of the board; rows are spaced 25px -->
   <g id="header" transform="translate(360,210)">
     <rect x="-8" y="-12" width="80" height="510" fill="#0a0a0a" stroke="#000"/>
     <text x="32" y="-22" text-anchor="middle" font-size="11" fill="#ccc">40-pin</text>
-
-    <!-- Generate 20 rows of pins. Each row has odd pin (left col, x=8) and even pin (right col, x=52). -->
-    <!-- Pin label rules: highlight used pins; gray-out the rest. -->
 
     <!-- Row 0 (pins 1, 2): pin1 = 3.3V (USED), pin2 = 5V -->
     <g transform="translate(0,8)">
@@ -91,258 +75,241 @@
       <text x="-12" y="4" text-anchor="end" font-size="10" fill="#9f9" font-weight="bold">3V3 (1)</text>
       <text x="74"  y="4" font-size="10" fill="#888">(2) 5V</text>
     </g>
-    <!-- Row 1 (pins 3, 4): pin3 = SDA1 (USED), pin4 = 5V -->
+    <!-- Row 1: pin3 = SDA1 (USED) -->
     <g transform="translate(0,33)">
       <circle cx="8"  cy="0" r="6" fill="url(#goldPin)" stroke="#a5f"/>
       <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#444"/>
       <text x="-12" y="4" text-anchor="end" font-size="10" fill="#caf" font-weight="bold">BCM 2 SDA (3)</text>
       <text x="74"  y="4" font-size="10" fill="#888">(4) 5V</text>
     </g>
-    <!-- Row 2 (pins 5, 6): pin5 = SCL1 (USED), pin6 = GND (USED) -->
+    <!-- Row 2: pin5 = SCL1 (USED), pin6 = GND (USED) -->
     <g transform="translate(0,58)">
       <circle cx="8"  cy="0" r="6" fill="url(#goldPin)" stroke="#a83"/>
       <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#000"/>
       <text x="-12" y="4" text-anchor="end" font-size="10" fill="#fc9" font-weight="bold">BCM 3 SCL (5)</text>
       <text x="74"  y="4" font-size="10" fill="#222" font-weight="bold">(6) GND</text>
     </g>
-    <!-- Row 3 (pins 7, 8) -->
+    <!-- Row 3 -->
     <g transform="translate(0,83)">
       <circle cx="8"  cy="0" r="5" fill="#666"/>
       <circle cx="52" cy="0" r="5" fill="#666"/>
       <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">BCM 4 (7)</text>
       <text x="74"  y="4" font-size="9" fill="#888">(8) TX</text>
     </g>
-    <!-- Row 4 (pins 9, 10): pin9 = GND (available) -->
+    <!-- Row 4 -->
     <g transform="translate(0,108)">
       <circle cx="8"  cy="0" r="5" fill="#666"/>
       <circle cx="52" cy="0" r="5" fill="#666"/>
       <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">GND (9)</text>
       <text x="74"  y="4" font-size="9" fill="#888">(10) RX</text>
     </g>
-    <!-- Row 5 (pins 11, 12): pin12 = BCM 18 (USED — PTT button) -->
+    <!-- Row 5: pin11 = BCM 17 (USED — toggle switch), pin12 = BCM 18 (USED — momentary) -->
     <g transform="translate(0,133)">
-      <circle cx="8"  cy="0" r="5" fill="#666"/>
+      <circle cx="8"  cy="0" r="6" fill="url(#goldPin)" stroke="#1abc9c"/>
       <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#dd3"/>
-      <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">BCM 17 (11)</text>
-      <text x="74"  y="4" font-size="10" fill="#ff6" font-weight="bold">(12) BCM 18 — PTT</text>
+      <text x="-12" y="4" text-anchor="end" font-size="10" fill="#7fe5d2" font-weight="bold">BCM 17 — Toggle (11)</text>
+      <text x="74"  y="4" font-size="10" fill="#ff6" font-weight="bold">(12) BCM 18 — Button</text>
     </g>
-    <!-- Row 6 (pins 13, 14): pin14 = GND (USED) -->
+    <!-- Row 6: pin14 = GND (USED) -->
     <g transform="translate(0,158)">
       <circle cx="8"  cy="0" r="5" fill="#666"/>
       <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#000"/>
       <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">BCM 27 (13)</text>
       <text x="74"  y="4" font-size="10" fill="#222" font-weight="bold">(14) GND</text>
     </g>
-    <!-- Row 7 (pins 15, 16): pin16 = BCM 23 (USED — LED idle) -->
+    <!-- Row 7: pin16 = BCM 23 (USED — RGB R) -->
     <g transform="translate(0,183)">
       <circle cx="8"  cy="0" r="5" fill="#666"/>
-      <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#3c3"/>
+      <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#ff4f8b"/>
       <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">BCM 22 (15)</text>
-      <text x="74"  y="4" font-size="10" fill="#9f9" font-weight="bold">(16) BCM 23 — LED idle</text>
+      <text x="74"  y="4" font-size="10" fill="#ff9bbf" font-weight="bold">(16) BCM 23 — RGB R</text>
     </g>
-    <!-- Row 8 (pins 17, 18): pin17 = 3.3V (available), pin18 = BCM 24 (USED — LED listen) -->
+    <!-- Row 8: pin18 = BCM 24 (USED — RGB G) -->
     <g transform="translate(0,208)">
       <circle cx="8"  cy="0" r="5" fill="#666"/>
-      <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#e44"/>
+      <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#2ecc71"/>
       <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">3V3 (17)</text>
-      <text x="74"  y="4" font-size="10" fill="#fbb" font-weight="bold">(18) BCM 24 — LED listen</text>
+      <text x="74"  y="4" font-size="10" fill="#9fe9b0" font-weight="bold">(18) BCM 24 — RGB G</text>
     </g>
-    <!-- Row 9 (pins 19, 20): pin20 = GND (available) -->
+    <!-- Row 9 -->
     <g transform="translate(0,233)">
       <circle cx="8"  cy="0" r="5" fill="#666"/>
       <circle cx="52" cy="0" r="5" fill="#666"/>
       <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">MOSI (19)</text>
       <text x="74"  y="4" font-size="9" fill="#888">(20) GND</text>
     </g>
-    <!-- Row 10 (pins 21, 22): pin22 = BCM 25 (USED — LED think) -->
+    <!-- Row 10: pin22 = BCM 25 (USED — RGB B) -->
     <g transform="translate(0,258)">
       <circle cx="8"  cy="0" r="5" fill="#666"/>
-      <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#fa3"/>
+      <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#3498db"/>
       <text x="-12" y="4" text-anchor="end" font-size="9" fill="#888">MISO (21)</text>
-      <text x="74"  y="4" font-size="10" fill="#fc8" font-weight="bold">(22) BCM 25 — LED think</text>
+      <text x="74"  y="4" font-size="10" fill="#9fcdee" font-weight="bold">(22) BCM 25 — RGB B</text>
     </g>
 
-    <!-- Remaining pins (23..40) shown faintly for reference -->
+    <!-- Remaining pins (23..40) shown faintly -->
     <g font-size="9" fill="#777">
-      <g transform="translate(0,283)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">SCLK (23)</text><text x="74" y="4">(24) CE0</text>
-      </g>
-      <g transform="translate(0,308)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">GND (25)</text><text x="74" y="4">(26) CE1</text>
-      </g>
-      <g transform="translate(0,333)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">ID_SD (27)</text><text x="74" y="4">(28) ID_SC</text>
-      </g>
-      <g transform="translate(0,358)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">BCM 5 (29)</text><text x="74" y="4">(30) GND</text>
-      </g>
-      <g transform="translate(0,383)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">BCM 6 (31)</text><text x="74" y="4">(32) BCM 12</text>
-      </g>
-      <g transform="translate(0,408)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">BCM 13 (33)</text><text x="74" y="4">(34) GND</text>
-      </g>
-      <g transform="translate(0,433)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">BCM 19 (35)</text><text x="74" y="4">(36) BCM 16</text>
-      </g>
-      <g transform="translate(0,458)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">BCM 26 (37)</text><text x="74" y="4">(38) BCM 20</text>
-      </g>
-      <g transform="translate(0,483)">
-        <circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/>
-        <text x="-12" y="4" text-anchor="end">GND (39)</text><text x="74" y="4">(40) BCM 21</text>
-      </g>
+      <g transform="translate(0,283)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">SCLK (23)</text><text x="74" y="4">(24) CE0</text></g>
+      <g transform="translate(0,308)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">GND (25)</text><text x="74" y="4">(26) CE1</text></g>
+      <g transform="translate(0,333)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">ID_SD (27)</text><text x="74" y="4">(28) ID_SC</text></g>
+      <g transform="translate(0,358)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">BCM 5 (29)</text><text x="74" y="4">(30) GND</text></g>
+      <g transform="translate(0,383)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">BCM 6 (31)</text><text x="74" y="4">(32) BCM 12</text></g>
+      <g transform="translate(0,408)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">BCM 13 (33)</text><text x="74" y="4">(34) GND</text></g>
+      <g transform="translate(0,433)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">BCM 19 (35)</text><text x="74" y="4">(36) BCM 16</text></g>
+      <g transform="translate(0,458)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">BCM 26 (37)</text><text x="74" y="4">(38) BCM 20</text></g>
+      <g transform="translate(0,483)"><circle cx="8" cy="0" r="5" fill="#555"/><circle cx="52" cy="0" r="5" fill="#555"/><text x="-12" y="4" text-anchor="end">GND (39)</text><text x="74" y="4">(40) BCM 21</text></g>
     </g>
   </g>
 
-  <!-- ==================== Wires ==================== -->
-  <!--
-    All wires exit the right side of the header. Header right column is at x = 360+52 = 412.
-    Wires use orthogonal routing with rounded corners. Stroke widths chunky for readability.
-    Color key:
-      red    = 3.3V power
-      black  = GND
-      yellow = PTT signal (BCM 18)
-      green  = LED idle  (BCM 23)
-      pink   = LED listen (BCM 24)
-      orange = LED think (BCM 25)
-      purple = I2C SDA
-      brown  = I2C SCL
+  <!-- ==================== Wires ====================
+       Color key:
+         red(#d83232)  = 3.3 V power
+         black         = GND
+         pink(#ff4f8b) = RGB R signal (BCM 23)
+         green         = RGB G signal (BCM 24)
+         blue          = RGB B signal (BCM 25)
+         yellow        = momentary button (BCM 18)
+         teal          = power toggle switch (BCM 17)
+         purple        = I²C SDA (BCM 2)
+         brown         = I²C SCL (BCM 3)
+         orange        = pot wiper → ADS A0
   -->
   <g fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
 
-    <!-- 3.3V to ADS1115 VDD (from pin 1) -->
+    <!-- 3.3V from pin 1 → ADS1115 VDD -->
     <path d="M 368 218 L 480 218 L 480 880 L 1140 880 L 1140 820"
           stroke="#d83232"/>
-    <!-- I2C SDA (BCM 2, pin 3) to ADS1115 SDA -->
+    <!-- I2C SDA from pin 3 → ADS1115 SDA -->
     <path d="M 368 243 L 500 243 L 500 900 L 1170 900 L 1170 820"
           stroke="#9b59b6"/>
-    <!-- I2C SCL (BCM 3, pin 5) to ADS1115 SCL -->
+    <!-- I2C SCL from pin 5 → ADS1115 SCL -->
     <path d="M 368 268 L 520 268 L 520 920 L 1200 920 L 1200 820"
           stroke="#8b572a"/>
-    <!-- GND (pin 6) — runs to a "ground rail" all components share -->
-    <path d="M 412 268 L 700 268 L 700 990 L 1230 990 L 1230 820"
-          stroke="#1a1a1a"/>
-    <!-- branches off ground rail to other components -->
-    <path d="M 700 990 L 700 720 L 770 720" stroke="#1a1a1a"/>      <!-- to button GND -->
-    <path d="M 700 540 L 800 540" stroke="#1a1a1a"/>                <!-- to LED idle GND rail -->
-    <path d="M 700 600 L 800 600" stroke="#1a1a1a"/>                <!-- to LED listen GND rail -->
-    <path d="M 700 660 L 800 660" stroke="#1a1a1a"/>                <!-- to LED think GND rail -->
 
-    <!-- BCM 18 (PTT button) — pin 12 -->
-    <path d="M 412 343 L 740 343 L 740 700 L 770 700"
+    <!-- GND rail (pin 6) — runs to all components -->
+    <path d="M 412 268 L 700 268 L 700 990 L 1230 990 L 1230 820" stroke="#1a1a1a"/>
+    <!-- GND branches -->
+    <path d="M 700 990 L 700 720 L 800 720" stroke="#1a1a1a"/>            <!-- toggle GND -->
+    <path d="M 700 580 L 800 580" stroke="#1a1a1a"/>                      <!-- momentary GND -->
+    <path d="M 700 380 L 1015 380 L 1015 410" stroke="#1a1a1a"/>          <!-- RGB cathode (common) -->
+    <path d="M 1020 880 L 1020 990" stroke="#1a1a1a"/>                    <!-- pot CCW (GND) -->
+
+    <!-- BCM 17 toggle — pin 11 (left column) routes around bottom of header -->
+    <path d="M 360 343 L 340 343 L 340 700 L 800 700"
+          stroke="#1abc9c"/>
+
+    <!-- BCM 18 momentary — pin 12 -->
+    <path d="M 412 343 L 740 343 L 740 560 L 800 560"
           stroke="#e6c200"/>
 
-    <!-- BCM 23 (LED idle) — pin 16 -->
-    <path d="M 412 393 L 760 393 L 760 540 L 800 540"
+    <!-- RGB R — pin 16 → resistor → LED R anode -->
+    <path d="M 412 393 L 880 393 L 880 350"
+          stroke="#ff4f8b"/>
+    <!-- RGB G — pin 18 -->
+    <path d="M 412 418 L 900 418 L 900 350"
           stroke="#2ecc71"/>
-    <!-- BCM 24 (LED listen) — pin 18 -->
-    <path d="M 412 418 L 780 418 L 780 600 L 800 600"
-          stroke="#e84393"/>
-    <!-- BCM 25 (LED think) — pin 22 -->
-    <path d="M 412 468 L 820 468 L 820 660"
-          stroke="#e67e22"/>
+    <!-- RGB B — pin 22 -->
+    <path d="M 412 468 L 920 468 L 920 350"
+          stroke="#3498db"/>
   </g>
 
-  <!-- ==================== LEDs ==================== -->
-  <!-- Each LED group: anode (long lead) at top connects via resistor to GPIO; cathode (short) to GND.
-       For active-HIGH drive: GPIO -> resistor -> LED anode -> LED cathode -> GND. -->
-
-  <!-- LED idle (green) at y=540 -->
-  <g id="led-idle" transform="translate(900,540)">
-    <!-- resistor (between GPIO wire end and LED anode) -->
-    <g transform="translate(-100,0)">
-      <line x1="0" y1="0" x2="14" y2="0" stroke="#999" stroke-width="2"/>
-      <rect x="14" y="-9" width="56" height="18" rx="2" fill="#dcb67a" stroke="#222"/>
-      <rect x="20" y="-9" width="3" height="18" fill="#000"/>
-      <rect x="28" y="-9" width="3" height="18" fill="orange"/>
-      <rect x="36" y="-9" width="3" height="18" fill="orange"/>
-      <rect x="44" y="-9" width="3" height="18" fill="brown"/>
-      <line x1="70" y1="0" x2="84" y2="0" stroke="#999" stroke-width="2"/>
-      <text x="42" y="-14" text-anchor="middle" font-size="10" fill="#444">330 Ω</text>
+  <!-- ==================== RGB LED ==================== -->
+  <g id="rgb-led" transform="translate(950,300)">
+    <!-- three resistors stacked vertically, one per channel, between GPIO wire end and LED anode -->
+    <!-- R resistor at x=-70, leads vertical -->
+    <g transform="translate(-70,50)">
+      <line x1="0" y1="-50" x2="0" y2="-30" stroke="#999" stroke-width="2"/>
+      <rect x="-9" y="-30" width="18" height="56" rx="2" fill="#dcb67a" stroke="#222"/>
+      <rect x="-9" y="-22" width="18" height="3" fill="#000"/>
+      <rect x="-9" y="-12" width="18" height="3" fill="orange"/>
+      <rect x="-9" y="-2" width="18" height="3" fill="orange"/>
+      <rect x="-9" y="8" width="18" height="3" fill="brown"/>
+      <line x1="0" y1="26" x2="0" y2="46" stroke="#999" stroke-width="2"/>
+      <text x="14" y="3" font-size="9" fill="#444">330 Ω</text>
     </g>
-    <!-- LED bulb -->
-    <ellipse cx="0" cy="0" rx="18" ry="22" fill="url(#ledGreen)" stroke="#063" stroke-width="1.5"/>
-    <ellipse cx="-5" cy="-7" rx="5" ry="3" fill="#fff" opacity="0.5"/>
-    <!-- leads from bulb -->
-    <line x1="-5" y1="22" x2="-5" y2="40" stroke="#bbb" stroke-width="2"/>
-    <line x1="5" y1="22" x2="5" y2="40" stroke="#bbb" stroke-width="2"/>
-    <text x="40" y="5" font-size="13" font-weight="bold" fill="#222">LED — idle</text>
-    <text x="40" y="22" font-size="10" fill="#666">5 mm green</text>
-  </g>
-
-  <!-- LED listen (red) -->
-  <g id="led-listen" transform="translate(900,600)">
-    <g transform="translate(-100,0)">
-      <line x1="0" y1="0" x2="14" y2="0" stroke="#999" stroke-width="2"/>
-      <rect x="14" y="-9" width="56" height="18" rx="2" fill="#dcb67a" stroke="#222"/>
-      <rect x="20" y="-9" width="3" height="18" fill="#000"/>
-      <rect x="28" y="-9" width="3" height="18" fill="orange"/>
-      <rect x="36" y="-9" width="3" height="18" fill="orange"/>
-      <rect x="44" y="-9" width="3" height="18" fill="brown"/>
-      <line x1="70" y1="0" x2="84" y2="0" stroke="#999" stroke-width="2"/>
-      <text x="42" y="-14" text-anchor="middle" font-size="10" fill="#444">330 Ω</text>
+    <!-- G resistor at x=-50 -->
+    <g transform="translate(-50,50)">
+      <line x1="0" y1="-50" x2="0" y2="-30" stroke="#999" stroke-width="2"/>
+      <rect x="-9" y="-30" width="18" height="56" rx="2" fill="#dcb67a" stroke="#222"/>
+      <rect x="-9" y="-22" width="18" height="3" fill="#000"/>
+      <rect x="-9" y="-12" width="18" height="3" fill="orange"/>
+      <rect x="-9" y="-2" width="18" height="3" fill="orange"/>
+      <rect x="-9" y="8" width="18" height="3" fill="brown"/>
+      <line x1="0" y1="26" x2="0" y2="46" stroke="#999" stroke-width="2"/>
     </g>
-    <ellipse cx="0" cy="0" rx="18" ry="22" fill="url(#ledRed)" stroke="#700" stroke-width="1.5"/>
-    <ellipse cx="-5" cy="-7" rx="5" ry="3" fill="#fff" opacity="0.5"/>
-    <line x1="-5" y1="22" x2="-5" y2="40" stroke="#bbb" stroke-width="2"/>
-    <line x1="5" y1="22" x2="5" y2="40" stroke="#bbb" stroke-width="2"/>
-    <text x="40" y="5" font-size="13" font-weight="bold" fill="#222">LED — listening</text>
-    <text x="40" y="22" font-size="10" fill="#666">5 mm red</text>
-  </g>
-
-  <!-- LED think (amber) -->
-  <g id="led-think" transform="translate(900,660)">
-    <g transform="translate(-100,0)">
-      <line x1="0" y1="0" x2="14" y2="0" stroke="#999" stroke-width="2"/>
-      <rect x="14" y="-9" width="56" height="18" rx="2" fill="#dcb67a" stroke="#222"/>
-      <rect x="20" y="-9" width="3" height="18" fill="#000"/>
-      <rect x="28" y="-9" width="3" height="18" fill="orange"/>
-      <rect x="36" y="-9" width="3" height="18" fill="orange"/>
-      <rect x="44" y="-9" width="3" height="18" fill="brown"/>
-      <line x1="70" y1="0" x2="84" y2="0" stroke="#999" stroke-width="2"/>
-      <text x="42" y="-14" text-anchor="middle" font-size="10" fill="#444">330 Ω</text>
+    <!-- B resistor at x=-30 -->
+    <g transform="translate(-30,50)">
+      <line x1="0" y1="-50" x2="0" y2="-30" stroke="#999" stroke-width="2"/>
+      <rect x="-9" y="-30" width="18" height="56" rx="2" fill="#dcb67a" stroke="#222"/>
+      <rect x="-9" y="-22" width="18" height="3" fill="#000"/>
+      <rect x="-9" y="-12" width="18" height="3" fill="orange"/>
+      <rect x="-9" y="-2" width="18" height="3" fill="orange"/>
+      <rect x="-9" y="8" width="18" height="3" fill="brown"/>
+      <line x1="0" y1="26" x2="0" y2="46" stroke="#999" stroke-width="2"/>
     </g>
-    <ellipse cx="0" cy="0" rx="18" ry="22" fill="url(#ledAmber)" stroke="#7a4400" stroke-width="1.5"/>
-    <ellipse cx="-5" cy="-7" rx="5" ry="3" fill="#fff" opacity="0.5"/>
-    <line x1="-5" y1="22" x2="-5" y2="40" stroke="#bbb" stroke-width="2"/>
-    <line x1="5" y1="22" x2="5" y2="40" stroke="#bbb" stroke-width="2"/>
-    <text x="40" y="5" font-size="13" font-weight="bold" fill="#222">LED — thinking</text>
-    <text x="40" y="22" font-size="10" fill="#666">5 mm amber</text>
+
+    <!-- LED leads from resistors to bulb base -->
+    <line x1="-70" y1="96" x2="-70" y2="120" stroke="#bbb" stroke-width="2"/>
+    <line x1="-50" y1="96" x2="-50" y2="120" stroke="#bbb" stroke-width="2"/>
+    <line x1="-30" y1="96" x2="-30" y2="120" stroke="#bbb" stroke-width="2"/>
+    <line x1="65"  y1="110" x2="65"  y2="120" stroke="#bbb" stroke-width="3"/>
+    <text x="-70" y="135" text-anchor="middle" font-size="9" fill="#444">R</text>
+    <text x="-50" y="135" text-anchor="middle" font-size="9" fill="#444">G</text>
+    <text x="-30" y="135" text-anchor="middle" font-size="9" fill="#444">B</text>
+    <text x="65"  y="135" text-anchor="middle" font-size="9" fill="#444">GND (cathode)</text>
+
+    <!-- LED bulb (rainbow gradient) -->
+    <ellipse cx="0" cy="100" rx="60" ry="50" fill="url(#rgbDome)" stroke="#444" stroke-width="2"/>
+    <!-- color hint dots inside the dome -->
+    <circle cx="-25" cy="95" r="11" fill="#ff4f8b" opacity="0.85"/>
+    <circle cx="0"   cy="105" r="11" fill="#2ecc71" opacity="0.85"/>
+    <circle cx="25"  cy="95" r="11" fill="#3498db" opacity="0.85"/>
+    <ellipse cx="-15" cy="80" rx="14" ry="8" fill="#fff" opacity="0.45"/>
+
+    <text x="0" y="180" text-anchor="middle" font-size="14" font-weight="bold" fill="#222">RGB LED</text>
+    <text x="0" y="197" text-anchor="middle" font-size="10" fill="#666">8 mm common-cathode · 4 leads</text>
+    <text x="0" y="212" text-anchor="middle" font-size="10" fill="#666" font-style="italic">color encodes mode (radio / librarian / thinking / error)</text>
   </g>
 
-  <!-- ==================== PTT button ==================== -->
-  <g id="button" transform="translate(880,720)">
+  <!-- ==================== Momentary action button ==================== -->
+  <g id="action-button" transform="translate(880,560)">
     <rect x="-110" y="-40" width="220" height="80" rx="8" fill="#222" stroke="#000" stroke-width="2"/>
     <circle cx="0" cy="0" r="22" fill="#a92" stroke="#5a3a05" stroke-width="3"/>
     <circle cx="0" cy="0" r="14" fill="#c93"/>
-    <text x="0" y="4" text-anchor="middle" font-size="11" font-weight="bold" fill="#1a0d00">PTT</text>
-    <text x="0" y="58" text-anchor="middle" font-size="13" font-weight="bold" fill="#222">Push-to-Talk Button</text>
-    <text x="0" y="74" text-anchor="middle" font-size="10" fill="#666">Momentary, normally-open · uses internal pull-up</text>
+    <text x="0" y="58" text-anchor="middle" font-size="13" font-weight="bold" fill="#222">Action Button (momentary)</text>
+    <text x="0" y="74" text-anchor="middle" font-size="10" fill="#666">short press: next track / action</text>
+    <text x="0" y="89" text-anchor="middle" font-size="10" fill="#666">long press (≥1 s): enter Librarian mode</text>
     <!-- terminals -->
     <line x1="-90" y1="0" x2="-110" y2="0" stroke="#bbb" stroke-width="3"/>
     <text x="-115" y="-10" text-anchor="end" font-size="10" fill="#444">to BCM 18</text>
-    <line x1="90" y1="0" x2="110" y2="0" stroke="#bbb" stroke-width="3"/>
+    <line x1="90"  y1="0" x2="110"  y2="0" stroke="#bbb" stroke-width="3"/>
+    <text x="115" y="-10" font-size="10" fill="#444">to GND</text>
+  </g>
+
+  <!-- ==================== Power toggle switch ==================== -->
+  <g id="power-toggle" transform="translate(880,700)">
+    <!-- switch body -->
+    <rect x="-110" y="-30" width="220" height="60" rx="6" fill="#2a2a2a" stroke="#000" stroke-width="2"/>
+    <!-- rocker / slider visualization: two pads with a slider on the "on" side -->
+    <rect x="-60" y="-15" width="120" height="30" rx="3" fill="#444" stroke="#222"/>
+    <rect x="0" y="-12" width="55" height="24" rx="2" fill="#888" stroke="#222"/>
+    <text x="-30" y="5" text-anchor="middle" font-size="11" fill="#aaa">OFF</text>
+    <text x="28" y="5" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">ON</text>
+    <text x="0" y="50" text-anchor="middle" font-size="13" font-weight="bold" fill="#222">Power Toggle Switch</text>
+    <text x="0" y="64" text-anchor="middle" font-size="10" fill="#666">closed = device on (radio active) · open = standby</text>
+    <!-- terminals -->
+    <line x1="-90" y1="0" x2="-110" y2="0" stroke="#bbb" stroke-width="3"/>
+    <text x="-115" y="-10" text-anchor="end" font-size="10" fill="#444">to BCM 17</text>
+    <line x1="90"  y1="0" x2="110"  y2="0" stroke="#bbb" stroke-width="3"/>
     <text x="115" y="-10" font-size="10" fill="#444">to GND</text>
   </g>
 
   <!-- ==================== Volume potentiometer + ADS1115 ==================== -->
   <g id="pot" transform="translate(990,820)">
-    <!-- knob body -->
     <circle cx="0" cy="0" r="34" fill="#5a4632" stroke="#1a0e00" stroke-width="3"/>
     <circle cx="0" cy="0" r="24" fill="#3a2a18"/>
     <line x1="0" y1="0" x2="18" y2="-18" stroke="#fff8d0" stroke-width="4" stroke-linecap="round"/>
     <text x="0" y="58" text-anchor="middle" font-size="12" font-weight="bold" fill="#222">Volume Potentiometer</text>
     <text x="0" y="73" text-anchor="middle" font-size="10" fill="#666">10 kΩ linear · 3 terminal</text>
-    <!-- terminals -->
     <line x1="-30" y1="30" x2="-30" y2="55" stroke="#bbb" stroke-width="2"/>
     <line x1="0"   y1="34" x2="0"   y2="55" stroke="#bbb" stroke-width="2"/>
     <line x1="30"  y1="30" x2="30"  y2="55" stroke="#bbb" stroke-width="2"/>
@@ -356,29 +323,25 @@
     <text x="0" y="-15" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">ADS1115</text>
     <text x="0" y="2" text-anchor="middle" font-size="10" fill="#cdd">16-bit I²C ADC</text>
     <text x="0" y="18" text-anchor="middle" font-size="9" fill="#9bf">A0 ← pot wiper</text>
-    <!-- pin row at top of breakout -->
     <g font-size="8" fill="#fff">
       <circle cx="-50" cy="-40" r="3" fill="#d83232"/><text x="-50" y="-46" text-anchor="middle">VDD</text>
       <circle cx="-30" cy="-40" r="3" fill="#9b59b6"/><text x="-30" y="-46" text-anchor="middle">SDA</text>
       <circle cx="-10" cy="-40" r="3" fill="#8b572a"/><text x="-10" y="-46" text-anchor="middle">SCL</text>
       <circle cx="10"  cy="-40" r="3" fill="#1a1a1a"/><text x="10"  y="-46" text-anchor="middle">GND</text>
-      <circle cx="30"  cy="-40" r="3" fill="#3498db"/><text x="30"  y="-46" text-anchor="middle">A0</text>
+      <circle cx="30"  cy="-40" r="3" fill="#e67e22"/><text x="30"  y="-46" text-anchor="middle">A0</text>
     </g>
   </g>
 
-  <!-- pot wiper -> ADS A0 (blue) -->
+  <!-- pot wiper → ADS A0 (orange) -->
   <path d="M 990 880 L 990 970 L 1210 970 L 1210 780"
-        fill="none" stroke="#3498db" stroke-width="3.5" stroke-linecap="round"/>
-  <!-- pot CCW (right, GND) -> ground rail -->
-  <path d="M 1020 880 L 1020 990 L 1230 990"
-        fill="none" stroke="#1a1a1a" stroke-width="3.5" stroke-linecap="round"/>
-  <!-- pot CW (left, +3V3) -> ADS VDD pin -->
+        fill="none" stroke="#e67e22" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- pot CW (left) → 3.3 V (joins existing 3V3 wire) -->
   <path d="M 960 880 L 960 945 L 1130 945 L 1130 780"
         fill="none" stroke="#d83232" stroke-width="3.5" stroke-linecap="round"/>
 
   <!-- ==================== Legend ==================== -->
   <g id="legend" transform="translate(60,950)">
-    <rect x="0" y="0" width="780" height="130" rx="8" fill="#fff8e6" stroke="#aa8" stroke-width="1"/>
+    <rect x="0" y="0" width="780" height="135" rx="8" fill="#fff8e6" stroke="#aa8" stroke-width="1"/>
     <text x="14" y="22" font-size="13" font-weight="bold" fill="#222">Wire colors</text>
     <g font-size="11" fill="#222">
       <line x1="14" y1="42" x2="44" y2="42" stroke="#d83232" stroke-width="4"/>
@@ -386,33 +349,37 @@
       <line x1="14" y1="62" x2="44" y2="62" stroke="#1a1a1a" stroke-width="4"/>
       <text x="50" y="66">GND</text>
       <line x1="14" y1="82" x2="44" y2="82" stroke="#e6c200" stroke-width="4"/>
-      <text x="50" y="86">PTT signal (BCM 18)</text>
-      <line x1="14" y1="102" x2="44" y2="102" stroke="#9b59b6" stroke-width="4"/>
-      <text x="50" y="106">I²C SDA (BCM 2)</text>
+      <text x="50" y="86">Action button (BCM 18)</text>
+      <line x1="14" y1="102" x2="44" y2="102" stroke="#1abc9c" stroke-width="4"/>
+      <text x="50" y="106">Toggle switch (BCM 17)</text>
 
-      <line x1="200" y1="42" x2="230" y2="42" stroke="#2ecc71" stroke-width="4"/>
-      <text x="236" y="46">LED idle (BCM 23)</text>
-      <line x1="200" y1="62" x2="230" y2="62" stroke="#e84393" stroke-width="4"/>
-      <text x="236" y="66">LED listen (BCM 24)</text>
-      <line x1="200" y1="82" x2="230" y2="82" stroke="#e67e22" stroke-width="4"/>
-      <text x="236" y="86">LED think (BCM 25)</text>
-      <line x1="200" y1="102" x2="230" y2="102" stroke="#8b572a" stroke-width="4"/>
-      <text x="236" y="106">I²C SCL (BCM 3)</text>
+      <line x1="240" y1="42" x2="270" y2="42" stroke="#ff4f8b" stroke-width="4"/>
+      <text x="276" y="46">RGB R (BCM 23)</text>
+      <line x1="240" y1="62" x2="270" y2="62" stroke="#2ecc71" stroke-width="4"/>
+      <text x="276" y="66">RGB G (BCM 24)</text>
+      <line x1="240" y1="82" x2="270" y2="82" stroke="#3498db" stroke-width="4"/>
+      <text x="276" y="86">RGB B (BCM 25)</text>
 
-      <line x1="400" y1="42" x2="430" y2="42" stroke="#3498db" stroke-width="4"/>
-      <text x="436" y="46">Pot wiper → ADC A0</text>
+      <line x1="450" y1="42" x2="480" y2="42" stroke="#9b59b6" stroke-width="4"/>
+      <text x="486" y="46">I²C SDA (BCM 2)</text>
+      <line x1="450" y1="62" x2="480" y2="62" stroke="#8b572a" stroke-width="4"/>
+      <text x="486" y="66">I²C SCL (BCM 3)</text>
+      <line x1="450" y1="82" x2="480" y2="82" stroke="#e67e22" stroke-width="4"/>
+      <text x="486" y="86">Pot wiper → ADC A0</text>
     </g>
   </g>
 
   <!-- ==================== Notes / BOM ==================== -->
   <g id="notes" transform="translate(870,950)">
-    <rect x="0" y="0" width="600" height="130" rx="8" fill="#fff8e6" stroke="#aa8" stroke-width="1"/>
+    <rect x="0" y="0" width="600" height="135" rx="8" fill="#fff8e6" stroke="#aa8" stroke-width="1"/>
     <text x="14" y="22" font-size="13" font-weight="bold" fill="#222">Bill of materials &amp; notes</text>
     <g font-size="11" fill="#222">
-      <text x="14" y="42">• 3 × 5 mm LED (green / red / amber) + 3 × 330 Ω resistor (¼ W)</text>
-      <text x="14" y="58">• 1 × momentary push-button (12 mm panel-mount works well in a radio enclosure)</text>
-      <text x="14" y="74">• 1 × 10 kΩ linear potentiometer + 1 × ADS1115 I²C ADC breakout</text>
-      <text x="14" y="92" fill="#a52" font-style="italic">Tip: a rotary encoder on 2 GPIO pins skips the ADC entirely if you don't need a true analog pot.</text>
+      <text x="14" y="42">• 1 × 8 mm common-cathode RGB LED (4-lead) + 3 × 330 Ω resistor (¼ W)</text>
+      <text x="14" y="58">• 1 × momentary push-button — short = next, long ≥1 s = Librarian mode</text>
+      <text x="14" y="74">• 1 × SPST toggle switch — closed wakes the device; open puts it in standby</text>
+      <text x="14" y="90">• 1 × 10 kΩ linear potentiometer + 1 × ADS1115 I²C ADC breakout</text>
+      <text x="14" y="108" fill="#a52" font-style="italic">Common-anode RGB LED works too, but invert the GPIO drive (active-LOW) and tie the common pin to 3.3 V.</text>
+      <text x="14" y="124" fill="#555" font-style="italic">USB DAC plugs into a Jetson USB-A port (no GPIO wiring) — see the labelled USB-A stack.</text>
     </g>
   </g>
 </svg>
