@@ -29,6 +29,9 @@ class OracleSettings(BaseSettings):
     # RAG
     chroma_path: Path = Path("data/chroma")
     embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_device: str = "auto"  # auto | cpu | cuda | cuda:N
+    embedding_fp16: bool = True  # only honored on CUDA
+    embedding_batch_size: int = 256
     rag_top_k: int = 5
     chunk_size: int = 512
     chunk_overlap: int = 64

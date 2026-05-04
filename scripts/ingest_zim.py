@@ -4,12 +4,13 @@ Unified ZIM ingestion script — replaces ingest_wikipedia.py, ingest_generic_zi
 and ingest_gutenberg.py (Gutenberg is now a ZIM too).
 
 Reads ZIM files, extracts article text, chunks it, embeds with
-all-MiniLM-L6-v2 (auto-detects GPU), and stores in ChromaDB.
+all-MiniLM-L6-v2 (auto-detects GPU, FP16 on CUDA), and stores in ChromaDB.
 
 Features over the old scripts:
   - Single script for all ZIM sources
   - Auto-detects collection name from ZIM filename
-  - GPU auto-detection (huge speedup on workstations)
+  - GPU auto-detection + explicit --device / --fp16 flags
+  - Producer/consumer pipeline so HTML extraction overlaps GPU embedding
   - Deterministic doc IDs for resume/dedup
   - --all mode to ingest every ZIM in a directory
   - Rate logging and progress tracking
@@ -17,11 +18,17 @@ Features over the old scripts:
 Usage:
     python scripts/ingest_zim.py <file.zim> [--collection <name>] [--batch-size 2000] [--dry-run]
     python scripts/ingest_zim.py --all --zim-dir /path/to/zims [--batch-size 2000] [--dry-run]
+
+Workstation tuning (e.g. RTX 4070):
+    python scripts/ingest_zim.py --all --zim-dir /path/to/zims \
+        --device cuda --fp16 --encode-batch-size 512 --batch-size 4000
 """
 
 import argparse
 import hashlib
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -125,12 +132,27 @@ def get_chroma_collection(db_path: str, collection_name: str):
     )
 
 
-def build_embedder():
-    """Load sentence-transformers model, auto-detecting GPU."""
+def build_embedder(device: str = "auto", fp16: bool = True):
+    """Load sentence-transformers model with explicit device + FP16.
+
+    device: 'auto' (cuda if available), 'cpu', 'cuda', or 'cuda:N'.
+    fp16: convert weights to half precision on CUDA (~2x faster, negligible
+    quality loss for MiniLM). No-op on CPU.
+    """
     from sentence_transformers import SentenceTransformer
 
-    logger.info("Loading embedding model all-MiniLM-L6-v2 ...")
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    from oracle.rag.embedder import resolve_device
+
+    resolved = resolve_device(device)
+    logger.info(f"Loading embedding model all-MiniLM-L6-v2 (device={resolved}, fp16={fp16}) ...")
+    model = SentenceTransformer("all-MiniLM-L6-v2", device=resolved)
+
+    if fp16 and str(model.device).startswith("cuda"):
+        model.half()
+        logger.info("Embedding model converted to FP16")
+    elif fp16:
+        logger.warning("FP16 requested but device is not CUDA; staying in FP32")
+
     logger.info(f"Embedding model loaded (device: {model.device})")
     return model
 
@@ -141,9 +163,15 @@ def flush_batch(
     doc_ids: list[str],
     texts: list[str],
     metadatas: list[dict],
+    encode_batch_size: int = 256,
 ):
     """Embed a batch and upsert into ChromaDB."""
-    embeddings = embedder.encode(texts, show_progress_bar=False, batch_size=256)
+    embeddings = embedder.encode(
+        texts,
+        show_progress_bar=False,
+        batch_size=encode_batch_size,
+        convert_to_numpy=True,
+    )
     collection.upsert(
         ids=doc_ids,
         documents=texts,
@@ -257,6 +285,81 @@ def load_existing_urls(collection_name: str, db_path: str) -> set[str]:
 # Main ingestion loop
 # ---------------------------------------------------------------------------
 
+_PRODUCER_DONE = object()
+
+
+def _produce_batches(
+    zim_path: str,
+    collection_name: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    existing_ids: set[str],
+    existing_urls: set[str],
+    batch_size: int,
+    out_queue: "queue.Queue",
+    stats: dict,
+    stop_event: threading.Event,
+) -> None:
+    """Producer thread: ZIM read + HTML extract + chunk + dedup -> batches.
+
+    All CPU-bound work that can run in parallel with GPU embedding lives here.
+    Pushes (ids, texts, metadatas) tuples onto out_queue, then a sentinel.
+    """
+    batch_ids: list[str] = []
+    batch_texts: list[str] = []
+    batch_metas: list[dict] = []
+
+    try:
+        for url, title, html in iter_zim_articles(zim_path):
+            if stop_event.is_set():
+                break
+
+            if url[:500] in existing_urls:
+                stats["skipped_url"] += 1
+                continue
+
+            text = extract_text(html)
+            if len(text) < 100:
+                stats["skipped_short"] += 1
+                continue
+
+            chunks = chunk_text(text, chunk_size, chunk_overlap)
+            if not chunks:
+                stats["skipped_short"] += 1
+                continue
+
+            stats["total_articles"] += 1
+
+            for idx, chunk in enumerate(chunks):
+                doc_id = make_doc_id(collection_name, url, idx)
+                stats["total_chunks"] += 1
+
+                if doc_id in existing_ids:
+                    stats["skipped_existing"] += 1
+                    continue
+
+                batch_ids.append(doc_id)
+                batch_texts.append(chunk)
+                batch_metas.append({
+                    "source": collection_name,
+                    "title": title[:500],
+                    "url": url[:500],
+                    "chunk_index": idx,
+                })
+
+                if len(batch_ids) >= batch_size:
+                    out_queue.put((batch_ids, batch_texts, batch_metas))
+                    batch_ids, batch_texts, batch_metas = [], [], []
+
+        if batch_ids:
+            out_queue.put((batch_ids, batch_texts, batch_metas))
+    except Exception as e:
+        stats["producer_error"] = repr(e)
+        logger.exception(f"Producer thread crashed: {e}")
+    finally:
+        out_queue.put(_PRODUCER_DONE)
+
+
 def ingest_zim(
     zim_path: str,
     collection_name: str,
@@ -265,92 +368,110 @@ def ingest_zim(
     chunk_size: int = 512,
     chunk_overlap: int = 64,
     dry_run: bool = False,
+    device: str = "auto",
+    fp16: bool = True,
+    encode_batch_size: int = 256,
+    queue_depth: int = 4,
 ) -> None:
     logger.info(f"=== Ingesting {Path(zim_path).name} -> collection '{collection_name}' ===")
-    logger.info(f"ChromaDB: {db_path} | batch: {batch_size} | chunk: {chunk_size}w / {chunk_overlap} overlap")
+    logger.info(
+        f"ChromaDB: {db_path} | upsert batch: {batch_size} | encode batch: {encode_batch_size} | "
+        f"chunk: {chunk_size}w / {chunk_overlap} overlap | device: {device} | fp16: {fp16}"
+    )
 
     if not dry_run:
         collection = get_chroma_collection(db_path, collection_name)
-        embedder = build_embedder()
+        embedder = build_embedder(device=device, fp16=fp16)
         existing_ids = load_existing_ids(collection, db_path)
         existing_urls = load_existing_urls(collection_name, db_path)
-        logger.info(f"Collection '{collection_name}' has {len(existing_ids)} existing chunks across {len(existing_urls)} URLs")
+        logger.info(
+            f"Collection '{collection_name}' has {len(existing_ids)} existing chunks "
+            f"across {len(existing_urls)} URLs"
+        )
     else:
         logger.info("DRY RUN — will not embed or store anything")
+        collection = None
+        embedder = None
         existing_ids = set()
         existing_urls = set()
 
-    total_articles = 0
-    total_chunks = 0
+    stats = {
+        "total_articles": 0,
+        "total_chunks": 0,
+        "skipped_short": 0,
+        "skipped_existing": 0,
+        "skipped_url": 0,
+    }
     new_chunks = 0
-    skipped_short = 0
-    skipped_existing = 0
-    skipped_url = 0
-    batch_ids: list[str] = []
-    batch_texts: list[str] = []
-    batch_metas: list[dict] = []
     t0 = time.time()
 
-    for url, title, html in iter_zim_articles(zim_path):
-        if url[:500] in existing_urls:
-            skipped_url += 1
-            continue
-        text = extract_text(html)
-        if len(text) < 100:
-            skipped_short += 1
-            continue
+    work_queue: queue.Queue = queue.Queue(maxsize=queue_depth)
+    stop_event = threading.Event()
+    producer = threading.Thread(
+        target=_produce_batches,
+        args=(
+            zim_path,
+            collection_name,
+            chunk_size,
+            chunk_overlap,
+            existing_ids,
+            existing_urls,
+            batch_size,
+            work_queue,
+            stats,
+            stop_event,
+        ),
+        name="zim-producer",
+        daemon=True,
+    )
+    producer.start()
 
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
-        if not chunks:
-            skipped_short += 1
-            continue
+    try:
+        while True:
+            item = work_queue.get()
+            if item is _PRODUCER_DONE:
+                break
+            ids, texts, metas = item
+            new_chunks += len(ids)
 
-        total_articles += 1
-
-        for idx, chunk in enumerate(chunks):
-            doc_id = make_doc_id(collection_name, url, idx)
-            total_chunks += 1
-
-            if doc_id in existing_ids:
-                skipped_existing += 1
-                continue
-
-            if dry_run:
-                new_chunks += 1
-                continue
-
-            batch_ids.append(doc_id)
-            batch_texts.append(chunk)
-            batch_metas.append({
-                "source": collection_name,
-                "title": title[:500],
-                "url": url[:500],
-                "chunk_index": idx,
-            })
-            new_chunks += 1
-
-            if len(batch_ids) >= batch_size:
-                flush_batch(collection, embedder, batch_ids, batch_texts, batch_metas)
-                elapsed = time.time() - t0
-                rate = new_chunks / elapsed if elapsed > 0 else 0
-                logger.info(
-                    f"  {new_chunks} new chunks ({total_chunks} total, "
-                    f"{skipped_existing} skipped, {total_articles} articles) "
-                    f"— {rate:.0f} new/sec"
+            if not dry_run:
+                flush_batch(
+                    collection,
+                    embedder,
+                    ids,
+                    texts,
+                    metas,
+                    encode_batch_size=encode_batch_size,
                 )
-                batch_ids.clear()
-                batch_texts.clear()
-                batch_metas.clear()
 
-    if batch_ids and not dry_run:
-        flush_batch(collection, embedder, batch_ids, batch_texts, batch_metas)
+            elapsed = time.time() - t0
+            rate = new_chunks / elapsed if elapsed > 0 else 0
+            logger.info(
+                f"  {new_chunks} new chunks ({stats['total_chunks']} total, "
+                f"{stats['skipped_existing']} skipped, {stats['total_articles']} articles) "
+                f"— {rate:.0f} new/sec"
+            )
+    except KeyboardInterrupt:
+        logger.warning("Interrupted; signaling producer to stop and draining queue")
+        stop_event.set()
+        # Drain remaining items so the producer's final put() doesn't block forever
+        while True:
+            item = work_queue.get()
+            if item is _PRODUCER_DONE:
+                break
+        raise
+    finally:
+        producer.join()
+
+    if "producer_error" in stats:
+        logger.error(f"Ingest aborted due to producer error: {stats['producer_error']}")
 
     elapsed = time.time() - t0
     logger.info(f"=== Done: {collection_name} ===")
     logger.info(
-        f"  Articles: {total_articles} | Total chunks: {total_chunks} | "
-        f"New: {new_chunks} | Skipped existing: {skipped_existing} | "
-        f"Skipped URL: {skipped_url} | Skipped short: {skipped_short}"
+        f"  Articles: {stats['total_articles']} | Total chunks: {stats['total_chunks']} | "
+        f"New: {new_chunks} | Skipped existing: {stats['skipped_existing']} | "
+        f"Skipped URL: {stats['skipped_url']} | Skipped short: {stats['skipped_short']}"
     )
     rate = new_chunks / elapsed if elapsed > 0 else 0
     logger.info(f"  Time: {elapsed / 60:.1f} min | Rate: {rate:.0f} new chunks/sec")
@@ -401,9 +522,15 @@ def main() -> None:
     parser.add_argument("--all", action="store_true", help="Ingest all ZIM files in --zim-dir")
     parser.add_argument("--zim-dir", default=".", help="Directory containing ZIM files (default: cwd)")
     parser.add_argument("--db-path", default="data/chroma", help="ChromaDB path (default: data/chroma)")
-    parser.add_argument("--batch-size", type=int, default=2000, help="Embedding batch size (default: 2000)")
+    parser.add_argument("--batch-size", type=int, default=2000, help="Chunks per ChromaDB upsert (default: 2000)")
+    parser.add_argument("--encode-batch-size", type=int, default=256, help="Sub-batch passed to model.encode (default: 256; try 512-1024 on RTX 4070+)")
     parser.add_argument("--chunk-size", type=int, default=512, help="Words per chunk (default: 512)")
     parser.add_argument("--chunk-overlap", type=int, default=64, help="Overlap between chunks (default: 64)")
+    parser.add_argument("--device", default="auto", help="Embedding device: auto | cpu | cuda | cuda:N (default: auto)")
+    fp16_group = parser.add_mutually_exclusive_group()
+    fp16_group.add_argument("--fp16", dest="fp16", action="store_true", default=True, help="Use FP16 weights on CUDA (default: on)")
+    fp16_group.add_argument("--no-fp16", dest="fp16", action="store_false", help="Disable FP16, use FP32")
+    parser.add_argument("--queue-depth", type=int, default=4, help="Producer/consumer queue depth (default: 4)")
     parser.add_argument("--dry-run", action="store_true", help="Count chunks without embedding/storing")
     args = parser.parse_args()
 
@@ -423,6 +550,10 @@ def main() -> None:
                 chunk_size=args.chunk_size,
                 chunk_overlap=args.chunk_overlap,
                 dry_run=args.dry_run,
+                device=args.device,
+                fp16=args.fp16,
+                encode_batch_size=args.encode_batch_size,
+                queue_depth=args.queue_depth,
             )
     elif args.zim_file:
         collection = args.collection or detect_collection(Path(args.zim_file).name)
@@ -436,6 +567,10 @@ def main() -> None:
             chunk_size=args.chunk_size,
             chunk_overlap=args.chunk_overlap,
             dry_run=args.dry_run,
+            device=args.device,
+            fp16=args.fp16,
+            encode_batch_size=args.encode_batch_size,
+            queue_depth=args.queue_depth,
         )
     else:
         parser.print_help()
