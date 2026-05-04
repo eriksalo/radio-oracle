@@ -8,7 +8,7 @@
     Radio Oracle — Jetson Orin Nano Wiring
   </text>
   <text x="750" y="68" text-anchor="middle" font-size="14" fill="#555">
-    LEDs · Push-to-Talk Button · Volume Potentiometer (via ADS1115 I²C ADC) · USB DAC
+    LEDs · Push-to-Talk Button · Volume Potentiometer (via ADS1115 I²C ADC)
   </text>
   <text x="750" y="88" text-anchor="middle" font-size="12" fill="#777" font-style="italic">
     Pin numbers are BCM (matches oracle/config/settings.py); header position numbers shown in parentheses
@@ -252,38 +252,6 @@
           stroke="#e67e22"/>
   </g>
 
-  <!-- ==================== USB DAC (top right) ==================== -->
-  <g id="usb-dac">
-    <rect x="930" y="130" width="260" height="120" rx="10" fill="#1c1c1c" stroke="#000" stroke-width="2"/>
-    <text x="1060" y="160" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff">USB DAC</text>
-    <text x="1060" y="180" text-anchor="middle" font-size="11" fill="#aaa">e.g. Sabrent / Creative</text>
-    <!-- USB connector -->
-    <rect x="930" y="190" width="40" height="22" fill="#888" stroke="#000"/>
-    <text x="950" y="226" text-anchor="middle" font-size="9" fill="#aaa">USB-A</text>
-    <!-- 3.5mm jack -->
-    <circle cx="1170" cy="200" r="8" fill="#333" stroke="#000"/>
-    <text x="1170" y="226" text-anchor="middle" font-size="9" fill="#aaa">3.5mm</text>
-
-    <!-- USB cable to Jetson USB-A port -->
-    <path d="M 930 200 C 800 200, 280 280, 150 730"
-          fill="none" stroke="#444" stroke-width="6" stroke-linecap="round"/>
-    <path d="M 930 200 C 800 200, 280 280, 150 730"
-          fill="none" stroke="#777" stroke-width="2.5" stroke-linecap="round"/>
-    <text x="540" y="210" font-size="11" fill="#555" font-style="italic">USB cable (no GPIO wiring)</text>
-  </g>
-
-  <!-- speaker icon -->
-  <g id="speaker" transform="translate(1280,180)">
-    <rect x="-25" y="-32" width="50" height="64" rx="3" fill="#3a2a18" stroke="#000"/>
-    <circle cx="0" cy="0" r="20" fill="#1a1a1a"/>
-    <circle cx="0" cy="0" r="14" fill="#333"/>
-    <circle cx="0" cy="0" r="6" fill="#666"/>
-    <text x="0" y="50" text-anchor="middle" font-size="11" fill="#444">Speaker</text>
-    <!-- 3.5mm cable to DAC -->
-    <path d="M -25 0 L -65 0 L -65 20" stroke="#444" stroke-width="4" fill="none"/>
-    <path d="M -25 0 L -65 0 L -65 20" stroke="#888" stroke-width="1.5" fill="none"/>
-  </g>
-
   <!-- ==================== LEDs ==================== -->
   <!-- Each LED group: anode (long lead) at top connects via resistor to GPIO; cathode (short) to GND.
        For active-HIGH drive: GPIO -> resistor -> LED anode -> LED cathode -> GND. -->
@@ -433,9 +401,6 @@
 
       <line x1="400" y1="42" x2="430" y2="42" stroke="#3498db" stroke-width="4"/>
       <text x="436" y="46">Pot wiper → ADC A0</text>
-      <line x1="400" y1="62" x2="430" y2="62" stroke="#444" stroke-width="6"/>
-      <line x1="400" y1="62" x2="430" y2="62" stroke="#777" stroke-width="2"/>
-      <text x="436" y="66">USB cable (DAC)</text>
     </g>
   </g>
 
@@ -447,8 +412,7 @@
       <text x="14" y="42">• 3 × 5 mm LED (green / red / amber) + 3 × 330 Ω resistor (¼ W)</text>
       <text x="14" y="58">• 1 × momentary push-button (12 mm panel-mount works well in a radio enclosure)</text>
       <text x="14" y="74">• 1 × 10 kΩ linear potentiometer + 1 × ADS1115 I²C ADC breakout</text>
-      <text x="14" y="90">• 1 × USB DAC + speaker (DAC is plug-and-play; no GPIO wiring)</text>
-      <text x="14" y="108" fill="#a52" font-style="italic">Tip: a rotary encoder on 2 GPIO pins skips the ADC entirely if you don't need a true analog pot.</text>
+      <text x="14" y="92" fill="#a52" font-style="italic">Tip: a rotary encoder on 2 GPIO pins skips the ADC entirely if you don't need a true analog pot.</text>
     </g>
   </g>
 </svg>
