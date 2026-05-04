@@ -2,7 +2,8 @@
 
 GPIO hardware integration for the vintage radio enclosure.
 
-See `docs/wiring/jetson-wiring.svg` for the schematic.
+See `docs/wiring/jetson-wiring.svg` for the schematic and
+`docs/wiring/netlist.md` for the per-net cable schedule.
 
 ## Scope
 
