@@ -42,15 +42,16 @@ class OracleSettings(BaseSettings):
     summary_threshold: int = 20
 
     # Mode
-    mode: Literal["text", "voice"] = "text"
+    mode: Literal["text", "voice", "hardware"] = "text"
     log_level: str = "INFO"
 
     # Hardware
-    ptt_gpio_pin: int = 18
-    led_idle_pin: int = 23
-    led_listen_pin: int = 24
-    led_think_pin: int = 25
-    power_switch_pin: int = 17  # SPST toggle: closed (LOW w/ pull-up) = device on / radio active
+    action_button_pin: int = 18  # momentary push-button (short = action, long = mode toggle)
+    led_red_pin: int = 23
+    led_green_pin: int = 24
+    led_blue_pin: int = 25
+    power_switch_pin: int = 17  # SPST toggle: closed (LOW w/ pull-up) = device on
+    long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
 
 
 settings = OracleSettings()

@@ -8,9 +8,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="The Oracle - Offline Voice Assistant")
     parser.add_argument(
         "--mode",
-        choices=["text", "voice"],
+        choices=["text", "voice", "hardware"],
         default=None,
-        help="Run mode (default: from ORACLE_MODE env or 'text')",
+        help="Run mode: text REPL, headless voice loop, or hardware-driven "
+             "state machine (power switch + button + RGB LED). "
+             "Default: from ORACLE_MODE env or 'text'.",
     )
     args = parser.parse_args()
 

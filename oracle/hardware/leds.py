@@ -1,64 +1,129 @@
-"""Status LED control for the Oracle enclosure."""
+"""Status RGB LED for the Oracle enclosure.
+
+Single common-cathode RGB LED driven by 3 GPIO pins (R/G/B).
+Each pin HIGH = that channel lit. Color encodes the current mode.
+
+Falls back to log-only output if Jetson.GPIO is unavailable (dev machines).
+"""
 
 from __future__ import annotations
+
+import threading
+from dataclasses import dataclass
+from typing import Literal
 
 from loguru import logger
 
 from config.settings import settings
 
+Mode = Literal["off", "radio", "librarian", "thinking", "speaking", "error"]
+
+
+@dataclass(frozen=True)
+class Color:
+    r: bool
+    g: bool
+    b: bool
+
+
+# Common-cathode mapping. Channel HIGH = lit.
+MODE_COLORS: dict[str, Color] = {
+    "off":       Color(False, False, False),
+    "radio":     Color(False, True,  False),  # green
+    "librarian": Color(False, False, True),   # blue
+    "thinking":  Color(True,  True,  False),  # amber (R+G)
+    "speaking":  Color(False, True,  True),   # cyan (G+B)
+    "error":     Color(True,  False, False),  # red — blinks
+}
+
+_BLINK_PERIOD_S = 0.6
+
 
 class StatusLEDs:
-    """Control status LEDs: idle, listening, thinking, speaking.
+    """Drive a single common-cathode RGB LED, encoding mode as color."""
 
-    Falls back to log messages if GPIO is unavailable.
-    """
-
-    STATES = ("idle", "listening", "thinking", "speaking")
-
-    def __init__(self):
-        self._pins = {
-            "idle": settings.led_idle_pin,
-            "listening": settings.led_listen_pin,
-            "thinking": settings.led_think_pin,
+    def __init__(self) -> None:
+        self._pins: dict[str, int] = {
+            "r": settings.led_red_pin,
+            "g": settings.led_green_pin,
+            "b": settings.led_blue_pin,
         }
         self._gpio = None
+        self._mode: Mode = "off"
+        self._lock = threading.Lock()
+        self._blink_stop: threading.Event | None = None
+        self._blink_thread: threading.Thread | None = None
         self._setup()
 
     def _setup(self) -> None:
         try:
-            import Jetson.GPIO as GPIO
+            import Jetson.GPIO as GPIO  # type: ignore[import-not-found]
 
             self._gpio = GPIO
             GPIO.setmode(GPIO.BCM)
-            for name, pin in self._pins.items():
+            for pin in self._pins.values():
                 GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
-            logger.info(f"Status LEDs configured: {self._pins}")
+            logger.info(
+                f"RGB LED on R={self._pins['r']} G={self._pins['g']} B={self._pins['b']}"
+            )
         except (ImportError, RuntimeError) as e:
-            logger.warning(f"GPIO unavailable ({e}), LEDs will log only")
+            logger.warning(f"GPIO unavailable ({e}), LED will log only")
             self._gpio = None
 
-    def set_state(self, state: str) -> None:
-        """Set the current state LED (turns off others)."""
-        if state not in self.STATES:
-            logger.warning(f"Unknown LED state: {state}")
-            return
-
-        logger.debug(f"LED state: {state}")
+    def _write(self, color: Color) -> None:
         if self._gpio is None:
             return
+        self._gpio.output(self._pins["r"], self._gpio.HIGH if color.r else self._gpio.LOW)
+        self._gpio.output(self._pins["g"], self._gpio.HIGH if color.g else self._gpio.LOW)
+        self._gpio.output(self._pins["b"], self._gpio.HIGH if color.b else self._gpio.LOW)
 
-        for name, pin in self._pins.items():
-            self._gpio.output(pin, self._gpio.HIGH if name == state else self._gpio.LOW)
+    def _stop_blink(self) -> None:
+        if self._blink_stop is not None:
+            self._blink_stop.set()
+        if self._blink_thread is not None and self._blink_thread.is_alive():
+            self._blink_thread.join(timeout=1.0)
+        self._blink_stop = None
+        self._blink_thread = None
+
+    def _start_blink(self, color: Color, period: float = _BLINK_PERIOD_S) -> None:
+        stop = threading.Event()
+
+        def _loop() -> None:
+            on = True
+            while not stop.is_set():
+                self._write(color if on else MODE_COLORS["off"])
+                on = not on
+                stop.wait(period / 2)
+            self._write(MODE_COLORS["off"])
+
+        thread = threading.Thread(target=_loop, name="led-blink", daemon=True)
+        self._blink_stop = stop
+        self._blink_thread = thread
+        thread.start()
+
+    def set_mode(self, mode: Mode) -> None:
+        """Set the LED to the color for the given mode."""
+        with self._lock:
+            if mode == self._mode:
+                return
+            logger.debug(f"LED: {self._mode} -> {mode}")
+            self._stop_blink()
+            color = MODE_COLORS.get(mode, MODE_COLORS["off"])
+            if mode == "error":
+                self._start_blink(color)
+            else:
+                self._write(color)
+            self._mode = mode
+
+    @property
+    def mode(self) -> Mode:
+        return self._mode
 
     def all_off(self) -> None:
-        """Turn off all LEDs."""
-        if self._gpio is None:
-            return
-        for pin in self._pins.values():
-            self._gpio.output(pin, self._gpio.LOW)
+        self.set_mode("off")
 
     def cleanup(self) -> None:
-        """Release GPIO resources."""
+        self._stop_blink()
+        self._write(MODE_COLORS["off"])
         if self._gpio is not None:
-            self.all_off()
             self._gpio.cleanup(list(self._pins.values()))
