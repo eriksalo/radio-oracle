@@ -8,6 +8,7 @@ small.en + llama3.2:3b can coexist in one voice-loop turn.
 
 from __future__ import annotations
 
+import os
 import struct
 import subprocess
 import sys
@@ -58,11 +59,15 @@ class WhisperSTT:
         logger.debug(f"Transcribing {len(audio) / 16000:.1f}s of audio")
         payload = struct.pack("<I", audio.shape[0]) + audio.tobytes()
 
+        env = os.environ.copy()
+        if settings.whisper_force_cpu:
+            env["CUDA_VISIBLE_DEVICES"] = ""
         proc = subprocess.run(
             [sys.executable, "-m", "oracle.stt_worker"],
             input=payload,
             capture_output=True,
             timeout=60,
+            env=env,
         )
         if proc.returncode != 0:
             logger.error(

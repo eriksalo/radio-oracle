@@ -13,7 +13,11 @@ class OracleSettings(BaseSettings):
     ollama_timeout: float = 120.0
 
     # Whisper STT
-    whisper_model_path: Path = Path("models/whisper-small.en.bin")
+    whisper_model_path: Path = Path("models/whisper-base.en.bin")
+    # pywhispercpp doesn't expose use_gpu; we hide CUDA from the STT subprocess
+    # via CUDA_VISIBLE_DEVICES so whisper.cpp falls back to CPU and the GPU
+    # stays dedicated to ollama. Set to False for GPU mode.
+    whisper_force_cpu: bool = True
     whisper_language: str = "en"
 
     # Piper TTS
@@ -25,6 +29,13 @@ class OracleSettings(BaseSettings):
     audio_channels: int = 1
     vad_energy_threshold: float = 0.004
     vad_silence_duration: float = 1.5
+    # PortAudio can't address ALSA `plughw`/`asym` PCMs, so we pin both
+    # devices by name and open them at their native rates. Capture is
+    # resampled to `audio_sample_rate` for Whisper.
+    audio_input_device: str = "ReSpeaker"
+    audio_output_device: str = "UACDemoV1.0"
+    audio_capture_sample_rate: int = 16000
+    audio_playback_sample_rate: int = 48000
 
     # RAG
     chroma_path: Path = Path("data/chroma")
@@ -44,6 +55,7 @@ class OracleSettings(BaseSettings):
     # Mode
     mode: Literal["text", "voice", "hardware"] = "text"
     log_level: str = "INFO"
+    voice_play_greeting: bool = True
 
     # Hardware
     action_button_pin: int = 18  # momentary push-button (short = action, long = mode toggle)

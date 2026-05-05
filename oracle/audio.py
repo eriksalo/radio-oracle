@@ -22,22 +22,31 @@ def record_until_silence(
     Returns float32 numpy array of audio samples.
     """
     import sounddevice as sd
+    from scipy.signal import resample_poly
 
-    sr = sample_rate or settings.audio_sample_rate
+    out_sr = sample_rate or settings.audio_sample_rate
+    capture_sr = settings.audio_capture_sample_rate
     ch = channels or settings.audio_channels
     threshold = energy_threshold or settings.vad_energy_threshold
     max_silence = silence_duration or settings.vad_silence_duration
+    device = settings.audio_input_device
 
     block_duration = 0.1  # 100ms blocks
-    block_size = int(sr * block_duration)
+    block_size = int(capture_sr * block_duration)
     silence_blocks = 0
     max_silence_blocks = int(max_silence / block_duration)
     started = False
     frames: list[np.ndarray] = []
 
-    logger.debug(f"Recording: sr={sr}, threshold={threshold}, silence={max_silence}s")
+    logger.debug(
+        f"Recording: device={device} capture_sr={capture_sr} out_sr={out_sr} "
+        f"threshold={threshold} silence={max_silence}s"
+    )
 
-    stream_opts = dict(samplerate=sr, channels=ch, dtype="float32", blocksize=block_size)
+    stream_opts = dict(
+        samplerate=capture_sr, channels=ch, dtype="float32",
+        blocksize=block_size, device=device,
+    )
     with sd.InputStream(**stream_opts) as stream:
         while True:
             data, _ = stream.read(block_size)
@@ -55,7 +64,13 @@ def record_until_silence(
             # If not started and below threshold, keep waiting
 
     audio = np.concatenate(frames, axis=0).flatten()
-    duration = len(audio) / sr
+    if capture_sr != out_sr:
+        # Whisper expects 16k mono; downsample from device native rate.
+        from math import gcd
+        g = gcd(capture_sr, out_sr)
+        audio = resample_poly(audio, out_sr // g, capture_sr // g).astype(np.float32)
+    duration = len(audio) / out_sr
+    sr = out_sr
     # Boost gain so quiet USB mics still produce signal Whisper can transcribe.
     # Target peak ~0.5; cap gain at 50x to avoid blowing up pure noise.
     peak = float(np.max(np.abs(audio)))
@@ -71,12 +86,27 @@ def record_until_silence(
     return audio
 
 
+def _resample_to_playback(audio: np.ndarray, src_sr: int) -> tuple[np.ndarray, int]:
+    """Resample audio to the speaker's native rate so PortAudio's hw path accepts it."""
+    dst_sr = settings.audio_playback_sample_rate
+    if src_sr == dst_sr:
+        return audio.astype(np.float32, copy=False), dst_sr
+    from math import gcd
+
+    from scipy.signal import resample_poly
+
+    g = gcd(src_sr, dst_sr)
+    out = resample_poly(audio, dst_sr // g, src_sr // g).astype(np.float32)
+    return out, dst_sr
+
+
 def play_audio(audio: np.ndarray, sample_rate: int | None = None) -> None:
-    """Play audio through default output device."""
+    """Play audio through configured output device."""
     import sounddevice as sd
 
-    sr = sample_rate or settings.audio_sample_rate
-    sd.play(audio, samplerate=sr)
+    src_sr = sample_rate or settings.audio_sample_rate
+    out, dst_sr = _resample_to_playback(audio, src_sr)
+    sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
     sd.wait()
 
 
@@ -85,7 +115,7 @@ def play_wav_bytes(wav_bytes: bytes) -> None:
     import sounddevice as sd
 
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-        sr = wf.getframerate()
+        src_sr = wf.getframerate()
         channels = wf.getnchannels()
         frames = wf.readframes(wf.getnframes())
         dtype = {1: np.int8, 2: np.int16, 4: np.int32}[wf.getsampwidth()]
@@ -96,7 +126,8 @@ def play_wav_bytes(wav_bytes: bytes) -> None:
             audio /= 2147483648.0
         if channels > 1:
             audio = audio.reshape(-1, channels)
-        sd.play(audio, samplerate=sr)
+        out, dst_sr = _resample_to_playback(audio, src_sr)
+        sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
         sd.wait()
 
 

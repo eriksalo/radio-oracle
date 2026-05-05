@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
 
+from config.settings import settings
 from oracle.llm import check_ollama, stream_chat
 from oracle.memory.context import ContextBuilder
 from oracle.memory.store import ConversationStore
@@ -123,9 +124,10 @@ async def voice_init() -> VoiceContext:
 
     greeting = get_greeting()
     logger.info(f"Oracle: {greeting}")
-    greeting_audio = tts.synthesize(greeting)
-    greeting_audio = apply_radio_filter(greeting_audio, tts.sample_rate)
-    play_audio(greeting_audio, tts.sample_rate)
+    if settings.voice_play_greeting:
+        greeting_audio = tts.synthesize(greeting)
+        greeting_audio = apply_radio_filter(greeting_audio, tts.sample_rate)
+        play_audio(greeting_audio, tts.sample_rate)
 
     return VoiceContext(
         stt=stt,
