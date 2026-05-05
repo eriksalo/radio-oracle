@@ -46,6 +46,10 @@ class OracleSettings(BaseSettings):
     rag_top_k: int = 5
     chunk_size: int = 512
     chunk_overlap: int = 64
+    # Comma-separated collection names to search by default. Empty/None means
+    # all collections — but on memory-constrained hosts, large HNSW indexes
+    # (e.g. a full Wikipedia embedding) won't fit in RAM, so restrict the set.
+    rag_collections: str | None = None
 
     # Memory
     db_path: Path = Path("data/oracle.db")

@@ -59,7 +59,12 @@ class Retriever:
         client = self._get_client()
 
         if collection_names is None:
-            collection_names = self.list_collections()
+            if settings.rag_collections:
+                collection_names = [
+                    n.strip() for n in settings.rag_collections.split(",") if n.strip()
+                ]
+            else:
+                collection_names = self.list_collections()
 
         if not collection_names:
             logger.warning("No collections available for RAG query")
