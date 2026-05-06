@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import sys
+import wave
 from pathlib import Path
 
 import psutil
@@ -61,44 +63,56 @@ async def record(req: RecordRequest) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# /api/speak — synthesize via Piper, play through Jetson speaker
+# /api/speak — synthesize via Piper subprocess, play through Jetson speaker
 # ---------------------------------------------------------------------------
 
-_tts_lock = asyncio.Lock()
-_tts_singleton = None
+# Serializes synthesis + playback. The synth subprocess loads ~300 MB of Piper
+# weights; running two in parallel doubles peak RSS and risks Ollama OOM on the
+# Jetson's unified memory pool. Playback is also exclusive (single speaker).
+_speak_lock = asyncio.Lock()
 
 
-def _get_tts():
-    global _tts_singleton
-    if _tts_singleton is None:
-        from oracle.tts import PiperTTS
+async def _synth_via_worker(text: str, radio_filter: bool) -> bytes:
+    """Run oracle.diag.tts_worker as a subprocess; return WAV bytes.
 
-        _tts_singleton = PiperTTS()
-        _tts_singleton.load()
-    return _tts_singleton
+    Subprocess exit reclaims the Piper model RSS so the diag process stays
+    small between calls.
+    """
+    args = [sys.executable, "-m", "oracle.diag.tts_worker"]
+    if radio_filter:
+        args.append("--radio-filter")
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate(text.encode("utf-8"))
+    if proc.returncode != 0:
+        msg = stderr.decode("utf-8", errors="replace").strip() or f"exit {proc.returncode}"
+        raise RuntimeError(f"tts worker failed: {msg}")
+    return stdout
+
+
+def _wav_duration_sec(wav: bytes) -> float:
+    with wave.open(io.BytesIO(wav), "rb") as wf:
+        return wf.getnframes() / wf.getframerate()
 
 
 @app.post("/api/speak")
 async def speak(req: SpeakRequest) -> dict:
-    from oracle.audio import apply_radio_filter, play_audio
+    from oracle.audio import play_wav_bytes
 
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="empty text")
 
-    async with _tts_lock:
-        tts = _get_tts()
+    async with _speak_lock:
+        wav = await _synth_via_worker(text, req.radio_filter)
         loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, play_wav_bytes, wav)
 
-        def _do() -> float:
-            audio = tts.synthesize(text)
-            if req.radio_filter:
-                audio = apply_radio_filter(audio, tts.sample_rate)
-            play_audio(audio, tts.sample_rate)
-            return len(audio) / tts.sample_rate
-
-        duration = await loop.run_in_executor(None, _do)
-
+    duration = _wav_duration_sec(wav)
     logger.info(f"diag: spoke {len(text)} chars, {duration:.2f}s audio")
     return {"ok": True, "duration_sec": duration, "chars": len(text)}
 
@@ -106,22 +120,11 @@ async def speak(req: SpeakRequest) -> dict:
 @app.get("/api/speak.wav")
 async def speak_wav(text: str, radio_filter: bool = False) -> Response:
     """Return synthesized audio as WAV without playing on the Jetson."""
-    from oracle.audio import apply_radio_filter, audio_to_wav_bytes
-
     if not text.strip():
         raise HTTPException(status_code=400, detail="empty text")
 
-    async with _tts_lock:
-        tts = _get_tts()
-        loop = asyncio.get_running_loop()
-
-        def _do() -> bytes:
-            audio = tts.synthesize(text)
-            if radio_filter:
-                audio = apply_radio_filter(audio, tts.sample_rate)
-            return audio_to_wav_bytes(audio, tts.sample_rate)
-
-        wav = await loop.run_in_executor(None, _do)
+    async with _speak_lock:
+        wav = await _synth_via_worker(text, radio_filter)
     return Response(content=wav, media_type="audio/wav")
 
 
