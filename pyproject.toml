@@ -41,8 +41,14 @@ ingest = [
     "libzim>=3.4",
     "selectolax>=0.3",
 ]
+diag = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "psutil>=5.9",
+    "python-multipart>=0.0.20",
+]
 all = [
-    "radio-oracle[voice,rag,tts,stt,music]",
+    "radio-oracle[voice,rag,tts,stt,music,diag]",
 ]
 
 [project.scripts]

@@ -1,0 +1,30 @@
+[Unit]
+Description=Radio Oracle - Diagnostics Web UI
+After=network.target ollama.service
+Wants=ollama.service
+Conflicts=radio-oracle.service
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/radio-oracle
+ExecStart=/opt/radio-oracle/.venv/bin/python -m oracle.diag --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+EnvironmentFile=-/opt/radio-oracle/.env
+Environment=ORACLE_LOG_LEVEL=INFO
+
+# Resource limits
+MemoryMax=7G
+CPUQuota=90%
+
+# Hardware access (mic/speaker via audio group; LEDs via gpio)
+SupplementaryGroups=gpio audio
+
+[Install]
+WantedBy=multi-user.target
