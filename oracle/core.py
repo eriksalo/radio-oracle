@@ -113,7 +113,7 @@ class VoiceContext:
 
 async def voice_init() -> VoiceContext:
     """Initialize STT, TTS, conversation store, persona, and play greeting."""
-    from oracle.audio import apply_radio_filter, play_audio
+    from oracle.audio import play_audio
     from oracle.stt import WhisperSTT
     from oracle.tts import PiperTTS
 
@@ -126,7 +126,6 @@ async def voice_init() -> VoiceContext:
     logger.info(f"Oracle: {greeting}")
     if settings.voice_play_greeting:
         greeting_audio = tts.synthesize(greeting)
-        greeting_audio = apply_radio_filter(greeting_audio, tts.sample_rate)
         play_audio(greeting_audio, tts.sample_rate)
 
     return VoiceContext(
@@ -152,7 +151,7 @@ async def voice_turn(
 
     Returns True if a turn completed, False if aborted or skipped (silence).
     """
-    from oracle.audio import apply_radio_filter, play_audio, record_until_silence
+    from oracle.audio import play_audio, record_until_silence
 
     def aborted() -> bool:
         return should_abort() if should_abort is not None else False
@@ -200,7 +199,6 @@ async def voice_turn(
                 sentence = sentence.strip()
                 if sentence:
                     audio_out = vc.tts.synthesize(sentence)
-                    audio_out = apply_radio_filter(audio_out, vc.tts.sample_rate)
                     play_audio(audio_out, vc.tts.sample_rate)
                     if aborted():
                         break
@@ -208,7 +206,6 @@ async def voice_turn(
 
     if sentence_buffer.strip() and not aborted():
         audio_out = vc.tts.synthesize(sentence_buffer.strip())
-        audio_out = apply_radio_filter(audio_out, vc.tts.sample_rate)
         play_audio(audio_out, vc.tts.sample_rate)
 
     response_text = "".join(response_parts)
