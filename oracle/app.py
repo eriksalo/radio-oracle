@@ -21,6 +21,7 @@ from typing import Literal
 from loguru import logger
 
 from oracle.hardware import ActionButton, ButtonEvent, PowerSwitch, StatusLEDs
+from oracle.state import StateWriter
 
 State = Literal["standby", "radio", "librarian"]
 
@@ -33,6 +34,10 @@ class OracleApp:
         self.button = ActionButton()
         self.power = PowerSwitch()
         self._state: State = "standby"
+        self._state_writer = StateWriter()
+        self._state_writer.set_mode(self._state)
+        self._state_writer.set_power(self.power.is_on)
+        self.power.add_listener(self._state_writer.set_power)
 
     async def run(self) -> None:
         from oracle.core import VoiceContext, voice_close, voice_init, voice_turn
@@ -94,6 +99,7 @@ class OracleApp:
             return
         logger.info(f"Mode: {self._state} -> {state}")
         self._state = state
+        self._state_writer.set_mode(state)
         if state == "standby":
             self.leds.set_mode("off")
         elif state == "radio":
@@ -111,6 +117,7 @@ class OracleApp:
 
     def _handle_buttons(self) -> None:
         for evt in self._drain_events():
+            self._state_writer.record_button(evt.kind, evt.duration)
             if evt.kind == "long":
                 if self._state == "radio":
                     self._enter("librarian")
@@ -142,3 +149,4 @@ class OracleApp:
                 await voice_close(voice_ctx)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Voice close error: {e}")
+        self._state_writer.clear()

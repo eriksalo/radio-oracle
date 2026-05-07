@@ -1,22 +1,42 @@
-"""FastAPI diagnostic server: mic, speaker, LLM, system stats."""
+"""FastAPI diagnostic server: mic, speaker, LLM, system stats, health, logs."""
 
 from __future__ import annotations
 
 import asyncio
 import io
+import json
+import shutil
+import subprocess
 import sys
+import time
 import wave
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import psutil
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from config.settings import settings
+from oracle.diag import tegrastats
+from oracle.log import get_recent_logs, setup_logging
+from oracle.state import read_state
 
-app = FastAPI(title="Radio Oracle Diagnostics")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    setup_logging()
+    tegrastats.start()
+    logger.info("diag server up")
+    try:
+        yield
+    finally:
+        await tegrastats.stop()
+
+
+app = FastAPI(title="Radio Oracle Diagnostics", lifespan=_lifespan)
 
 _THERMAL_ROOT = Path("/sys/devices/virtual/thermal")
 
@@ -197,6 +217,223 @@ def update_persona(req: PersonaUpdate) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"user_name": saved}
+
+
+# ---------------------------------------------------------------------------
+# /api/ask/stream — same as /api/ask but streams tokens via Server-Sent Events
+# ---------------------------------------------------------------------------
+
+@app.post("/api/ask/stream")
+async def ask_stream(req: AskRequest) -> StreamingResponse:
+    from oracle.llm import stream_chat
+    from oracle.persona import build_system_prompt
+
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty text")
+
+    system_prompt = build_system_prompt()
+    rag_context = ""
+    rag_sources: list[str] = []
+    if req.use_rag:
+        try:
+            from oracle.rag.retriever import Retriever
+
+            retriever = Retriever()
+            collections = retriever.list_collections()
+            if collections:
+                results = retriever.query(text)
+                rag_context = retriever.format_context(results)
+                rag_sources = sorted({r.get("source", "?") for r in results})
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"diag: RAG unavailable for stream: {e}")
+
+    full_system = system_prompt + (f"\n\n{rag_context}" if rag_context else "")
+    messages = [
+        {"role": "system", "content": full_system},
+        {"role": "user", "content": text},
+    ]
+
+    async def gen():
+        # Emit a meta event up-front so the UI can label sources before tokens arrive
+        meta = {"type": "meta", "rag_used": bool(rag_context), "rag_sources": rag_sources}
+        yield f"data: {json.dumps(meta)}\n\n"
+        try:
+            async for token in stream_chat(messages):
+                yield f"data: {json.dumps({'type': 'token', 'value': token})}\n\n"
+            yield "data: {\"type\": \"done\"}\n\n"
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"diag: ask stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# /api/health — subsystem reachability checks
+# ---------------------------------------------------------------------------
+
+async def _check_ollama() -> dict:
+    from oracle.llm import check_ollama
+
+    t0 = time.time()
+    try:
+        ok = await check_ollama()
+        return {
+            "ok": bool(ok),
+            "detail": settings.ollama_model if ok else "unreachable",
+            "latency_ms": round((time.time() - t0) * 1000, 1),
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": repr(e), "latency_ms": None}
+
+
+def _check_chroma() -> dict:
+    try:
+        from oracle.rag.retriever import Retriever
+
+        r = Retriever()
+        cols = r.list_collections()
+        return {
+            "ok": True,
+            "detail": f"{len(cols)} collection(s)",
+            "collections": cols,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": repr(e), "collections": []}
+
+
+def _check_audio() -> dict:
+    try:
+        import sounddevice as sd
+
+        devices = sd.query_devices()
+        names = [d["name"] for d in devices]
+        in_dev = settings.audio_input_device
+        out_dev = settings.audio_output_device
+        in_ok = any(in_dev in n for n in names)
+        out_ok = any(out_dev in n for n in names)
+        ok = in_ok and out_ok
+        missing = []
+        if not in_ok:
+            missing.append(f"input '{in_dev}'")
+        if not out_ok:
+            missing.append(f"output '{out_dev}'")
+        detail = "input + output present" if ok else f"missing: {', '.join(missing)}"
+        return {
+            "ok": ok,
+            "detail": detail,
+            "input_device": in_dev,
+            "output_device": out_dev,
+            "devices": names,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": repr(e), "devices": []}
+
+
+def _check_gpio() -> dict:
+    try:
+        import Jetson.GPIO as GPIO  # noqa: F401  # type: ignore[import-not-found]
+
+        return {"ok": True, "detail": "Jetson.GPIO importable"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": f"unavailable: {e!r}"}
+
+
+@app.get("/api/health")
+async def health() -> dict:
+    """Snapshot of subsystem reachability — green/red lights for the UI."""
+    ollama_task = asyncio.create_task(_check_ollama())
+    loop = asyncio.get_running_loop()
+    chroma = await loop.run_in_executor(None, _check_chroma)
+    audio = await loop.run_in_executor(None, _check_audio)
+    gpio = await loop.run_in_executor(None, _check_gpio)
+    ollama = await ollama_task
+    overall = all((ollama["ok"], chroma["ok"], audio["ok"]))  # GPIO optional
+    return {
+        "ok": overall,
+        "ollama": ollama,
+        "chroma": chroma,
+        "audio": audio,
+        "gpio": gpio,
+    }
+
+
+# ---------------------------------------------------------------------------
+# /api/state — read shared state file written by the running radio-oracle
+# ---------------------------------------------------------------------------
+
+@app.get("/api/state")
+def app_state() -> dict:
+    snap = read_state()
+    if snap is None:
+        return {"ok": False, "running": False, "detail": "no state file"}
+    pid = snap.get("pid")
+    running = False
+    if pid:
+        try:
+            running = psutil.pid_exists(int(pid))
+        except (TypeError, ValueError):
+            running = False
+    return {"ok": True, "running": running, **snap}
+
+
+# ---------------------------------------------------------------------------
+# /api/logs — tail of in-process loguru ring buffer
+# ---------------------------------------------------------------------------
+
+@app.get("/api/logs")
+def logs(tail: int = 200, level: str | None = None) -> dict:
+    return {"entries": get_recent_logs(tail=tail, level=level)}
+
+
+# ---------------------------------------------------------------------------
+# /api/journal — tail of systemd journal for a sibling unit
+# ---------------------------------------------------------------------------
+
+_ALLOWED_UNITS = {"radio-oracle", "radio-oracle-diag"}
+
+
+@app.get("/api/journal")
+def journal(unit: str = "radio-oracle", tail: int = 200) -> dict:
+    if unit not in _ALLOWED_UNITS:
+        raise HTTPException(status_code=400, detail=f"unit must be one of {sorted(_ALLOWED_UNITS)}")
+    if shutil.which("journalctl") is None:
+        return {"available": False, "entries": [], "detail": "journalctl not on PATH"}
+    try:
+        out = subprocess.check_output(
+            [
+                "journalctl",
+                "-u",
+                unit,
+                "-n",
+                str(int(tail)),
+                "--no-pager",
+                "--output=short-iso",
+            ],
+            stderr=subprocess.STDOUT,
+            timeout=5,
+            text=True,
+        )
+        lines = out.splitlines()
+        return {"available": True, "unit": unit, "entries": lines}
+    except subprocess.CalledProcessError as e:
+        return {"available": True, "unit": unit, "entries": [], "detail": e.output.strip()[-400:]}
+    except subprocess.TimeoutExpired:
+        return {"available": True, "unit": unit, "entries": [], "detail": "journalctl timed out"}
+
+
+# ---------------------------------------------------------------------------
+# /api/gpu — Jetson GPU + RAM stats from background tegrastats poller
+# ---------------------------------------------------------------------------
+
+@app.get("/api/gpu")
+def gpu() -> dict:
+    return tegrastats.snapshot()
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +746,49 @@ _PAGE = """<!doctype html>
     }
     .cpu-cell .v { font-size: 16px; color: var(--grn); }
 
+    /* Health dots */
+    .dot {
+      display: inline-block;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--grn-dim);
+      box-shadow: 0 0 6px transparent;
+      margin-right: 8px; vertical-align: middle;
+    }
+    .dot.ok  { background: var(--grn);   box-shadow: 0 0 8px var(--grn-glow); }
+    .dot.err { background: #ff5e5e;      box-shadow: 0 0 8px rgba(255,80,80,0.6); }
+    .dot.warn{ background: #f5c518;      box-shadow: 0 0 8px rgba(245,197,24,0.55); }
+    .health-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 0; border-bottom: 1px dashed rgba(31,138,63,0.25);
+      font-size: 16px;
+    }
+    .health-row:last-child { border-bottom: 0; }
+    .health-row .name { color: var(--grn-dim); letter-spacing: 0.06em; }
+    .health-row .detail { color: var(--grn); font-size: 14px; max-width: 60%;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Log tail */
+    .log-tabs { display: flex; gap: 8px; margin-bottom: 6px; }
+    .log-tabs button { padding: 2px 10px; font-size: 14px; }
+    .log-tabs button.active {
+      background: var(--grn); color: var(--bg);
+      text-shadow: none; box-shadow: 0 0 12px var(--grn-glow);
+    }
+    .log {
+      background: rgba(0,0,0,0.55);
+      border: 1px solid var(--grn-dim);
+      padding: 6px 8px;
+      max-height: 280px;
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.25;
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      white-space: pre;
+    }
+    .log .lvl-WARNING { color: #f5c518; }
+    .log .lvl-ERROR, .log .lvl-CRITICAL { color: #ff5e5e; }
+    .log .lvl-DEBUG { color: var(--grn-dim); }
+
     .footer {
       margin-top: 18px;
       text-align: center;
@@ -611,6 +891,34 @@ _PAGE = """<!doctype html>
 
   <div class="grid">
 
+    <!-- Health -->
+    <div class="card">
+      <h2>[ 0 ] SYSTEM HEALTH</h2>
+      <div id="healthList">
+        <div class="health-row"><span class="name"><span class="dot"></span>OLLAMA</span><span class="detail">…</span></div>
+        <div class="health-row"><span class="name"><span class="dot"></span>CHROMA</span><span class="detail">…</span></div>
+        <div class="health-row"><span class="name"><span class="dot"></span>AUDIO</span><span class="detail">…</span></div>
+        <div class="health-row"><span class="name"><span class="dot"></span>GPIO</span><span class="detail">…</span></div>
+      </div>
+      <div class="row"><button id="refreshHealthBtn" class="secondary">[ REFRESH ]</button>
+        <span class="status" id="healthStatus"></span></div>
+    </div>
+
+    <!-- Live state -->
+    <div class="card">
+      <h2>[ 0 ] LIVE STATE</h2>
+      <div id="liveState">
+        <div class="stat-row"><span>service</span><span id="lsRunning">—</span></div>
+        <div class="stat-row"><span>mode</span><span id="lsMode">—</span></div>
+        <div class="stat-row"><span>power</span><span id="lsPower">—</span></div>
+        <div class="stat-row"><span>last button</span><span id="lsButton">—</span></div>
+        <div class="stat-row"><span>last transcription</span><span id="lsLastTx">—</span></div>
+        <div class="stat-row"><span>updated</span><span id="lsUpdated">—</span></div>
+      </div>
+      <div class="hint">Populated when <code>radio-oracle.service</code> is running.
+        Stop it to free the mic/speaker for the cards below.</div>
+    </div>
+
     <!-- Mic -->
     <div class="card">
       <h2>[ 1 ] AUDIO INPUT TEST</h2>
@@ -671,7 +979,25 @@ _PAGE = """<!doctype html>
           <div class="meter-label"><span>CORE TEMP (°C)</span><span></span></div>
           <div id="temps"></div>
         </div>
+        <div>
+          <div class="meter-label"><span>GPU</span><span id="gpuPct">—</span></div>
+          <div class="bar"><div id="gpuBar" style="width:0%"></div></div>
+          <div class="stat-row"><span>freq</span><span id="gpuFreq">—</span></div>
+          <div class="stat-row"><span>tegrastats</span><span id="gpuAvail">—</span></div>
+        </div>
       </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="card" style="grid-column: 1 / -1">
+      <h2>[ 5 ] TELEMETRY LOG</h2>
+      <div class="log-tabs">
+        <button id="tabDiag" class="active">[ DIAG ]</button>
+        <button id="tabRadio" class="secondary">[ RADIO-ORACLE ]</button>
+        <button id="tabRefresh" class="secondary" style="margin-left:auto">[ REFRESH ]</button>
+        <label class="inline" style="margin-left:8px"><input type="checkbox" id="logAuto" checked /> AUTO</label>
+      </div>
+      <div class="log" id="logBox">[ awaiting telemetry ]</div>
     </div>
 
   </div>
@@ -740,29 +1066,70 @@ $('speakBrowserBtn').onclick = async () => {
   } finally { btn.disabled = false; }
 };
 
-// --- ask ---
+// --- ask (streaming via SSE / fetch ReadableStream) ---
+let _askAbort = null;
 $('askBtn').onclick = async () => {
   const btn = $('askBtn'), st = $('askStatus');
   const text = $('askText').value.trim();
   if (!text) return;
-  btn.disabled = true; setStatus(st, 'Thinking…');
+  btn.disabled = true; setStatus(st, 'Streaming…');
   $('answer').textContent = ''; $('ragSources').textContent = '';
+
+  // Use fetch + ReadableStream (POST is required; EventSource only does GET).
+  const ctrl = new AbortController();
+  _askAbort = ctrl;
+  let answer = '';
   try {
-    const r = await postJSON('/api/ask', { text, use_rag: $('ragChk').checked });
-    const j = await r.json();
-    $('answer').textContent = j.answer;
-    if (j.rag_used) {
-      $('ragSources').textContent = 'RAG sources: ' + (j.rag_sources.join(', ') || '(none)');
-    } else if ($('ragChk').checked) {
-      $('ragSources').textContent = 'RAG requested but no collections matched.';
+    const resp = await fetch('/api/ask/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, use_rag: $('ragChk').checked }),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok || !resp.body) throw new Error(await resp.text() || resp.statusText);
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      // SSE frames split by blank line.
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const dataLines = frame.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
+        if (!dataLines.length) continue;
+        let evt;
+        try { evt = JSON.parse(dataLines.join('\n')); } catch { continue; }
+        if (evt.type === 'token') {
+          answer += evt.value;
+          $('answer').textContent = answer;
+        } else if (evt.type === 'meta') {
+          if (evt.rag_used) {
+            $('ragSources').textContent = 'RAG sources: ' + (evt.rag_sources.join(', ') || '(none)');
+          } else if ($('ragChk').checked) {
+            $('ragSources').textContent = 'RAG requested but no collections matched.';
+          }
+        } else if (evt.type === 'done') {
+          setStatus(st, 'Done.', 'ok');
+        } else if (evt.type === 'error') {
+          setStatus(st, 'Error: ' + evt.message, 'err');
+        }
+      }
     }
-    setStatus(st, 'Done.', 'ok');
-    if ($('speakAnswerChk').checked) {
-      await postJSON('/api/speak', { text: j.answer, radio_filter: $('filterChk').checked });
+    if ($('speakAnswerChk').checked && answer) {
+      setStatus(st, 'Speaking…', 'ok');
+      await postJSON('/api/speak', { text: answer, radio_filter: $('filterChk').checked });
+      setStatus(st, 'Done.', 'ok');
     }
   } catch (e) {
-    setStatus(st, 'Error: ' + e.message, 'err');
-  } finally { btn.disabled = false; }
+    if (e.name === 'AbortError') {
+      setStatus(st, 'Cancelled.', 'ok');
+    } else {
+      setStatus(st, 'Error: ' + e.message, 'err');
+    }
+  } finally { btn.disabled = false; _askAbort = null; }
 };
 
 // --- stats poll ---
@@ -783,12 +1150,116 @@ async function pollStats() {
     $('swapBar').style.width = j.swap.pct + '%';
     $('temps').innerHTML = Object.entries(j.temps_c).map(([k,v]) =>
       `<div class="stat-row"><span>${k}</span><span>${v.toFixed(1)}</span></div>`).join('');
-  } catch (e) {
-    // ignore transient
-  }
+  } catch (e) { /* ignore transient */ }
 }
 pollStats();
 setInterval(pollStats, 2000);
+
+// --- gpu poll (tegrastats) ---
+async function pollGpu() {
+  try {
+    const r = await fetch('/api/gpu'); const j = await r.json();
+    $('gpuAvail').textContent = j.available ? (j.stale_sec != null ? `${j.stale_sec.toFixed(1)}s ago` : 'live') : 'unavailable';
+    if (j.gpu_pct != null) {
+      $('gpuPct').textContent = j.gpu_pct + '%';
+      $('gpuBar').style.width = j.gpu_pct + '%';
+    } else {
+      $('gpuPct').textContent = '—';
+      $('gpuBar').style.width = '0%';
+    }
+    $('gpuFreq').textContent = j.gpu_freq_mhz != null ? j.gpu_freq_mhz + ' MHz' : '—';
+  } catch (e) { /* ignore */ }
+}
+pollGpu();
+setInterval(pollGpu, 2000);
+
+// --- health poll ---
+function setHealthRow(el, name, info) {
+  const dotCls = info?.ok ? 'ok' : 'err';
+  const detail = info?.detail || '';
+  const lat = info?.latency_ms != null ? ` (${info.latency_ms} ms)` : '';
+  el.innerHTML = `<span class="name"><span class="dot ${dotCls}"></span>${name}</span><span class="detail" title="${detail}">${detail}${lat}</span>`;
+}
+async function pollHealth() {
+  const st = $('healthStatus');
+  setStatus(st, 'checking…');
+  try {
+    const r = await fetch('/api/health'); const j = await r.json();
+    const rows = $('healthList').children;
+    setHealthRow(rows[0], 'OLLAMA', j.ollama);
+    setHealthRow(rows[1], 'CHROMA', j.chroma);
+    setHealthRow(rows[2], 'AUDIO',  j.audio);
+    setHealthRow(rows[3], 'GPIO',   j.gpio);
+    setStatus(st, j.ok ? 'all systems nominal' : 'subsystem failures', j.ok ? 'ok' : 'err');
+  } catch (e) {
+    setStatus(st, 'error: ' + e.message, 'err');
+  }
+}
+$('refreshHealthBtn').onclick = pollHealth;
+pollHealth();
+setInterval(pollHealth, 15000);
+
+// --- live state poll ---
+function fmtAgo(ts) {
+  if (!ts) return '—';
+  const d = Math.max(0, (Date.now() / 1000) - ts);
+  if (d < 60) return d.toFixed(0) + 's ago';
+  if (d < 3600) return (d / 60).toFixed(0) + 'm ago';
+  return (d / 3600).toFixed(1) + 'h ago';
+}
+async function pollState() {
+  try {
+    const r = await fetch('/api/state'); const j = await r.json();
+    if (!j.ok || !j.running) {
+      $('lsRunning').textContent = j.running === false ? 'stale state file' : 'not running';
+      $('lsMode').textContent = j.mode || '—';
+      $('lsPower').textContent = j.power_on != null ? (j.power_on ? 'on' : 'off') : '—';
+      $('lsButton').textContent = '—';
+      $('lsLastTx').textContent = '—';
+      $('lsUpdated').textContent = j.updated_at ? fmtAgo(j.updated_at) : '—';
+      return;
+    }
+    $('lsRunning').textContent = `pid ${j.pid} ✓`;
+    $('lsMode').textContent = (j.mode || '—').toUpperCase();
+    $('lsPower').textContent = j.power_on ? 'ON' : 'OFF';
+    $('lsButton').textContent = j.last_button
+      ? `${j.last_button.kind} (${j.last_button.duration.toFixed(2)}s, ${fmtAgo(j.last_button.ts)})`
+      : '—';
+    $('lsLastTx').textContent = j.last_transcription
+      ? `"${j.last_transcription.text}" — ${fmtAgo(j.last_transcription.ts)}`
+      : '—';
+    $('lsUpdated').textContent = fmtAgo(j.updated_at);
+  } catch (e) { /* ignore */ }
+}
+pollState();
+setInterval(pollState, 1500);
+
+// --- log tail ---
+let _logTab = 'diag';
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
+async function pollLogs() {
+  const box = $('logBox');
+  try {
+    if (_logTab === 'diag') {
+      const r = await fetch('/api/logs?tail=200'); const j = await r.json();
+      box.innerHTML = (j.entries || []).map(e =>
+        `<span class="lvl-${e.level}">[${e.ts}] ${e.level.padEnd(7)} ${e.name} :: ${escapeHtml(e.message)}</span>`
+      ).join('\n') || '[ empty ]';
+    } else {
+      const r = await fetch('/api/journal?unit=radio-oracle&tail=200'); const j = await r.json();
+      if (!j.available) { box.textContent = j.detail || 'journalctl unavailable'; return; }
+      box.innerHTML = (j.entries || []).map(escapeHtml).join('\n') || '[ no entries — service inactive? ]';
+    }
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { box.textContent = 'log fetch error: ' + e.message; }
+}
+$('tabDiag').onclick = () => { _logTab = 'diag';
+  $('tabDiag').classList.add('active'); $('tabRadio').classList.remove('active'); pollLogs(); };
+$('tabRadio').onclick = () => { _logTab = 'radio';
+  $('tabRadio').classList.add('active'); $('tabDiag').classList.remove('active'); pollLogs(); };
+$('tabRefresh').onclick = pollLogs;
+pollLogs();
+setInterval(() => { if ($('logAuto').checked) pollLogs(); }, 3000);
 
 // --- persona / user name ---
 async function loadUserName() {

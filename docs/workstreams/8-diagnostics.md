@@ -7,10 +7,10 @@ either standalone or under its own systemd unit.
 
 ## Status
 
-First cut landed (`oracle/diag/`): FastAPI server, page templates,
-TTS-worker subprocess for free-RSS testing, and `radio-oracle-diag.service`
-systemd unit. Iterating on the dashboard panels, metrics, and a
-"talk to me" debug path.
+Working dashboard with audio I/O test cards, streaming LLM ask, system
+health checks, live state from a running `radio-oracle` service, GPU
+metrics from `tegrastats`, and a log tail (own process + sibling
+service via `journalctl`). All wired into the Pip-Boy themed UI.
 
 ## Scope
 
@@ -33,12 +33,14 @@ systemd unit. Iterating on the dashboard panels, metrics, and a
 oracle/diag/
   __init__.py
   __main__.py              # `python -m oracle.diag` — starts uvicorn
-  server.py                # FastAPI app, routes, dashboard
+  server.py                # FastAPI app, routes, single-page dashboard
   tts_worker.py            # subprocess Piper invocation for RSS hygiene
+  tegrastats.py            # background tegrastats poller + parser
+oracle/
+  log.py                   # ring-buffer sink for /api/logs (in-process)
+  state.py                 # cross-process state file (running app → diag)
 systemd/
   radio-oracle-diag.service
-oracle/
-  health.py                # subsystem check primitives (consumed by diag)
 ```
 
 ## Settings
@@ -64,19 +66,34 @@ extra in `pyproject.toml`.
 ## Interface contract
 
 **Provides** (HTTP, browser- or curl-consumable):
-- `GET /` → dashboard (single-page HTML)
-- `GET /api/health` → subsystem checks
-- `GET /api/state` → current mode + last events
-- `GET /api/metrics` → CPU/GPU/disk/memory snapshot
-- `GET /api/logs?tail=N` → recent log lines
-- `POST /api/debug/chat` → streamed pipeline response
+- `GET /`                     → dashboard (single-page HTML)
+- `POST /api/record`          → mic capture → WAV
+- `POST /api/speak`           → Piper synth (subprocess) + Jetson playback
+- `GET /api/speak.wav`        → synth only, return WAV (no playback)
+- `POST /api/ask`             → blocking LLM (+ optional RAG) — returns answer
+- `POST /api/ask/stream`      → streaming SSE: `meta` event then `token` events then `done`
+- `GET /api/health`           → `{ollama, chroma, audio, gpio}` with up/down + detail
+- `GET /api/state`            → snapshot of the running `radio-oracle.service`
+                                 (mode, power, last button, last transcription, pid liveness)
+- `GET /api/logs?tail=N`      → in-process loguru ring buffer (own logs)
+- `GET /api/journal?unit=…&tail=N` → systemd journal tail for `radio-oracle` or `radio-oracle-diag`
+- `GET /api/gpu`              → tegrastats snapshot (gpu%, freq, temps, RAM)
+- `GET /api/stats`            → CPU/mem/swap/load avg/temps via psutil
+- `GET /api/persona`          → user_name, assistant_name
+- `POST /api/persona`         → set user_name (persists to persona.toml)
 
 **Consumes** (read-only):
-- WS 1: `StatusLEDs.mode`, `PowerSwitch.is_on`
-- WS 2: `Retriever.list_collections()` + per-collection counts
-- WS 5: device enumeration (`sounddevice.query_devices`)
-- WS 6: `check_ollama()`, `oracle.persona.build_system_prompt`
-- WS 7: log ring buffer; current `OracleApp` state when running
+- WS 2: `Retriever.list_collections()` + counts (health + ask)
+- WS 5: `oracle.audio.record_until_silence`, `play_wav_bytes`,
+         `sounddevice.query_devices` (audio health)
+- WS 6: `check_ollama`, `stream_chat`, `chat`, `build_system_prompt`,
+         persona getters/setters
+- WS 7: `oracle.state.read_state()` — non-shared, file-backed
+
+**Cross-process state**: the running app (`oracle/app.py::OracleApp`)
+publishes a snapshot to `$XDG_RUNTIME_DIR/radio-oracle-state.json` (or
+`/tmp/radio-oracle-state.json`) on every transition. `/api/state`
+reads + checks `pid_exists` so a stale file is reported as "not running".
 
 **Coordination with the main app**: the diagnostics service detects
 `radio-oracle.service` running and warns the operator that the mic and
@@ -102,7 +119,8 @@ curl http://<jetson>:8000/api/metrics | jq
 
 - [ ] mDNS / Bonjour so the page is discoverable as `oracle.local:8000`
 - [ ] Per-collection HNSW memory footprint chart
-- [ ] Tegrastats parsing for per-rail GPU power
-- [ ] Auth on the `POST /api/debug/chat` endpoint (LAN-trust assumption today)
+- [ ] Tegrastats: per-rail GPU power (currently only GPU%, freq, temps)
+- [ ] Auth / token on `POST /api/ask*` (LAN-trust assumption today)
 - [ ] Persist last-N pipeline traces for postmortem
-- [ ] Lightweight JS, no build step (single hand-written `app.js`)
+- [ ] Split inline HTML/JS/CSS into `oracle/diag/static/` with FastAPI
+      `StaticFiles` so iteration on the dashboard isn't a Python edit
