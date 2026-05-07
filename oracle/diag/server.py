@@ -21,14 +21,24 @@ from pydantic import BaseModel
 
 from config.settings import settings
 from oracle.diag import tegrastats
-from oracle.log import get_recent_logs, setup_logging
+from oracle.log import attach_ring_buffer, get_recent_logs
 from oracle.state import read_state
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    setup_logging()
-    tegrastats.start()
+    # Don't call setup_logging() here — that adds a file sink at
+    # data/oracle.log which can fail under systemd if the data dir
+    # isn't writable, and would kill startup before uvicorn binds.
+    # Just attach the ring buffer to whatever sinks loguru already has.
+    try:
+        attach_ring_buffer()
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"diag: ring buffer attach failed: {e}")
+    try:
+        tegrastats.start()
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"diag: tegrastats start failed: {e}")
     logger.info("diag server up")
     try:
         yield
