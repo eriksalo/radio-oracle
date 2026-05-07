@@ -44,6 +44,7 @@ async def _lifespan(app: FastAPI):
         yield
     finally:
         await tegrastats.stop()
+        await _tts_worker.aclose()
 
 
 app = FastAPI(title="Radio Oracle Diagnostics", lifespan=_lifespan)
@@ -93,35 +94,108 @@ async def record(req: RecordRequest) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# /api/speak — synthesize via Piper subprocess, play through Jetson speaker
+# /api/speak — synthesize via persistent Piper worker, play on Jetson speaker
 # ---------------------------------------------------------------------------
 
-# Serializes synthesis + playback. The synth subprocess loads ~300 MB of Piper
-# weights; running two in parallel doubles peak RSS and risks Ollama OOM on the
-# Jetson's unified memory pool. Playback is also exclusive (single speaker).
+# Serializes synthesis + playback. Piper's ONNX session lives in a long-lived
+# worker subprocess so we pay the ~2-4 s model load only once, not per request.
+# Playback is exclusive anyway (single speaker), so we use one shared lock for
+# both the worker request/response framing and the audio output.
 _speak_lock = asyncio.Lock()
 
 
-async def _synth_via_worker(text: str, radio_filter: bool) -> bytes:
-    """Run oracle.diag.tts_worker as a subprocess; return WAV bytes.
+class _PersistentTTSWorker:
+    """Long-lived ``oracle.diag.tts_worker --persistent`` subprocess.
 
-    Subprocess exit reclaims the Piper model RSS so the diag process stays
-    small between calls.
+    Lazily started on first call and restarted on crash. Callers must hold
+    ``_speak_lock`` (the protocol is not safe under concurrent requests).
     """
-    args = [sys.executable, "-m", "oracle.diag.tts_worker"]
-    if radio_filter:
-        args.append("--radio-filter")
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate(text.encode("utf-8"))
-    if proc.returncode != 0:
-        msg = stderr.decode("utf-8", errors="replace").strip() or f"exit {proc.returncode}"
-        raise RuntimeError(f"tts worker failed: {msg}")
-    return stdout
+
+    def __init__(self) -> None:
+        self._proc: asyncio.subprocess.Process | None = None
+
+    async def synth(self, text: str, radio_filter: bool) -> bytes:
+        # One retry: if the worker died between calls, restart and try again.
+        for attempt in (0, 1):
+            try:
+                await self._ensure_started()
+                return await self._call(text, radio_filter)
+            except (BrokenPipeError, ConnectionResetError, asyncio.IncompleteReadError, RuntimeError) as e:
+                self._reset()
+                if attempt == 1:
+                    raise RuntimeError(f"tts worker failed: {e}") from e
+                logger.warning(f"diag: tts worker unhealthy ({e}); restarting")
+        raise AssertionError("unreachable")
+
+    async def aclose(self) -> None:
+        proc = self._proc
+        self._proc = None
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            if proc.stdin is not None and not proc.stdin.is_closing():
+                proc.stdin.close()
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            proc.kill()
+            await proc.wait()
+
+    async def _ensure_started(self) -> None:
+        if self._proc is not None and self._proc.returncode is None:
+            return
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "oracle.diag.tts_worker", "--persistent",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            # stderr inherits from parent → goes to journalctl
+        )
+        ready = await proc.stdout.readline()
+        if ready.strip() != b"READY":
+            await proc.wait()
+            raise RuntimeError(f"tts worker did not signal READY (got {ready!r})")
+        self._proc = proc
+        logger.info(f"diag: persistent tts worker started (pid={proc.pid})")
+
+    async def _call(self, text: str, radio_filter: bool) -> bytes:
+        assert self._proc is not None and self._proc.stdin is not None and self._proc.stdout is not None
+        text_bytes = text.encode("utf-8")
+        flag = "1" if radio_filter else "0"
+        header = f"{flag} {len(text_bytes)}\n".encode("ascii")
+        self._proc.stdin.write(header)
+        self._proc.stdin.write(text_bytes)
+        await self._proc.stdin.drain()
+
+        resp_header = await self._proc.stdout.readline()
+        if not resp_header:
+            raise RuntimeError("tts worker exited unexpectedly")
+        try:
+            status, len_str = resp_header.decode("ascii").strip().split()
+            length = int(len_str)
+        except ValueError as e:
+            raise RuntimeError(f"bad worker response header: {resp_header!r}") from e
+        body = await self._proc.stdout.readexactly(length)
+        if status == "OK":
+            return body
+        if status == "ERR":
+            raise RuntimeError(body.decode("utf-8", errors="replace"))
+        raise RuntimeError(f"unknown worker status: {status}")
+
+    def _reset(self) -> None:
+        proc = self._proc
+        self._proc = None
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+
+_tts_worker = _PersistentTTSWorker()
+
+
+async def _synth_via_worker(text: str, radio_filter: bool) -> bytes:
+    """Synthesize WAV bytes using the persistent Piper worker."""
+    return await _tts_worker.synth(text, radio_filter)
 
 
 def _wav_duration_sec(wav: bytes) -> float:
