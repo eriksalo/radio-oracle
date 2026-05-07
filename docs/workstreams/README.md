@@ -1,20 +1,68 @@
 # Workstreams
 
-Radio Oracle is split into 5 independent workstreams. Each can be developed and tested in isolation.
+Radio Oracle is split into **8 independent workstreams**. Each has its own
+folder of code, its own tests, its own settings prefix, and a documented way
+to develop and exercise it in isolation. Pick one, ignore the others.
 
-| # | Workstream | Status | Key Paths |
-|---|-----------|--------|-----------|
-| 1 | [RAG Ingest](1-rag-ingest.md) | In progress | `scripts/ingest_*.py`, `oracle/rag/` |
-| 2 | [Music Player](2-music-player.md) | Not started | `oracle/music/`, `scripts/ingest_music.py` |
-| 3 | [TTS & Conversation](3-tts-conversation.md) | Working E2E | `oracle/core.py`, `oracle/tts.py`, `oracle/stt.py`, `oracle/llm.py` |
-| 4 | [Electronics & Wiring](4-electronics.md) | Basic GPIO done | `oracle/hardware/` |
-| 5 | [Updates & Reliability](5-reliability.md) | Not started | `systemd/`, `oracle/health.py`, `scripts/setup_jetson.sh` |
+| #   | Workstream                                | Status         | Code lives in                              |
+|-----|-------------------------------------------|----------------|--------------------------------------------|
+| [1](1-electronics.md)  | Electronics & Wiring                | Hardware loop done | `oracle/hardware/`, `docs/wiring/`     |
+| [2](2-rag.md)          | Large-data ingest / RAG             | Working E2E (workstation) | `oracle/rag/`, `scripts/ingest_*.py`   |
+| [3](3-music.md)        | Music player                        | Stub            | `oracle/music/`                          |
+| [4](4-books.md)        | Books & book reader                 | Not started     | `oracle/books/` (stub)                   |
+| [5](5-tts.md)          | Text-to-voice (TTS + audio I/O)     | Working E2E     | `oracle/tts.py`, `oracle/audio.py`       |
+| [6](6-llm.md)          | LLM behavior (chat, persona, memory)| Working E2E     | `oracle/llm.py`, `oracle/persona.py`, `oracle/memory/` |
+| [7](7-orchestration.md)| Intro & working-flow (state machine, STT, deploy) | Working | `oracle/app.py`, `oracle/core.py`, `oracle/stt.py`, `systemd/` |
+| [8](8-diagnostics.md)  | Diagnostic web page                 | First cut landed | `oracle/diag/`, `systemd/radio-oracle-diag.service` |
 
-## Interface Contracts
+## How to pick a workstream and start
 
-Workstreams communicate through well-defined boundaries:
+1. Open the workstream's doc.
+2. Skim **Scope** and **File ownership** — those tell you exactly what's
+   yours to change.
+3. Run the **Standalone exercise** section to confirm the workstream works
+   end-to-end on your machine before touching anything.
+4. Make changes only inside that workstream's owned files. If you find
+   yourself editing a file owned by another workstream, the change probably
+   belongs in *its* doc as a TODO instead.
 
-- **RAG -> Conversation**: `Retriever.query(text) -> list[dict]` returns ranked chunks. Conversation code calls this; RAG ingest never touches conversation code.
-- **Music -> Conversation**: `core.py` detects music intent via LLM and delegates to `oracle/music/player.py`. Music player owns audio output while playing; conversation pauses.
-- **Hardware -> Conversation**: `core.py` reads PTT events from `hardware/button.py` and sets LED state via `hardware/leds.py`. Hardware modules expose simple async interfaces.
-- **Reliability -> All**: `health.py` checks subsystem status. systemd manages process lifecycle. No code changes needed in other workstreams.
+## Cross-workstream rules
+
+- **Settings**: each workstream owns an env-var prefix under `ORACLE_*`
+  (e.g., `ORACLE_LED_*`, `ORACLE_MUSIC_*`). All defaults live in
+  `config/settings.py`.
+- **Lazy imports**: where one workstream consumes another, the import is
+  done inside the function that needs it and wrapped in a try/except, so
+  a missing dep degrades gracefully instead of crashing startup. See
+  `oracle/core.py::_try_rag_query` for the pattern.
+- **Interfaces are documented in each workstream's doc** under
+  *Interface contract*. Don't add a new cross-workstream call without
+  updating both docs.
+- **Tests** go in `tests/test_<workstream-thing>.py`. Each workstream's doc
+  lists its own tests under *Standalone exercise*.
+
+## Dependency graph
+
+```
+                  ┌──────────────────────┐
+                  │ 7. Orchestration     │
+                  │  (app, core, STT)    │
+                  └──┬─────┬─────┬──────┘
+              uses  │     │     │  uses
+                    ▼     ▼     ▼
+       ┌─────────┐ ┌────┐ ┌────────┐ ┌───────┐
+       │ 5. TTS  │ │ 6. │ │ 1. HW  │ │ 3.    │
+       │ + audio │ │LLM │ │+wiring │ │Music  │
+       └─────────┘ └─┬──┘ └────────┘ └───┬───┘
+                    │ uses              │ uses TTS
+                    ▼                    ▼
+                 ┌────────┐          ┌─────────┐
+                 │ 2. RAG │          │ 4. Books│
+                 └────────┘          └─────────┘
+
+8. Diagnostics — reads metrics from all of the above; depended on by none.
+```
+
+Workstreams above the line consume those below. Nothing flows the other way,
+so you can stub or break a downstream workstream without affecting upstream
+ones (the lazy-import pattern handles missing deps).
