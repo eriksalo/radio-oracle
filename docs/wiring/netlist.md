@@ -1,156 +1,165 @@
-# Radio Oracle — Wiring Netlist
+# Radio Oracle — Wiring Connection List
 
-Companion to [`jetson-wiring.svg`](jetson-wiring.svg). Use the SVG to see the
-layout; use this file to actually solder/breadboard the connections.
+Bench-side companion to the diagrams. Two views of the same information:
 
-All Jetson pins are referenced by **header position** (1–40) with their **BCM**
-GPIO number in parentheses. BCM numbers match `config/settings.py`.
+- **[`jetson-schematic.svg`](jetson-schematic.svg)** — proper EE schematic
+  with standard symbols and named net flags. Use this to *verify the design
+  is correct*.
+- **[`jetson-wiring.svg`](jetson-wiring.svg)** — pictorial / Fritzing-style
+  layout with colored wires. Use this to *see what it should look like*.
+
+This file is the *checkbox-driven build sheet*. Print or open it next to
+the bench, work top-to-bottom through the matrix, tick each row as you make
+the connection.
+
+All Jetson pins use **header position 1–40** (with BCM number in
+parentheses). Reference designators (J1, R1–R3, LED1, SW1, SW2, RV1, U1)
+match the schematic.
 
 ---
 
-## Components (BOM with reference designators)
+## Bill of materials
 
-| Ref     | Part                                | Notes                                      |
-|---------|-------------------------------------|--------------------------------------------|
-| **J1**  | Jetson Orin Nano 40-pin header (J12)| 2 × 20 male pins                           |
-| **LED1**| Common-cathode RGB LED, 5/8 mm      | 4 leads — typical order: R · GND · G · B   |
-| **R1–R3**| 330 Ω, ¼ W resistor                | One per RGB channel; orient either way     |
-| **SW1** | Momentary push-button, NO           | 2 terminals; panel-mount (≥ 12 mm)         |
-| **SW2** | SPST toggle (or rocker) switch      | 2 terminals; panel-mount                   |
-| **RV1** | 10 kΩ linear potentiometer          | 3 terminal: CW · Wiper · CCW               |
-| **U1**  | ADS1115 I²C ADC breakout            | Adafruit/generic 5-pin power + 4-ch analog |
+| Ref       | Qty | Part                                    | Notes                                      |
+|-----------|-----|-----------------------------------------|--------------------------------------------|
+| **J1**    | 1   | Jetson Orin Nano dev kit (40-pin J12)   | uses 9 of 40 pins                          |
+| **LED1**  | 1   | Common-cathode RGB LED, 5 mm or 8 mm    | 4 leads, typical order R-K-G-B             |
+| **R1**    | 1   | 330 Ω resistor, ¼ W                     | RGB R series resistor (BCM 23 → LED1.R)   |
+| **R2**    | 1   | 330 Ω resistor, ¼ W                     | RGB G series resistor (BCM 24 → LED1.G)   |
+| **R3**    | 1   | 330 Ω resistor, ¼ W                     | RGB B series resistor (BCM 25 → LED1.B)   |
+| **SW1**   | 1   | Momentary push-button, NO               | 12 mm panel-mount fits a vintage radio     |
+| **SW2**   | 1   | SPST toggle / rocker switch             | panel-mount                                |
+| **RV1**   | 1   | 10 kΩ linear potentiometer              | 3-terminal: CW · W · CCW                   |
+| **U1**    | 1   | ADS1115 I²C ADC breakout                | 5-pin power + 4-channel analog             |
+| —         | ~12 | hookup wire, 22 AWG stranded            | ≥ 6 colors recommended                     |
+| —         | 1   | breadboard, 400-tie-point or larger     | optional but recommended                   |
 
 ---
 
 ## Jetson J1 pin map (only pins this design uses)
 
-| Pin | BCM | Direction | Function                  | Notes                       |
-|-----|-----|-----------|---------------------------|-----------------------------|
-| 1   | —   | power-out | +3.3 V                    | Feeds U1.VDD and RV1.CW     |
-| 3   | 2   | I²C       | SDA1                      | Hardware I²C bus 1 data     |
-| 5   | 3   | I²C       | SCL1                      | Hardware I²C bus 1 clock    |
-| 6   | —   | ground    | GND                       | Star ground for everything  |
-| 11  | 17  | input     | Power toggle              | Internal pull-up; LOW = on  |
-| 12  | 18  | input     | Action button             | Internal pull-up; LOW = pressed |
-| 16  | 23  | output    | RGB R drive               | HIGH = R channel lit        |
-| 18  | 24  | output    | RGB G drive               | HIGH = G channel lit        |
-| 22  | 25  | output    | RGB B drive               | HIGH = B channel lit        |
+| Pin | BCM | Net           | Direction | Notes                       |
+|-----|-----|---------------|-----------|-----------------------------|
+| 1   | —   | `+3V3`        | power-out | feeds U1.VDD and RV1.CW     |
+| 3   | 2   | `SDA`         | I²C       | hardware I²C bus 1 data     |
+| 5   | 3   | `SCL`         | I²C       | hardware I²C bus 1 clock    |
+| 6   | —   | `GND`         | ground    | star ground for everything  |
+| 11  | 17  | `BCM17`       | input     | internal pull-up; LOW = on  |
+| 12  | 18  | `BCM18`       | input     | internal pull-up; LOW = pressed |
+| 16  | 23  | `BCM23`       | output    | HIGH = R channel lit        |
+| 18  | 24  | `BCM24`       | output    | HIGH = G channel lit        |
+| 22  | 25  | `BCM25`       | output    | HIGH = B channel lit        |
 
-All other J1 pins are unused.
-
----
-
-## Nets
-
-A **net** is a set of pins that are electrically the same node (same wire).
-The ten nets in this design:
-
-### N1 · `+3V3`  (Jetson 3.3 V rail)
-- J1.1 — 3V3 (power source)
-- U1.VDD
-- RV1.CW (pot left terminal)
-
-### N2 · `GND`  (star ground)
-- J1.6 — GND (ground source)
-- LED1.cathode (common cathode)
-- SW1.t2 (action button, second terminal)
-- SW2.t2 (power toggle, second terminal)
-- RV1.CCW (pot right terminal)
-- U1.GND
-
-### N3 · `I2C_SDA` (BCM 2)
-- J1.3
-- U1.SDA
-
-### N4 · `I2C_SCL` (BCM 3)
-- J1.5
-- U1.SCL
-
-### N5 · `POWER_TOGGLE` (BCM 17)
-- J1.11
-- SW2.t1 (power toggle, first terminal)
-
-### N6 · `ACTION_BUTTON` (BCM 18)
-- J1.12
-- SW1.t1 (action button, first terminal)
-
-### N7 · `RGB_R` (BCM 23)
-- J1.16  ──[ R1 = 330 Ω ]──  LED1.R_anode
-
-### N8 · `RGB_G` (BCM 24)
-- J1.18  ──[ R2 = 330 Ω ]──  LED1.G_anode
-
-### N9 · `RGB_B` (BCM 25)
-- J1.22  ──[ R3 = 330 Ω ]──  LED1.B_anode
-
-### N10 · `POT_WIPER`
-- RV1.W (wiper)
-- U1.A0
+Every other pin on J1 is **unused** — leave them open.
 
 ---
 
-## Cable schedule (physical wires to run)
+## Connection matrix (build sheet — tick as you wire)
 
-Each row = one piece of hookup wire. Suggested colors match the SVG legend.
-Resistor bodies count as inline parts on the wire, not as endpoints.
+Each row is one electrical link. Resistor rows have the resistor itself
+*on the wire* (one lead at "From", the other at "To"); they're not separate
+endpoints. Wire colors match `jetson-wiring.svg` for easy cross-reference.
 
-| #  | Net           | From               | To                  | Suggested color  |
-|----|---------------|--------------------|---------------------|------------------|
-| 1  | +3V3          | J1.1               | U1.VDD              | red              |
-| 2  | +3V3          | U1.VDD             | RV1.CW              | red (jumper)     |
-| 3  | GND           | J1.6               | U1.GND              | black            |
-| 4  | GND           | U1.GND             | RV1.CCW             | black (jumper)   |
-| 5  | GND           | J1.6 (or U1.GND)   | LED1.cathode        | black            |
-| 6  | GND           | J1.6               | SW1.t2              | black            |
-| 7  | GND           | J1.6               | SW2.t2              | black            |
-| 8  | I2C_SDA       | J1.3               | U1.SDA              | purple           |
-| 9  | I2C_SCL       | J1.5               | U1.SCL              | brown            |
-| 10 | POWER_TOGGLE  | J1.11              | SW2.t1              | teal             |
-| 11 | ACTION_BUTTON | J1.12              | SW1.t1              | yellow           |
-| 12 | RGB_R         | J1.16              | R1 (lead a)         | hot pink         |
-| 13 | RGB_R         | R1 (lead b)        | LED1.R_anode        | hot pink (short) |
-| 14 | RGB_G         | J1.18              | R2 (lead a)         | green            |
-| 15 | RGB_G         | R2 (lead b)        | LED1.G_anode        | green (short)    |
-| 16 | RGB_B         | J1.22              | R3 (lead a)         | blue             |
-| 17 | RGB_B         | R3 (lead b)        | LED1.B_anode        | blue (short)     |
-| 18 | POT_WIPER     | RV1.W              | U1.A0               | orange           |
+| ✓ | #  | Net      | From               | To                   | Inline part   | Wire color |
+|---|----|----------|--------------------|----------------------|---------------|------------|
+| ☐ |  1 | `+3V3`   | J1.1 (3V3)         | U1.VDD               | —             | red        |
+| ☐ |  2 | `+3V3`   | U1.VDD             | RV1.CW               | —             | red        |
+| ☐ |  3 | `GND`    | J1.6 (GND)         | U1.GND               | —             | black      |
+| ☐ |  4 | `GND`    | U1.GND             | RV1.CCW              | —             | black      |
+| ☐ |  5 | `GND`    | U1.GND             | LED1.cathode         | —             | black      |
+| ☐ |  6 | `GND`    | U1.GND             | SW1.t2               | —             | black      |
+| ☐ |  7 | `GND`    | U1.GND             | SW2.t2               | —             | black      |
+| ☐ |  8 | `SDA`    | J1.3 (BCM 2)       | U1.SDA               | —             | purple     |
+| ☐ |  9 | `SCL`    | J1.5 (BCM 3)       | U1.SCL               | —             | brown      |
+| ☐ | 10 | `BCM17`  | J1.11 (BCM 17)     | SW2.t1               | —             | teal       |
+| ☐ | 11 | `BCM18`  | J1.12 (BCM 18)     | SW1.t1               | —             | yellow     |
+| ☐ | 12 | `BCM23`  | J1.16 (BCM 23)     | LED1.R\_anode        | **R1 = 330 Ω** | hot pink   |
+| ☐ | 13 | `BCM24`  | J1.18 (BCM 24)     | LED1.G\_anode        | **R2 = 330 Ω** | green      |
+| ☐ | 14 | `BCM25`  | J1.22 (BCM 25)     | LED1.B\_anode        | **R3 = 330 Ω** | blue       |
+| ☐ | 15 | `A0`     | RV1.W (wiper)      | U1.A0                | —             | orange     |
 
-**Wire count: 18** (5 ground, 2 power, 2 I²C, 2 switch signals, 6 RGB driver+anode, 1 pot wiper).
-
-In practice, ground and 3.3 V are often distributed via a breadboard rail
-rather than running 5 separate ground wires from J1.6 — the netlist treats
-them as one node either way.
+**Total: 15 wires** + 3 inline resistors. (Rows 3–7 share the `GND` net.
+On a breadboard you'd land them all on the GND rail rather than running
+five separate wires from J1.6.)
 
 ---
 
-## Off-header (not in netlist)
+## Per-component pinout (which pin is which)
 
-- **USB DAC** — plugs into any Jetson USB-A port. The DAC's 3.5 mm jack feeds
-  the speaker. No GPIO involvement.
-- **Microphone** — USB mic, also on USB-A.
-- **Power input** — DC barrel jack on the Jetson dev kit (not GPIO).
+Quick reference for orienting parts on the bench. "Looking at the part with
+its leads pointing down" unless noted.
+
+### LED1 — common-cathode RGB LED
+
+```
+       (R)   (K)   (G)   (B)
+        │     │     │     │       (K = common cathode, longest lead)
+        ▽     ▽     ▽     ▽
+```
+Verify with a 3 V coin cell + 330 Ω in series before installing — a
+common-anode part will need the wiring inverted.
+
+### SW1 / SW2 — switches
+
+Two terminals, polarity-free. SW1 is *momentary* (closes only while held);
+SW2 is *latching* (toggles open ↔ closed).
+
+### RV1 — 10 kΩ linear pot
+
+```
+   CW  ──┐
+         ├──[ resistive track ]
+   CCW ──┘
+            wiper (W) ─── slides along the track
+```
+Three terminals in a row on most panel-mount pots; the middle one is the
+wiper. CW vs CCW is whichever way you mount the knob — software can flip
+the sense.
+
+### U1 — ADS1115 (Adafruit/generic breakout)
+
+```
+  VDD  SCL  ALERT  A1   A3
+   │    │    │    │    │
+  ┌──────────────────────┐
+  │      ADS1115         │
+  └──────────────────────┘
+   │    │    │    │    │
+  GND  SDA  ADDR  A0   A2
+```
+
+Pin order varies by breakout vendor — **double-check yours by silkscreen**.
+Leave `ADDR` floating or tie to GND for I²C address `0x48` (the default
+the code expects).
 
 ---
 
-## Verification checklist
+## Verification checklist (before powering on)
 
-Before powering on:
+- [ ] J1.1 = 3.3 V (not 5 V). Pin 2 and pin 4 are 5 V — don't mix them up.
+- [ ] LED1 is common-**cathode** (long lead = GND).
+      If it's common-anode, swap LED1.cathode ↔ +3V3 and tell the firmware
+      it's active-LOW (TODO in `oracle/hardware/leds.py`).
+- [ ] R1, R2, R3 are all 330 Ω (orange-orange-brown, or 5-band
+      orange-orange-black-black-brown). Anything 220 Ω–1 kΩ is safe.
+- [ ] SW1 and SW2 wired between BCM pin and **GND** (not 3.3 V) —
+      firmware uses `PUD_UP`.
+- [ ] U1 ADDR pin is floating or tied to GND (I²C address `0x48`).
+- [ ] Pot CW/CCW orientation only affects which way is "louder"; software
+      can invert.
+- [ ] Continuity-check every row in the matrix above with a multimeter
+      *before* applying power. Ring out every GND row to J1.6.
 
-- [ ] Confirm RGB LED is **common-cathode** (the long lead is GND, not VCC).
-      If yours is common-anode, swap LED1.cathode → +3V3 and invert the
-      Jetson outputs (active-LOW); see notes in `4-electronics.md`.
-- [ ] Resistors are 330 Ω (orange-orange-brown, or 5-band: orange-orange-
-      black-black-brown). Anything between 220 Ω and 1 kΩ is safe.
-- [ ] SW1 and SW2 are wired to GND (not 3.3 V) — code uses `PUD_UP`.
-- [ ] U1 (ADS1115) ADDR pin is left floating or tied to GND for I²C address
-      `0x48` (the default the code expects).
-- [ ] Pot CW vs CCW: orientation only affects which knob direction is
-      "louder"; software can invert.
+---
 
-## Smoke test
+## Smoke tests (after wiring, before assembly)
+
+Run each on the Jetson with the venv active. They each touch one piece
+of hardware so you can localise faults.
+
+### RGB LED (rows 12–14 + GND rail)
 
 ```bash
-# RGB LED
 python -c "
 from oracle.hardware.leds import StatusLEDs
 import time
@@ -159,8 +168,12 @@ for m in ('radio','librarian','thinking','speaking','error'):
     print(m); leds.set_mode(m); time.sleep(2)
 leds.cleanup()
 "
+```
+Expected: green → blue → amber → cyan → red-blink, then off.
 
-# Action button (interactive — press it a few times)
+### Action button (row 11)
+
+```bash
 python -c "
 from oracle.hardware.button import ActionButton
 btn = ActionButton(); btn.start()
@@ -168,8 +181,13 @@ import time; time.sleep(15)
 while not btn.events.empty(): print(btn.events.get_nowait())
 btn.cleanup()
 "
+```
+Press a few times in 15 s. Expected: one `ButtonEvent(kind='short', …)`
+per quick tap, `kind='long'` for ≥ 1 s holds.
 
-# Power switch (interactive — flip it once each way)
+### Power switch (row 10)
+
+```bash
 python -c "
 from oracle.hardware.power_switch import PowerSwitch
 sw = PowerSwitch(); sw.add_listener(lambda on: print('ON' if on else 'OFF'))
@@ -177,3 +195,32 @@ sw.start()
 import time; time.sleep(15); sw.cleanup()
 "
 ```
+Flip the toggle. Expected: `ON` and `OFF` printed on each edge.
+
+### ADS1115 + pot (rows 1–4 + 8–9 + 15)
+
+```bash
+python -c "
+import board, busio
+from adafruit_ads1x15.ads1115 import ADS1115
+from adafruit_ads1x15.analog_in import AnalogIn
+i2c = busio.I2C(board.SCL, board.SDA)
+ads = ADS1115(i2c)
+chan = AnalogIn(ads, 0)   # A0 = pot wiper
+for _ in range(20):
+    print(f'pot = {chan.value:5d}  ({chan.voltage:.3f} V)')
+    __import__('time').sleep(0.25)
+"
+```
+Turn the knob. Expected: voltage sweeps roughly 0.0 V → 3.3 V end-to-end.
+
+---
+
+## Off-header (not in the matrix)
+
+| Item        | Where it goes                  |
+|-------------|--------------------------------|
+| USB DAC     | any Jetson USB-A port          |
+| USB mic     | any Jetson USB-A port          |
+| Speaker     | DAC's 3.5 mm jack              |
+| DC power    | barrel jack on the dev kit     |
