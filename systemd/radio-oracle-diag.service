@@ -23,8 +23,8 @@ Environment=ORACLE_LOG_LEVEL=INFO
 MemoryMax=7G
 CPUQuota=90%
 
-# Hardware access (mic/speaker via audio group; LEDs via gpio)
-SupplementaryGroups=gpio audio
+# Hardware access (mic/speaker via audio group; LEDs via gpio; ADS1115 via i2c)
+SupplementaryGroups=gpio audio i2c
 
 [Install]
 WantedBy=multi-user.target

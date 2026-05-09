@@ -115,6 +115,20 @@ class StatusLEDs:
                 self._write(color)
             self._mode = mode
 
+    def set_rgb(self, r: bool, g: bool, b: bool) -> Color:
+        """Drive the channels directly (diag/test path).
+
+        Bypasses the mode state machine — useful for the diagnostic UI.
+        Subsequent ``set_mode`` calls will overwrite this. Returns the
+        Color that was actually written.
+        """
+        color = Color(bool(r), bool(g), bool(b))
+        with self._lock:
+            self._stop_blink()
+            self._write(color)
+            self._mode = "off"  # force the next set_mode to re-apply
+        return color
+
     @property
     def mode(self) -> Mode:
         return self._mode

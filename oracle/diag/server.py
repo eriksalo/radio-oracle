@@ -24,6 +24,12 @@ from oracle.diag import tegrastats
 from oracle.log import attach_ring_buffer, get_recent_logs
 from oracle.state import read_state
 
+# Lazy hardware singletons used only by the diag I/O card. Imported here so
+# the ``HardwareInputs`` / LED state lives for the lifetime of the process.
+_hw_inputs: "_HardwareInputs | None" = None
+_hw_leds = None  # type: ignore[var-annotated]
+_hw_pot = None   # type: ignore[var-annotated]
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
@@ -445,6 +451,118 @@ async def health() -> dict:
         "audio": audio,
         "gpio": gpio,
     }
+
+
+# ---------------------------------------------------------------------------
+# /api/hardware — live raw GPIO inputs + pot reading + direct LED control
+# ---------------------------------------------------------------------------
+
+
+class _HardwareInputs:
+    """Direct GPIO reads of the action button and power switch.
+
+    Sidesteps oracle.hardware.button / power_switch (which run their own
+    polling threads) so the diag UI can poll without spinning extra workers
+    and without consuming the production button event queue.
+    """
+
+    def __init__(self) -> None:
+        self._gpio = None
+        self._error: str | None = None
+        try:
+            import Jetson.GPIO as GPIO  # type: ignore[import-not-found]
+
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(settings.action_button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.setup(settings.power_switch_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            self._gpio = GPIO
+        except (ImportError, RuntimeError) as e:  # noqa: BLE001
+            self._error = repr(e)
+            logger.warning(f"diag hardware inputs unavailable: {e}")
+
+    def read(self) -> dict:
+        if self._gpio is None:
+            return {
+                "available": False,
+                "detail": self._error or "GPIO unavailable",
+                "button": None,
+                "switch": None,
+            }
+        # Active-low: PUD_UP means open contact reads HIGH, closed reads LOW.
+        btn_level = self._gpio.input(settings.action_button_pin)
+        sw_level = self._gpio.input(settings.power_switch_pin)
+        return {
+            "available": True,
+            "button": {
+                "pin": settings.action_button_pin,
+                "level": "HIGH" if btn_level else "LOW",
+                "pressed": btn_level == self._gpio.LOW,
+            },
+            "switch": {
+                "pin": settings.power_switch_pin,
+                "level": "HIGH" if sw_level else "LOW",
+                "on": sw_level == self._gpio.LOW,
+            },
+        }
+
+
+def _get_inputs() -> _HardwareInputs:
+    global _hw_inputs
+    if _hw_inputs is None:
+        _hw_inputs = _HardwareInputs()
+    return _hw_inputs
+
+
+def _get_pot():
+    global _hw_pot
+    if _hw_pot is None:
+        from oracle.hardware.pot import Potentiometer
+
+        _hw_pot = Potentiometer()
+    return _hw_pot
+
+
+def _get_leds():
+    global _hw_leds
+    if _hw_leds is None:
+        from oracle.hardware.leds import StatusLEDs
+
+        _hw_leds = StatusLEDs()
+    return _hw_leds
+
+
+class LEDRequest(BaseModel):
+    r: bool = False
+    g: bool = False
+    b: bool = False
+
+
+@app.get("/api/hardware/inputs")
+def hw_inputs() -> dict:
+    inputs = _get_inputs().read()
+    pot = _get_pot()
+    if not pot.available:
+        inputs["pot"] = {"available": False, "detail": pot.error or "unavailable"}
+    else:
+        reading = pot.read()
+        if reading is None:
+            inputs["pot"] = {"available": False, "detail": pot.error or "read failed"}
+        else:
+            inputs["pot"] = {
+                "available": True,
+                "raw": reading.raw,
+                "voltage": reading.voltage,
+                "pct": reading.pct,
+            }
+    return inputs
+
+
+@app.post("/api/hardware/led")
+def hw_led(req: LEDRequest) -> dict:
+    leds = _get_leds()
+    color = leds.set_rgb(req.r, req.g, req.b)
+    logger.info(f"diag: LED set R={color.r} G={color.g} B={color.b}")
+    return {"ok": True, "r": color.r, "g": color.g, "b": color.b}
 
 
 # ---------------------------------------------------------------------------
@@ -1003,6 +1121,43 @@ _PAGE = """<!doctype html>
         Stop it to free the mic/speaker for the cards below.</div>
     </div>
 
+    <!-- Hardware I/O -->
+    <div class="card" style="grid-column: 1 / -1">
+      <h2>[ ! ] HARDWARE I/O DIAGNOSTIC</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+        <div>
+          <div class="meter-label"><span>MOMENTARY (BCM <span id="hwBtnPin">18</span>)</span><span id="hwBtnLevel">—</span></div>
+          <div class="stat-row"><span>state</span><span id="hwBtnState">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>POWER SWITCH (BCM <span id="hwSwPin">17</span>)</span><span id="hwSwLevel">—</span></div>
+          <div class="stat-row"><span>state</span><span id="hwSwState">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>POTENTIOMETER</span><span id="hwPotPct">—</span></div>
+          <div class="bar"><div id="hwPotBar" style="width:0%"></div></div>
+          <div class="stat-row"><span>raw</span><span id="hwPotRaw">—</span></div>
+          <div class="stat-row"><span>voltage</span><span id="hwPotV">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>RGB LED</span><span id="hwLedSwatch" style="display:inline-block;width:18px;height:14px;border:1px solid var(--grn-dim);background:#000;vertical-align:middle"></span></div>
+          <div class="row" style="margin-top:4px">
+            <label class="inline"><input type="checkbox" id="hwLedR" /> R</label>
+            <label class="inline"><input type="checkbox" id="hwLedG" /> G</label>
+            <label class="inline"><input type="checkbox" id="hwLedB" /> B</label>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <button id="hwLedApply">[ APPLY ]</button>
+            <button id="hwLedOff" class="secondary">[ OFF ]</button>
+          </div>
+          <span class="status" id="hwLedStatus"></span>
+        </div>
+      </div>
+      <div class="hint">Live raw GPIO + ADS1115 reads. Halt <code>radio-oracle.service</code> if its
+        own LED writes are stomping yours.</div>
+      <div class="status" id="hwInputsStatus"></div>
+    </div>
+
     <!-- Mic -->
     <div class="card">
       <h2>[ 1 ] AUDIO INPUT TEST</h2>
@@ -1180,12 +1335,12 @@ $('askBtn').onclick = async () => {
       buf += dec.decode(value, { stream: true });
       // SSE frames split by blank line.
       let idx;
-      while ((idx = buf.indexOf('\n\n')) >= 0) {
+      while ((idx = buf.indexOf('\\n\\n')) >= 0) {
         const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        const dataLines = frame.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
+        const dataLines = frame.split('\\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
         if (!dataLines.length) continue;
         let evt;
-        try { evt = JSON.parse(dataLines.join('\n')); } catch { continue; }
+        try { evt = JSON.parse(dataLines.join('\\n')); } catch { continue; }
         if (evt.type === 'token') {
           answer += evt.value;
           $('answer').textContent = answer;
@@ -1318,6 +1473,69 @@ async function pollState() {
 pollState();
 setInterval(pollState, 1500);
 
+// --- hardware I/O poll + LED control ---
+async function pollHwInputs() {
+  const st = $('hwInputsStatus');
+  try {
+    const r = await fetch('/api/hardware/inputs'); const j = await r.json();
+    if (j.button) {
+      $('hwBtnPin').textContent = j.button.pin;
+      $('hwBtnLevel').textContent = j.button.level;
+      $('hwBtnState').textContent = j.button.pressed ? 'PRESSED' : 'released';
+    }
+    if (j.switch) {
+      $('hwSwPin').textContent = j.switch.pin;
+      $('hwSwLevel').textContent = j.switch.level;
+      $('hwSwState').textContent = j.switch.on ? 'ON' : 'OFF';
+    }
+    if (j.pot && j.pot.available) {
+      $('hwPotPct').textContent = j.pot.pct.toFixed(1) + '%';
+      $('hwPotBar').style.width = j.pot.pct + '%';
+      $('hwPotRaw').textContent = j.pot.raw;
+      $('hwPotV').textContent = j.pot.voltage.toFixed(3) + ' V';
+    } else {
+      $('hwPotPct').textContent = '—';
+      $('hwPotBar').style.width = '0%';
+      $('hwPotRaw').textContent = j.pot?.detail || 'unavailable';
+      $('hwPotV').textContent = '—';
+    }
+    if (j.available === false) {
+      setStatus(st, 'GPIO unavailable: ' + (j.detail || ''), 'err');
+    } else {
+      setStatus(st, '');
+    }
+  } catch (e) {
+    setStatus(st, 'poll error: ' + e.message, 'err');
+  }
+}
+function updateLedSwatch() {
+  const r = $('hwLedR').checked, g = $('hwLedG').checked, b = $('hwLedB').checked;
+  // Common-cathode digital: each channel is on/off only.
+  const css = `rgb(${r?255:0}, ${g?255:0}, ${b?255:0})`;
+  $('hwLedSwatch').style.background = css;
+}
+['hwLedR','hwLedG','hwLedB'].forEach(id => $(id).addEventListener('change', updateLedSwatch));
+async function applyLed(r, g, b) {
+  const st = $('hwLedStatus');
+  setStatus(st, 'writing…');
+  try {
+    const resp = await postJSON('/api/hardware/led', { r, g, b });
+    const j = await resp.json();
+    setStatus(st, `R=${j.r?1:0} G=${j.g?1:0} B=${j.b?1:0}`, 'ok');
+  } catch (e) {
+    setStatus(st, 'error: ' + e.message, 'err');
+  }
+}
+$('hwLedApply').onclick = () => applyLed($('hwLedR').checked, $('hwLedG').checked, $('hwLedB').checked);
+$('hwLedOff').onclick = () => {
+  $('hwLedR').checked = $('hwLedG').checked = $('hwLedB').checked = false;
+  updateLedSwatch();
+  applyLed(false, false, false);
+};
+updateLedSwatch();
+pollHwInputs();
+setInterval(pollHwInputs, 250);
+
 // --- log tail ---
 let _logTab = 'diag';
 function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
@@ -1328,11 +1546,11 @@ async function pollLogs() {
       const r = await fetch('/api/logs?tail=200'); const j = await r.json();
       box.innerHTML = (j.entries || []).map(e =>
         `<span class="lvl-${e.level}">[${e.ts}] ${e.level.padEnd(7)} ${e.name} :: ${escapeHtml(e.message)}</span>`
-      ).join('\n') || '[ empty ]';
+      ).join('\\n') || '[ empty ]';
     } else {
       const r = await fetch('/api/journal?unit=radio-oracle&tail=200'); const j = await r.json();
       if (!j.available) { box.textContent = j.detail || 'journalctl unavailable'; return; }
-      box.innerHTML = (j.entries || []).map(escapeHtml).join('\n') || '[ no entries — service inactive? ]';
+      box.innerHTML = (j.entries || []).map(escapeHtml).join('\\n') || '[ no entries — service inactive? ]';
     }
     box.scrollTop = box.scrollHeight;
   } catch (e) { box.textContent = 'log fetch error: ' + e.message; }

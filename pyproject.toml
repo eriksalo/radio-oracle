@@ -46,6 +46,8 @@ diag = [
     "uvicorn>=0.30",
     "psutil>=5.9",
     "python-multipart>=0.0.20",
+    "smbus2>=0.5",
+    "Jetson.GPIO>=2.1.12",
 ]
 all = [
     "radio-oracle[voice,rag,tts,stt,music,diag]",
