@@ -1,7 +1,8 @@
 """Status RGB LED for the Oracle enclosure.
 
-Single common-cathode RGB LED driven by 3 GPIO pins (R/G/B).
-Each pin HIGH = that channel lit. Color encodes the current mode.
+Single common-anode RGB LED driven by 3 GPIO pins (R/G/B).
+Anode tied to 3.3 V; each pin pulls its cathode LOW to light that channel
+(LOW = lit, HIGH = off). Color encodes the current mode.
 
 Falls back to log-only output if Jetson.GPIO is unavailable (dev machines).
 """
@@ -26,7 +27,8 @@ class Color:
     b: bool
 
 
-# Common-cathode mapping. Channel HIGH = lit.
+# Mode → channel intent (True = that channel lit). Polarity to GPIO pins
+# is handled in ``_write`` for a common-anode LED.
 MODE_COLORS: dict[str, Color] = {
     "off":       Color(False, False, False),
     "radio":     Color(False, True,  False),  # green
@@ -40,7 +42,7 @@ _BLINK_PERIOD_S = 0.6
 
 
 class StatusLEDs:
-    """Drive a single common-cathode RGB LED, encoding mode as color."""
+    """Drive a single common-anode RGB LED, encoding mode as color."""
 
     def __init__(self) -> None:
         self._pins: dict[str, int] = {
@@ -61,8 +63,9 @@ class StatusLEDs:
 
             self._gpio = GPIO
             GPIO.setmode(GPIO.BCM)
+            # Common-anode: park each cathode HIGH so the LED is dark at boot.
             for pin in self._pins.values():
-                GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+                GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
             logger.info(
                 f"RGB LED on R={self._pins['r']} G={self._pins['g']} B={self._pins['b']}"
             )
@@ -73,9 +76,11 @@ class StatusLEDs:
     def _write(self, color: Color) -> None:
         if self._gpio is None:
             return
-        self._gpio.output(self._pins["r"], self._gpio.HIGH if color.r else self._gpio.LOW)
-        self._gpio.output(self._pins["g"], self._gpio.HIGH if color.g else self._gpio.LOW)
-        self._gpio.output(self._pins["b"], self._gpio.HIGH if color.b else self._gpio.LOW)
+        # Common-anode: lit = pin LOW, off = pin HIGH.
+        on, off = self._gpio.LOW, self._gpio.HIGH
+        self._gpio.output(self._pins["r"], on if color.r else off)
+        self._gpio.output(self._pins["g"], on if color.g else off)
+        self._gpio.output(self._pins["b"], on if color.b else off)
 
     def _stop_blink(self) -> None:
         if self._blink_stop is not None:

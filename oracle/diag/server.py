@@ -1510,7 +1510,7 @@ async function pollHwInputs() {
 }
 function updateLedSwatch() {
   const r = $('hwLedR').checked, g = $('hwLedG').checked, b = $('hwLedB').checked;
-  // Common-cathode digital: each channel is on/off only.
+  // Common-anode digital: each channel is on/off only (polarity handled server-side).
   const css = `rgb(${r?255:0}, ${g?255:0}, ${b?255:0})`;
   $('hwLedSwatch').style.background = css;
 }
