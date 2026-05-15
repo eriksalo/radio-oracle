@@ -62,15 +62,21 @@ class OracleSettings(BaseSettings):
     voice_play_greeting: bool = True
 
     # Hardware
-    action_button_pin: int = 18  # momentary push-button (short = action, long = mode toggle)
+    # NOTE: action_button_pin / power_switch_pin are retained for documentation
+    # only — the switches are read via the ADS1115 (channels below), not GPIO,
+    # because the Tegra234 GPIO INPUT register has a loopback bug on JP 6.2.x
+    # for these pads. See memory/hdr40-pinmux-overlay.md.
+    action_button_pin: int = 18  # (legacy wiring on BCM 18; now unused for reads)
     led_red_pin: int = 23
     led_green_pin: int = 24
     led_blue_pin: int = 25
-    power_switch_pin: int = 17  # SPST toggle: closed (LOW w/ pull-up) = device on
+    power_switch_pin: int = 17   # (legacy wiring on BCM 17; now unused for reads)
     long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
-    pot_i2c_bus: int = 7            # /dev/i2c-N for the ADS1115 (header pins 3/5)
-    pot_ads1115_addr: int = 0x48    # default ADDR-floating address
-    pot_ads1115_channel: int = 0    # AIN0 (single-ended)
+    pot_i2c_bus: int = 7                  # /dev/i2c-N for the ADS1115 (header pins 3/5)
+    pot_ads1115_addr: int = 0x48          # default ADDR-floating address
+    pot_ads1115_channel: int = 0          # AIN0 (single-ended)
+    action_button_ads1115_channel: int = 2  # AIN2, momentary push-button → GND, 10k pull-up to 3V3
+    power_switch_ads1115_channel: int = 1   # AIN1, SPST toggle → GND, 10k pull-up to 3V3
 
 
 settings = OracleSettings()

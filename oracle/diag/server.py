@@ -459,51 +459,53 @@ async def health() -> dict:
 
 
 class _HardwareInputs:
-    """Direct GPIO reads of the action button and power switch.
+    """Read the action button and power switch via the ADS1115.
 
-    Sidesteps oracle.hardware.button / power_switch (which run their own
-    polling threads) so the diag UI can poll without spinning extra workers
-    and without consuming the production button event queue.
+    The switches are wired to ADC inputs (10 kΩ pull-up to 3V3, switch shorts
+    to GND) rather than GPIO because the Tegra234 GPIO INPUT register exhibits
+    a loopback bug on JP 6.2.x for these pads. The ADC reading is thresholded
+    to a boolean.
     """
 
     def __init__(self) -> None:
-        self._gpio = None
-        self._error: str | None = None
-        try:
-            import Jetson.GPIO as GPIO  # type: ignore[import-not-found]
+        from oracle.hardware.switch_adc import (
+            make_action_button_switch,
+            make_power_switch_switch,
+        )
 
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(settings.action_button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            GPIO.setup(settings.power_switch_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            self._gpio = GPIO
-        except (ImportError, RuntimeError) as e:  # noqa: BLE001
-            self._error = repr(e)
-            logger.warning(f"diag hardware inputs unavailable: {e}")
+        self._button = make_action_button_switch()
+        self._power = make_power_switch_switch()
 
     def read(self) -> dict:
-        if self._gpio is None:
+        if not self._button.available:
             return {
                 "available": False,
-                "detail": self._error or "GPIO unavailable",
+                "detail": self._button.error or "ADS1115 unavailable",
                 "button": None,
                 "switch": None,
             }
-        # Active-low: PUD_UP means open contact reads HIGH, closed reads LOW.
-        btn_level = self._gpio.input(settings.action_button_pin)
-        sw_level = self._gpio.input(settings.power_switch_pin)
-        return {
-            "available": True,
-            "button": {
-                "pin": settings.action_button_pin,
-                "level": "HIGH" if btn_level else "LOW",
-                "pressed": btn_level == self._gpio.LOW,
-            },
-            "switch": {
-                "pin": settings.power_switch_pin,
-                "level": "HIGH" if sw_level else "LOW",
-                "on": sw_level == self._gpio.LOW,
-            },
-        }
+        btn = self._button.read()
+        sw = self._power.read()
+        out: dict = {"available": True}
+        if btn is None:
+            out["button"] = None
+        else:
+            out["button"] = {
+                "channel": btn.channel,
+                "voltage": btn.voltage,
+                "level": "LOW" if btn.closed else "HIGH",
+                "pressed": btn.closed,
+            }
+        if sw is None:
+            out["switch"] = None
+        else:
+            out["switch"] = {
+                "channel": sw.channel,
+                "voltage": sw.voltage,
+                "level": "LOW" if sw.closed else "HIGH",
+                "on": sw.closed,
+            }
+        return out
 
 
 def _get_inputs() -> _HardwareInputs:
@@ -1126,12 +1128,14 @@ _PAGE = """<!doctype html>
       <h2>[ ! ] HARDWARE I/O DIAGNOSTIC</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
         <div>
-          <div class="meter-label"><span>MOMENTARY (BCM <span id="hwBtnPin">18</span>)</span><span id="hwBtnLevel">—</span></div>
+          <div class="meter-label"><span>MOMENTARY (AIN<span id="hwBtnPin">—</span>)</span><span id="hwBtnLevel">—</span></div>
           <div class="stat-row"><span>state</span><span id="hwBtnState">—</span></div>
+          <div class="stat-row"><span>voltage</span><span id="hwBtnVolt">—</span></div>
         </div>
         <div>
-          <div class="meter-label"><span>POWER SWITCH (BCM <span id="hwSwPin">17</span>)</span><span id="hwSwLevel">—</span></div>
+          <div class="meter-label"><span>POWER SWITCH (AIN<span id="hwSwPin">—</span>)</span><span id="hwSwLevel">—</span></div>
           <div class="stat-row"><span>state</span><span id="hwSwState">—</span></div>
+          <div class="stat-row"><span>voltage</span><span id="hwSwVolt">—</span></div>
         </div>
         <div>
           <div class="meter-label"><span>POTENTIOMETER</span><span id="hwPotPct">—</span></div>
@@ -1479,14 +1483,16 @@ async function pollHwInputs() {
   try {
     const r = await fetch('/api/hardware/inputs'); const j = await r.json();
     if (j.button) {
-      $('hwBtnPin').textContent = j.button.pin;
+      $('hwBtnPin').textContent = j.button.channel;
       $('hwBtnLevel').textContent = j.button.level;
       $('hwBtnState').textContent = j.button.pressed ? 'PRESSED' : 'released';
+      $('hwBtnVolt').textContent = j.button.voltage.toFixed(3) + ' V';
     }
     if (j.switch) {
-      $('hwSwPin').textContent = j.switch.pin;
+      $('hwSwPin').textContent = j.switch.channel;
       $('hwSwLevel').textContent = j.switch.level;
       $('hwSwState').textContent = j.switch.on ? 'ON' : 'OFF';
+      $('hwSwVolt').textContent = j.switch.voltage.toFixed(3) + ' V';
     }
     if (j.pot && j.pot.available) {
       $('hwPotPct').textContent = j.pot.pct.toFixed(1) + '%';

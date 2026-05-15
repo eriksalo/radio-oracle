@@ -4,7 +4,10 @@ Press < long_press_threshold = "short" (next track / action)
 Press >= long_press_threshold = "long"  (toggle Radio ↔ Librarian mode)
 
 Events are pushed to a thread-safe queue. Falls back to keyboard input
-when GPIO is unavailable so the state machine still exercises in dev.
+when the ADC is unavailable so the state machine still exercises in dev.
+
+Read via ADS1115 (single channel) rather than GPIO — the Tegra234 GPIO INPUT
+register has a loopback bug on JP 6.2.x for the pads we'd otherwise use.
 """
 
 from __future__ import annotations
@@ -18,10 +21,11 @@ from typing import Literal
 from loguru import logger
 
 from config.settings import settings
+from oracle.hardware.switch_adc import make_action_button_switch
 
 PressKind = Literal["short", "long"]
 _DEBOUNCE_S = 0.03
-_POLL_S = 0.01
+_POLL_S = 0.02      # ADS1115 read is ~10 ms; 50 Hz is plenty for human press timing
 
 
 @dataclass(frozen=True)
@@ -31,46 +35,39 @@ class ButtonEvent:
 
 
 class ActionButton:
-    """Polled momentary button that emits short/long press events."""
+    """Polled momentary button that emits short/long press events.
 
-    def __init__(
-        self,
-        pin: int | None = None,
-        long_press_threshold: float | None = None,
-    ) -> None:
-        self._pin = pin if pin is not None else settings.action_button_pin
+    Reads the switch state from one ADS1115 channel; ``closed`` (line shorted
+    to GND) means pressed.
+    """
+
+    def __init__(self, long_press_threshold: float | None = None) -> None:
         self._long_threshold = (
             long_press_threshold
             if long_press_threshold is not None
             else settings.long_press_threshold
         )
-        self._gpio = None
+        self._switch = make_action_button_switch()
         self.events: Queue[ButtonEvent] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._setup()
-
-    def _setup(self) -> None:
-        try:
-            import Jetson.GPIO as GPIO  # type: ignore[import-not-found]
-
-            self._gpio = GPIO
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self._pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        if self._switch.available:
             logger.info(
-                f"Action button on GPIO {self._pin} "
+                f"Action button on ADS1115 AIN{self._switch.channel} "
                 f"(long-press ≥ {self._long_threshold:.2f}s)"
             )
-        except (ImportError, RuntimeError) as e:
-            logger.warning(f"GPIO unavailable ({e}), button will use keyboard fallback")
-            self._gpio = None
+        else:
+            logger.warning(
+                f"ADS1115 unavailable ({self._switch.error}); "
+                "button will use keyboard fallback"
+            )
 
     def start(self) -> None:
         """Begin monitoring in a background thread."""
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop.clear()
-        target = self._gpio_loop if self._gpio is not None else self._keyboard_loop
+        target = self._adc_loop if self._switch.available else self._keyboard_loop
         self._thread = threading.Thread(target=target, name="button-monitor", daemon=True)
         self._thread.start()
 
@@ -83,15 +80,20 @@ class ActionButton:
     def classify(self, duration: float) -> PressKind:
         return "long" if duration >= self._long_threshold else "short"
 
-    def _gpio_loop(self) -> None:
-        prev = self._gpio.input(self._pin)
+    def _adc_loop(self) -> None:
+        prev = self._switch.is_closed() or False  # treat unknown as released
         press_start: float | None = None
         while not self._stop.is_set():
-            level = self._gpio.input(self._pin)
-            if prev == self._gpio.HIGH and level == self._gpio.LOW:
+            level = self._switch.is_closed()
+            if level is None:
+                self._stop.wait(_POLL_S)
+                continue
+            if not prev and level:
+                # released → pressed
                 press_start = time.monotonic()
                 self._stop.wait(_DEBOUNCE_S)
-            elif prev == self._gpio.LOW and level == self._gpio.HIGH and press_start is not None:
+            elif prev and not level and press_start is not None:
+                # pressed → released
                 duration = time.monotonic() - press_start
                 press_start = None
                 if duration >= _DEBOUNCE_S:
@@ -119,5 +121,3 @@ class ActionButton:
 
     def cleanup(self) -> None:
         self.stop()
-        if self._gpio is not None:
-            self._gpio.cleanup(self._pin)
