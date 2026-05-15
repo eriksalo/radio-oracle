@@ -11,7 +11,7 @@
     Radio Oracle — Jetson Orin Nano Wiring
   </text>
   <text x="750" y="68" text-anchor="middle" font-size="14" fill="#555">
-    RGB LED · Momentary Action Button · Power Toggle Switch · Volume Potentiometer (via ADS1115 I²C ADC)
+    Common-anode RGB LED · Momentary Action Button · Power Toggle · Volume Pot — buttons + pot read via ADS1115
   </text>
   <text x="750" y="88" text-anchor="middle" font-size="12" fill="#777" font-style="italic">
     Pin numbers are BCM (matches config/settings.py); header position numbers shown in parentheses
@@ -98,71 +98,113 @@
        between two pin-label rows so labels stay legible.
 
        Color key:
-         #d83232  3.3 V power
+         #d83232  3.3 V power (also feeds LED1 common anode and the two pull-ups)
          #1a1a1a  GND
          #9b59b6  I²C SDA  (BCM 2)
          #8b572a  I²C SCL  (BCM 3)
-         #1abc9c  Power toggle (BCM 17)
-         #e6c200  Action button (BCM 18)
-         #ff4f8b  RGB R    (BCM 23)
-         #2ecc71  RGB G    (BCM 24)
-         #3498db  RGB B    (BCM 25)
+         #1abc9c  Power toggle → U1.A1   (was BCM 17, now via ADS)
+         #e6c200  Action button → U1.A2  (was BCM 18, now via ADS)
+         #ff4f8b  RGB R cathode (BCM 23, drive LOW = lit on common-anode LED)
+         #2ecc71  RGB G cathode (BCM 24)
+         #3498db  RGB B cathode (BCM 25)
          #e67e22  Pot wiper → ADS A0
        ====================================================================== -->
   <g id="wires" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
 
-    <!-- ============ Left-column pins: route DOWN through the header
-         (the header rect is drawn on top of these vertical segments and
-         hides them) and exit east at a bus-y BELOW the header. ============ -->
+    <!-- ============ Power and I²C from the left header column ============ -->
 
-    <!-- 3.3 V (pin 1, y=218) → ADS1115 VDD (1130, 790) -->
+    <!-- 3.3 V (pin 1, y=218) → ADS1115 VDD (1130, 790).
+         This rail also picks up junctions for: LED1 common anode (x=1110),
+         R5 pull-up (x=1090), R4 pull-up (x=1080), pot CW (x=1130). -->
     <path d="M 368 218 V 720 H 1130 V 790" stroke="#d83232"/>
 
-    <!-- I²C SDA (pin 3, y=243) → ADS1115 SDA (1170, 790) -->
+    <!-- I²C SDA (pin 3) → ADS1115 SDA, I²C SCL (pin 5) → ADS1115 SCL -->
     <path d="M 368 243 V 730 H 1170 V 790" stroke="#9b59b6"/>
-
-    <!-- I²C SCL (pin 5, y=268) → ADS1115 SCL (1200, 790) -->
     <path d="M 368 268 V 740 H 1200 V 790" stroke="#8b572a"/>
 
-    <!-- Power toggle BCM 17 (pin 11, y=343) → toggle left terminal (790, 700) -->
-    <path d="M 368 343 V 750 H 800 V 700 H 790" stroke="#1abc9c"/>
+    <!-- ============ GND rail and its branches.
+         No longer feeds LED1 (common-anode now goes to +3V3 instead).
+         Switches are flipped so the GND side is the WEST terminal. ============ -->
 
-    <!-- ============ Right-column pins: drop a few px to a trunk-y in the
-         gap between two label rows, then go east. ============ -->
-
-    <!-- GND main rail. Source: pin 6 (y=268). Trunk at y=280. Bus runs
-         vertically at x=660 down to y=1010, branching east to each
-         component's GND pad. -->
+    <!-- GND main vertical rail at x=660, from pin 6 trunk down to y=1010 -->
     <path d="M 412 268 V 280 H 660 V 1010" stroke="#1a1a1a"/>
-    <!-- GND branch → RGB common cathode (970, 525) — y=525 is in the gap
-         between rows 12 and 13 so it doesn't share the y=480 trunk with
-         the RGB B signal wire. -->
-    <path d="M 660 525 H 970"       stroke="#1a1a1a"/>
-    <!-- GND branch → action button right terminal (1010, 530) -->
-    <path d="M 660 530 H 1010"      stroke="#1a1a1a"/>
-    <!-- GND branch → power toggle right terminal (1010, 700) -->
-    <path d="M 660 700 H 1010"      stroke="#1a1a1a"/>
-    <!-- GND bottom: bus → pot CCW (1020, 875) and ADS GND (1230, 790) -->
-    <path d="M 660 1010 H 1230 V 790"           stroke="#1a1a1a"/>
-    <path d="M 1020 875 V 1010"                 stroke="#1a1a1a"/>
+    <!-- GND → action button WEST terminal (790, 530) -->
+    <path d="M 660 530 H 790"   stroke="#1a1a1a"/>
+    <!-- GND → power toggle WEST terminal (790, 700) -->
+    <path d="M 660 700 H 790"   stroke="#1a1a1a"/>
+    <!-- GND bottom: rail → pot CCW (1020, 875) and ADS GND (1230, 790) -->
+    <path d="M 660 1010 H 1230 V 790" stroke="#1a1a1a"/>
+    <path d="M 1020 875 V 1010"       stroke="#1a1a1a"/>
 
-    <!-- Action button BCM 18 (pin 12, y=343) trunk-y=355 → button left terminal (790, 530) -->
-    <path d="M 412 343 V 355 H 760 V 530 H 790" stroke="#e6c200"/>
+    <!-- ============ Switch signal wires + pull-ups.
+         Each switch's EAST terminal carries the analog signal east, then
+         dives south past the toggle/pot to enter U1's A1 / A2 pin on the
+         LEFT edge of the ADS1115 box. A 10 kΩ pull-up resistor taps each
+         signal to the +3V3 rail at y=720. ============ -->
 
-    <!-- RGB R (BCM 23, pin 16, y=393) trunk-y=405 → top of R-resistor lead at (920, 350) -->
-    <path d="M 412 393 V 405 H 920 V 350"        stroke="#ff4f8b"/>
+    <!-- Action button signal (yellow): right terminal (1010, 530) → U1.A2 (1115, 845) -->
+    <path d="M 1010 530 H 1100 V 845 H 1115" stroke="#e6c200"/>
+    <!-- R5 pull-up: tap at (1100, 600) → west jog → R5 → south to +3V3 rail (1090, 720) -->
+    <path d="M 1100 600 H 1090" stroke="#e6c200"/>
+    <path d="M 1090 620 V 720"  stroke="#d83232"/>
 
-    <!-- RGB G (BCM 24, pin 18, y=418) trunk-y=430 → top of G-resistor lead at (940, 350) -->
-    <path d="M 412 418 V 430 H 940 V 350"        stroke="#2ecc71"/>
+    <!-- Power toggle signal (teal): right terminal (1010, 700) → U1.A1 (1115, 815) -->
+    <path d="M 1010 700 H 1070 V 815 H 1115" stroke="#1abc9c"/>
+    <!-- R4 pull-up: tap at (1070, 760) → west into R4 → north to +3V3 rail (1080, 720) -->
+    <path d="M 1080 720 V 740"  stroke="#d83232"/>
+    <path d="M 1080 760 H 1070" stroke="#1abc9c"/>
 
-    <!-- RGB B (BCM 25, pin 22, y=468) trunk-y=480 → top of B-resistor lead at (960, 350) -->
-    <path d="M 412 468 V 480 H 960 V 350"        stroke="#3498db"/>
+    <!-- Junctions where pull-ups + signals + rail meet -->
+    <circle cx="1100" cy="600" r="3.5" fill="#222"/>
+    <circle cx="1090" cy="720" r="3.5" fill="#d83232"/>
+    <circle cx="1070" cy="760" r="3.5" fill="#222"/>
+    <circle cx="1080" cy="720" r="3.5" fill="#d83232"/>
 
-    <!-- Pot ↔ ADS — pot is right next to ADS so wires are short -->
-    <!-- Pot wiper → ADS A0 (A0 is on the BOTTOM edge of ADS at y=870) -->
+    <!-- ============ RGB LED — common-anode now.
+         BCM 23/24/25 → R1/R2/R3 → each colour's CATHODE.
+         The common ANODE exits east from the bulb at (1020, 460) and
+         joins the +3V3 rail at (1110, 720). ============ -->
+
+    <!-- RGB cathode drives (BCM 23/24/25) → top of each resistor lead at y=350 -->
+    <path d="M 412 393 V 405 H 920 V 350" stroke="#ff4f8b"/>
+    <path d="M 412 418 V 430 H 940 V 350" stroke="#2ecc71"/>
+    <path d="M 412 468 V 480 H 960 V 350" stroke="#3498db"/>
+
+    <!-- LED1 common anode (lead exits east at (1020, 460)) → +3V3 rail at (1110, 720) -->
+    <path d="M 1020 460 H 1110 V 720" stroke="#d83232"/>
+    <circle cx="1110" cy="720" r="3.5" fill="#d83232"/>
+
+    <!-- ============ Potentiometer ============ -->
+    <!-- Pot wiper → ADS A0 (on the BOTTOM edge of ADS at y=870) -->
     <path d="M 990 875 H 1230 V 870" stroke="#e67e22"/>
     <!-- Pot CW (left terminal, +3V3) joins the 3V3 rail -->
     <path d="M 960 875 V 935 H 1130 V 790" stroke="#d83232"/>
+  </g>
+
+  <!-- ======================================================================
+       Pull-up resistors R4, R5 — drawn AFTER the wires so the resistor
+       body sits on top of the wire tap. Each is a small 4-band resistor
+       in classic ¼ W tan with a brown-black-orange-(brown) color code.
+       ====================================================================== -->
+  <g id="pull-ups" font-size="9" fill="#444">
+    <!-- R5 = 10 kΩ pull-up for the action button (yellow signal → +3V3) -->
+    <g transform="translate(1090, 600)">
+      <rect x="-4" y="0" width="8" height="20" rx="1" fill="#dcb67a" stroke="#222"/>
+      <rect x="-4" y="3"  width="8" height="2" fill="#5a3a05"/>
+      <rect x="-4" y="7"  width="8" height="2" fill="#000"/>
+      <rect x="-4" y="11" width="8" height="2" fill="orange"/>
+      <rect x="-4" y="15" width="8" height="2" fill="#5a3a05"/>
+      <text x="10" y="14" class="halo">R5 · 10 kΩ</text>
+    </g>
+    <!-- R4 = 10 kΩ pull-up for the power toggle (teal signal → +3V3) -->
+    <g transform="translate(1080, 740)">
+      <rect x="-4" y="0" width="8" height="20" rx="1" fill="#dcb67a" stroke="#222"/>
+      <rect x="-4" y="3"  width="8" height="2" fill="#5a3a05"/>
+      <rect x="-4" y="7"  width="8" height="2" fill="#000"/>
+      <rect x="-4" y="11" width="8" height="2" fill="orange"/>
+      <rect x="-4" y="15" width="8" height="2" fill="#5a3a05"/>
+      <text x="10" y="14" class="halo">R4 · 10 kΩ</text>
+    </g>
   </g>
 
   <!-- ======================================================================
@@ -214,14 +256,14 @@
     <circle cx="0"   cy="86" r="11" fill="#2ecc71" opacity="0.85"/>
     <circle cx="22"  cy="78" r="11" fill="#3498db" opacity="0.85"/>
     <ellipse cx="-15" cy="64" rx="14" ry="8" fill="#fff" opacity="0.45"/>
-    <!-- common cathode lead drops out the bottom of the bulb to meet the
-         GND branch arriving horizontally at y_abs=525. -->
-    <line x1="30" y1="125" x2="30" y2="145" stroke="#bbb" stroke-width="3"/>
-    <text x="40" y="142" font-size="10" fill="#222" class="halo">cathode → GND</text>
+    <!-- common anode lead exits the bulb to the east (relative (55,80) →
+         (80,80)); joins the +3V3 rail via the red wire over to (1110,720). -->
+    <line x1="55" y1="80" x2="80" y2="80" stroke="#bbb" stroke-width="3"/>
+    <text x="60" y="72" font-size="10" fill="#222" class="halo">anode → +3V3</text>
 
     <text x="0" y="160" text-anchor="middle" font-size="14" font-weight="bold" fill="#222">RGB LED</text>
-    <text x="0" y="177" text-anchor="middle" font-size="10" fill="#666">8 mm common-cathode (4 leads)</text>
-    <text x="0" y="192" text-anchor="middle" font-size="10" fill="#666" font-style="italic">color encodes mode</text>
+    <text x="0" y="177" text-anchor="middle" font-size="10" fill="#666">8 mm common-anode (4 leads)</text>
+    <text x="0" y="192" text-anchor="middle" font-size="10" fill="#666" font-style="italic">color encodes mode · firmware drives active-LOW</text>
   </g>
 
   <!-- ============ Action button (momentary) ============ -->
@@ -233,9 +275,9 @@
     <text x="0" y="74" text-anchor="middle" font-size="10" fill="#666">short press: next track / action</text>
     <text x="0" y="89" text-anchor="middle" font-size="10" fill="#666">long press (≥ 1 s): toggle Librarian mode</text>
     <line x1="-90" y1="0" x2="-110" y2="0" stroke="#bbb" stroke-width="3"/>
-    <text x="-115" y="-12" text-anchor="end" font-size="10" fill="#222" class="halo">to BCM 18</text>
+    <text x="-115" y="-12" text-anchor="end" font-size="10" fill="#222" class="halo">to GND</text>
     <line x1="90"  y1="0" x2="110"  y2="0" stroke="#bbb" stroke-width="3"/>
-    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to GND</text>
+    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to U1.A2 (+ R5 to 3V3)</text>
   </g>
 
   <!-- ============ Power toggle switch (SPST) ============ -->
@@ -248,9 +290,9 @@
     <text x="0" y="50" text-anchor="middle" font-size="13" font-weight="bold" fill="#222">Power Toggle Switch</text>
     <text x="0" y="64" text-anchor="middle" font-size="10" fill="#666">closed = device on (radio active) · open = standby</text>
     <line x1="-90" y1="0" x2="-110" y2="0" stroke="#bbb" stroke-width="3"/>
-    <text x="-115" y="-12" text-anchor="end" font-size="10" fill="#222" class="halo">to BCM 17</text>
+    <text x="-115" y="-12" text-anchor="end" font-size="10" fill="#222" class="halo">to GND</text>
     <line x1="90"  y1="0" x2="110"  y2="0" stroke="#bbb" stroke-width="3"/>
-    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to GND</text>
+    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to U1.A1 (+ R4 to 3V3)</text>
   </g>
 
   <!-- ============ Volume potentiometer ============ -->
@@ -273,12 +315,16 @@
     <rect x="-65" y="-40" width="130" height="80" rx="4" fill="#1f3a5a" stroke="#000" stroke-width="2"/>
     <text x="0" y="-15" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">ADS1115</text>
     <text x="0" y="2"   text-anchor="middle" font-size="10" fill="#cdd">16-bit I²C ADC</text>
-    <text x="0" y="18"  text-anchor="middle" font-size="9"  fill="#9bf">A0 ← pot wiper</text>
+    <text x="0" y="16"  text-anchor="middle" font-size="8"  fill="#9bf">A0 ← pot · A1 ← power · A2 ← button</text>
     <g font-size="8" fill="#fff">
       <circle cx="-50" cy="-40" r="3" fill="#d83232"/><text x="-50" y="-46" text-anchor="middle">VDD</text>
       <circle cx="-10" cy="-40" r="3" fill="#9b59b6"/><text x="-10" y="-46" text-anchor="middle">SDA</text>
       <circle cx="20"  cy="-40" r="3" fill="#8b572a"/><text x="20"  y="-46" text-anchor="middle">SCL</text>
       <circle cx="50"  cy="-40" r="3" fill="#1a1a1a"/><text x="50"  y="-46" text-anchor="middle">GND</text>
+      <!-- Analog inputs on the LEFT edge: A1 = toggle (teal), A2 = button (yellow) -->
+      <circle cx="-65" cy="-15" r="3" fill="#1abc9c"/><text x="-58" y="-12">A1</text>
+      <circle cx="-65" cy="15"  r="3" fill="#e6c200"/><text x="-58" y="18">A2</text>
+      <!-- A0 = pot wiper (still on the bottom edge) -->
       <circle cx="50"  cy="40"  r="3" fill="#e67e22"/><text x="50"  y="55"  text-anchor="middle">A0</text>
     </g>
   </g>
@@ -327,12 +373,13 @@
       <text x="-12" y="4" text-anchor="end" class="pin-label-faint halo">GND (9)</text>
       <text x="74"  y="4" class="pin-label-faint halo">(10) RX</text>
     </g>
-    <!-- Row 5  pin 11=BCM 17 toggle*, 12=BCM 18 button* -->
+    <!-- Row 5  pin 11=BCM 17 (now unused), 12=BCM 18 (now unused).
+         Switches read through U1.A1 / U1.A2 instead of GPIO. -->
     <g transform="translate(0,133)">
-      <circle cx="8"  cy="0" r="6" fill="url(#goldPin)" stroke="#1abc9c"/>
-      <circle cx="52" cy="0" r="6" fill="url(#goldPin)" stroke="#dd3"/>
-      <text x="-12" y="4" text-anchor="end" class="pin-label-used halo" fill="#7fe5d2">BCM 17 Toggle (11)</text>
-      <text x="74"  y="4" class="pin-label-used halo" fill="#ff6">(12) BCM 18 Button</text>
+      <circle cx="8"  cy="0" r="5" fill="#666"/>
+      <circle cx="52" cy="0" r="5" fill="#666"/>
+      <text x="-12" y="4" text-anchor="end" class="pin-label-faint halo">BCM 17 (11) · unused</text>
+      <text x="74"  y="4" class="pin-label-faint halo">(12) BCM 18 · unused</text>
     </g>
     <!-- Row 6  pin 14=GND -->
     <g transform="translate(0,158)">
@@ -392,13 +439,13 @@
     <text x="14" y="22" font-size="13" font-weight="bold" fill="#222">Wire colors</text>
     <g font-size="11" fill="#222">
       <line x1="14" y1="42"  x2="44" y2="42"  stroke="#d83232" stroke-width="4"/>
-      <text x="50" y="46">3.3 V power</text>
+      <text x="50" y="46">3.3 V power (also feeds LED1 + pull-ups)</text>
       <line x1="14" y1="62"  x2="44" y2="62"  stroke="#1a1a1a" stroke-width="4"/>
       <text x="50" y="66">GND</text>
       <line x1="14" y1="82"  x2="44" y2="82"  stroke="#e6c200" stroke-width="4"/>
-      <text x="50" y="86">Action button (BCM 18)</text>
+      <text x="50" y="86">Action button → U1.A2 (via R5 pull-up)</text>
       <line x1="14" y1="102" x2="44" y2="102" stroke="#1abc9c" stroke-width="4"/>
-      <text x="50" y="106">Power toggle (BCM 17)</text>
+      <text x="50" y="106">Power toggle → U1.A1 (via R4 pull-up)</text>
       <line x1="14" y1="122" x2="44" y2="122" stroke="#e67e22" stroke-width="4"/>
       <text x="50" y="126">Pot wiper → ADS A0</text>
 
@@ -434,11 +481,11 @@
     <rect x="0" y="0" width="600" height="145" rx="8" fill="#fff8e6" stroke="#aa8" stroke-width="1"/>
     <text x="14" y="22" font-size="13" font-weight="bold" fill="#222">Bill of materials &amp; notes</text>
     <g font-size="11" fill="#222">
-      <text x="14" y="42">• 1 × 8 mm common-cathode RGB LED (4-lead) + 3 × 330 Ω resistor (¼ W)</text>
+      <text x="14" y="42">• 1 × 8 mm common-anode RGB LED (4-lead) + 3 × 330 Ω resistor (¼ W)</text>
       <text x="14" y="58">• 1 × momentary push-button — short = next, long ≥ 1 s = Librarian mode</text>
       <text x="14" y="74">• 1 × SPST toggle switch — closed wakes the device; open puts it in standby</text>
-      <text x="14" y="90">• 1 × 10 kΩ linear potentiometer + 1 × ADS1115 I²C ADC breakout</text>
-      <text x="14" y="108" fill="#a52" font-style="italic">Common-anode RGB LED also works — invert the GPIO drive (active-LOW), tie common to 3.3 V.</text>
+      <text x="14" y="90">• 1 × 10 kΩ linear potentiometer + 1 × ADS1115 I²C ADC + 2 × 10 kΩ pull-up (R4, R5)</text>
+      <text x="14" y="108" fill="#a52" font-style="italic">Switches read via U1.A1 / U1.A2 (not GPIO) — Tegra234 GPIO INPUT has a loopback bug on JP 6.2.x.</text>
       <text x="14" y="125" fill="#555" font-style="italic">USB DAC plugs into a Jetson USB-A port (no GPIO wiring) — see "DAC plugs in here" label.</text>
     </g>
   </g>

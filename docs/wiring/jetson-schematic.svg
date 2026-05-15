@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 880"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1020"
      font-family="'Helvetica Neue', Arial, sans-serif" font-size="13">
   <!-- ==================================================================
        Radio Oracle — proper EE schematic.
@@ -27,7 +27,7 @@
          no marker needed -->
   </defs>
 
-  <rect width="1240" height="880" fill="#fff"/>
+  <rect width="1240" height="1020" fill="#fff"/>
 
   <text x="620" y="32" text-anchor="middle" class="title">Radio Oracle — Jetson Orin Nano Schematic</text>
   <text x="620" y="52" text-anchor="middle" class="sub">
@@ -35,7 +35,7 @@
   </text>
 
   <!-- ====================================================================
-       J1 — Jetson 40-pin connector (only the 9 pins this design uses)
+       J1 — Jetson 40-pin connector (only the 7 pins this design uses)
        ==================================================================== -->
   <g id="J1" transform="translate(80,110)">
     <rect class="sym" x="0" y="0" width="160" height="490" rx="3"/>
@@ -63,15 +63,9 @@
     <text x="152" y="186" text-anchor="end" class="pin">6</text>
     <text x="146" y="200" text-anchor="end" class="small">GND</text>
 
-    <!-- Pin 11 (y=250) → BCM 17 (power toggle) -->
-    <line class="wire" x1="160" y1="250" x2="240" y2="250"/>
-    <text x="152" y="246" text-anchor="end" class="pin">11</text>
-    <text x="146" y="260" text-anchor="end" class="small">BCM 17</text>
-
-    <!-- Pin 12 (y=300) → BCM 18 (action button) -->
-    <line class="wire" x1="160" y1="300" x2="240" y2="300"/>
-    <text x="152" y="296" text-anchor="end" class="pin">12</text>
-    <text x="146" y="310" text-anchor="end" class="small">BCM 18</text>
+    <!-- Pins 11 (BCM 17) and 12 (BCM 18) are unused in this design:
+         the switches read through U1.A1 / U1.A2 instead. -->
+    <text x="80" y="275" text-anchor="middle" class="small" font-style="italic" fill="#888">pins 11/12 unused</text>
 
     <!-- Pin 16 (y=360) → BCM 23 (RGB R) -->
     <line class="wire" x1="160" y1="360" x2="240" y2="360"/>
@@ -147,19 +141,40 @@
     <text x="0" y="40" text-anchor="middle" class="net">GND</text>
   </g>
 
-  <!-- Pin 11 → SW2 (power toggle) -->
-  <g transform="translate(320,360)">
-    <!-- net label going right to SW2 -->
-    <line class="wire" x1="0" y1="0" x2="120" y2="0"/>
-    <!-- SPST switch drawn open: ─o /  o─ -->
-    <circle class="sym" cx="120" cy="0" r="3"/>
-    <line class="sym" x1="121" y1="-2" x2="148" y2="-15"/>
-    <circle class="sym" cx="150" cy="0" r="3"/>
-    <line class="wire" x1="153" y1="0" x2="220" y2="0"/>
-    <text x="135" y="-22" text-anchor="middle" class="ref">SW2</text>
-    <text x="135" y="22" text-anchor="middle" class="val">power toggle</text>
+  <!-- ====================================================================
+       SW2 — power toggle. Signal goes to net flag A1, with R4 = 10 kΩ
+       pulling that node up to +3V3. Other terminal goes to GND.
+       Layout: vertical pull-up above the switch, switch horizontal.
+       ==================================================================== -->
+  <g transform="translate(320,380)">
+    <text x="135" y="-100" text-anchor="middle" class="ref">SW2</text>
+    <text x="135" y="-86" text-anchor="middle" class="val">power toggle</text>
+
+    <!-- Pull-up: +3V3 flag at top, R4 resistor vertical, junction at switch t1 -->
+    <g transform="translate(135,-60)">
+      <polygon class="flag sym" points="-30,-12 30,-12 30,0 12,0 0,10 -12,0 -30,0"/>
+      <text x="0" y="-2" text-anchor="middle" class="net">+3V3</text>
+    </g>
+    <line class="wire" x1="135" y1="-50" x2="135" y2="-32"/>
+    <rect class="sym" x="128" y="-32" width="14" height="32"/>
+    <text x="156" y="-12" class="val">R4</text>
+    <text x="156" y="4" class="val">10 kΩ</text>
+    <line class="wire" x1="135" y1="0" x2="135" y2="14"/>
+    <circle class="junction" cx="135" cy="14" r="3"/>
+
+    <!-- Switch signal line: A1 flag on the left, switch on the right -->
+    <g transform="translate(-10,14)">
+      <polygon class="flag sym" points="0,-12 45,-12 55,0 45,12 0,12"/>
+      <text x="22" y="4" text-anchor="middle" class="net">A1</text>
+    </g>
+    <line class="wire" x1="55" y1="14" x2="120" y2="14"/>
+    <!-- SPST switch drawn open -->
+    <circle class="sym" cx="120" cy="14" r="3"/>
+    <line class="sym" x1="121" y1="12" x2="148" y2="-1"/>
+    <circle class="sym" cx="150" cy="14" r="3"/>
+    <line class="wire" x1="153" y1="14" x2="220" y2="14"/>
     <!-- to GND -->
-    <g transform="translate(220,0)">
+    <g transform="translate(220,14)">
       <line class="wire" x1="0" y1="0" x2="0" y2="14"/>
       <line class="wire" x1="-12" y1="14" x2="12" y2="14"/>
       <line class="wire" x1="-8" y1="20" x2="8" y2="20"/>
@@ -168,20 +183,38 @@
     </g>
   </g>
 
-  <!-- Pin 12 → SW1 (action button) -->
-  <g transform="translate(320,420)">
-    <line class="wire" x1="0" y1="0" x2="120" y2="0"/>
-    <!-- Momentary push-button: same as switch with vertical arrow above -->
-    <circle class="sym" cx="120" cy="0" r="3"/>
-    <line class="sym" x1="121" y1="-2" x2="148" y2="-15"/>
-    <circle class="sym" cx="150" cy="0" r="3"/>
-    <line class="wire" x1="153" y1="0" x2="220" y2="0"/>
-    <!-- push arrow above the bar -->
-    <line class="wire" x1="135" y1="-32" x2="135" y2="-22"/>
-    <polygon class="junction" points="135,-22 130,-30 140,-30"/>
-    <text x="135" y="-40" text-anchor="middle" class="ref">SW1</text>
-    <text x="135" y="22" text-anchor="middle" class="val">action button (momentary)</text>
-    <g transform="translate(220,0)">
+  <!-- ====================================================================
+       SW1 — action button (momentary). Signal goes to net flag A2 with
+       R5 = 10 kΩ pull-up to +3V3. Other terminal to GND.
+       ==================================================================== -->
+  <g transform="translate(320,510)">
+    <text x="135" y="-100" text-anchor="middle" class="ref">SW1</text>
+    <text x="135" y="-86" text-anchor="middle" class="val">action button</text>
+
+    <g transform="translate(135,-60)">
+      <polygon class="flag sym" points="-30,-12 30,-12 30,0 12,0 0,10 -12,0 -30,0"/>
+      <text x="0" y="-2" text-anchor="middle" class="net">+3V3</text>
+    </g>
+    <line class="wire" x1="135" y1="-50" x2="135" y2="-32"/>
+    <rect class="sym" x="128" y="-32" width="14" height="32"/>
+    <text x="156" y="-12" class="val">R5</text>
+    <text x="156" y="4" class="val">10 kΩ</text>
+    <line class="wire" x1="135" y1="0" x2="135" y2="14"/>
+    <circle class="junction" cx="135" cy="14" r="3"/>
+
+    <g transform="translate(-10,14)">
+      <polygon class="flag sym" points="0,-12 45,-12 55,0 45,12 0,12"/>
+      <text x="22" y="4" text-anchor="middle" class="net">A2</text>
+    </g>
+    <line class="wire" x1="55" y1="14" x2="120" y2="14"/>
+    <!-- Push-button with arrow over the contact bar -->
+    <circle class="sym" cx="120" cy="14" r="3"/>
+    <line class="sym" x1="121" y1="12" x2="148" y2="-1"/>
+    <circle class="sym" cx="150" cy="14" r="3"/>
+    <line class="wire" x1="153" y1="14" x2="220" y2="14"/>
+    <line class="wire" x1="135" y1="-18" x2="135" y2="-8"/>
+    <polygon class="junction" points="135,-8 130,-16 140,-16"/>
+    <g transform="translate(220,14)">
       <line class="wire" x1="0" y1="0" x2="0" y2="14"/>
       <line class="wire" x1="-12" y1="14" x2="12" y2="14"/>
       <line class="wire" x1="-8" y1="20" x2="8" y2="20"/>
@@ -192,42 +225,43 @@
 
   <!-- ====================================================================
        RGB LED block — pin 16/18/22 each go through a 330 Ω resistor into a
-       common-cathode RGB LED whose cathode goes to GND. Three separate
-       diode symbols sharing one cathode is the standard schematic for this.
+       common-anode RGB LED whose common anode goes to +3V3. Each colour's
+       cathode hangs off its BCM output pin via the series resistor; the
+       firmware drives the pin LOW to light that channel (active-low).
+       Diode symbols are drawn with the triangle pointing LEFT (toward the
+       BCM pin) so the anode is on the right, joining the common bus.
        ==================================================================== -->
 
-  <!-- Pin 16 BCM 23 → R1 → LED R -->
-  <g transform="translate(320,500)">
-    <!-- short stub from pin label end (J1 stub was 240,360 → 240,500 here);
-         continue the trace into the resistor -->
+  <!-- Pin 16 BCM 23 → R1 → LED R (cathode) -->
+  <g transform="translate(320,640)">
     <line class="wire" x1="0" y1="0" x2="20" y2="0"/>
     <!-- Resistor R1 (IEC rectangle) -->
     <rect class="sym" x="20" y="-7" width="46" height="14"/>
     <text x="43" y="-13" text-anchor="middle" class="ref">R1</text>
     <text x="43" y="22" text-anchor="middle" class="val">330 Ω</text>
     <line class="wire" x1="66" y1="0" x2="120" y2="0"/>
-    <!-- LED R: triangle (anode side) + bar (cathode side) -->
-    <polygon class="sym" points="120,-8 120,8 134,0"/>
-    <line class="sym" x1="134" y1="-8" x2="134" y2="8"/>
+    <!-- LED R: bar (cathode side, left) + triangle pointing left (anode side, right) -->
+    <line class="sym" x1="120" y1="-8" x2="120" y2="8"/>
+    <polygon class="sym" points="134,-8 134,8 120,0"/>
     <!-- Light arrows -->
     <line class="wire" x1="124" y1="-12" x2="130" y2="-18"/>
     <polygon class="junction" points="129,-13 130,-18 125,-15"/>
     <line class="wire" x1="130" y1="-12" x2="136" y2="-18"/>
     <polygon class="junction" points="135,-13 136,-18 131,-15"/>
     <text x="155" y="4" class="small">D1 (R)</text>
-    <!-- cathode wire goes east to common cathode bus -->
+    <!-- anode wire goes east to common anode bus -->
     <line class="wire" x1="134" y1="0" x2="220" y2="0"/>
   </g>
 
-  <!-- Pin 18 BCM 24 → R2 → LED G -->
-  <g transform="translate(320,560)">
+  <!-- Pin 18 BCM 24 → R2 → LED G (cathode) -->
+  <g transform="translate(320,700)">
     <line class="wire" x1="0" y1="0" x2="20" y2="0"/>
     <rect class="sym" x="20" y="-7" width="46" height="14"/>
     <text x="43" y="-13" text-anchor="middle" class="ref">R2</text>
     <text x="43" y="22" text-anchor="middle" class="val">330 Ω</text>
     <line class="wire" x1="66" y1="0" x2="120" y2="0"/>
-    <polygon class="sym" points="120,-8 120,8 134,0"/>
-    <line class="sym" x1="134" y1="-8" x2="134" y2="8"/>
+    <line class="sym" x1="120" y1="-8" x2="120" y2="8"/>
+    <polygon class="sym" points="134,-8 134,8 120,0"/>
     <line class="wire" x1="124" y1="-12" x2="130" y2="-18"/>
     <polygon class="junction" points="129,-13 130,-18 125,-15"/>
     <line class="wire" x1="130" y1="-12" x2="136" y2="-18"/>
@@ -236,15 +270,15 @@
     <line class="wire" x1="134" y1="0" x2="220" y2="0"/>
   </g>
 
-  <!-- Pin 22 BCM 25 → R3 → LED B -->
-  <g transform="translate(320,620)">
+  <!-- Pin 22 BCM 25 → R3 → LED B (cathode) -->
+  <g transform="translate(320,760)">
     <line class="wire" x1="0" y1="0" x2="20" y2="0"/>
     <rect class="sym" x="20" y="-7" width="46" height="14"/>
     <text x="43" y="-13" text-anchor="middle" class="ref">R3</text>
     <text x="43" y="22" text-anchor="middle" class="val">330 Ω</text>
     <line class="wire" x1="66" y1="0" x2="120" y2="0"/>
-    <polygon class="sym" points="120,-8 120,8 134,0"/>
-    <line class="sym" x1="134" y1="-8" x2="134" y2="8"/>
+    <line class="sym" x1="120" y1="-8" x2="120" y2="8"/>
+    <polygon class="sym" points="134,-8 134,8 120,0"/>
     <line class="wire" x1="124" y1="-12" x2="130" y2="-18"/>
     <polygon class="junction" points="129,-13 130,-18 125,-15"/>
     <line class="wire" x1="130" y1="-12" x2="136" y2="-18"/>
@@ -253,22 +287,21 @@
     <line class="wire" x1="134" y1="0" x2="220" y2="0"/>
   </g>
 
-  <!-- Common cathode bus on the right of LED1 -->
-  <line class="wire" x1="540" y1="500" x2="540" y2="620"/>
-  <circle class="junction" cx="540" cy="500" r="3"/>
-  <circle class="junction" cx="540" cy="560" r="3"/>
-  <circle class="junction" cx="540" cy="620" r="3"/>
-  <text x="546" y="510" class="small">LED1 cathode (common)</text>
-  <!-- cathode bus → GND -->
-  <line class="wire" x1="540" y1="620" x2="540" y2="660"/>
-  <g transform="translate(540,660)">
-    <line class="wire" x1="-12" y1="0" x2="12" y2="0"/>
-    <line class="wire" x1="-8" y1="6" x2="8" y2="6"/>
-    <line class="wire" x1="-4" y1="12" x2="4" y2="12"/>
-    <text x="0" y="26" text-anchor="middle" class="small">GND</text>
+  <!-- Common anode bus on the right of LED1.
+       Anode tap → +3V3 flag drawn HORIZONTALLY to the right (tip points
+       left into the bus), so it doesn't crowd the SW1 GND symbol above. -->
+  <line class="wire" x1="540" y1="640" x2="540" y2="760"/>
+  <circle class="junction" cx="540" cy="640" r="3"/>
+  <circle class="junction" cx="540" cy="700" r="3"/>
+  <circle class="junction" cx="540" cy="760" r="3"/>
+  <text x="450" y="634" text-anchor="end" class="ref">LED1</text>
+  <text x="450" y="650" text-anchor="end" class="val">RGB common-anode</text>
+  <!-- horizontal +3V3 flag east of the bus, tip touching bus at (540, 700) -->
+  <line class="wire" x1="540" y1="700" x2="565" y2="700"/>
+  <g transform="translate(565,700)">
+    <polygon class="flag sym" points="0,-12 45,-12 55,0 45,12 0,12"/>
+    <text x="22" y="4" text-anchor="middle" class="net">+3V3</text>
   </g>
-  <text x="450" y="494" text-anchor="end" class="ref">LED1</text>
-  <text x="450" y="510" text-anchor="end" class="val">RGB common-cathode</text>
 
   <!-- ====================================================================
        Potentiometer RV1 — three terminals, wiper to A0 net flag
@@ -366,17 +399,27 @@
       <text x="22" y="4" text-anchor="middle" class="net">A0</text>
     </g>
 
-    <!-- A1..A3 unused: stubs only, marked NC -->
+    <!-- A1 → SW2 (power toggle) via named net -->
     <text x="164" y="138" text-anchor="end" class="small">A1</text>
-    <line class="wire" x1="170" y1="135" x2="190" y2="135"/>
-    <line class="wire" x1="190" y1="130" x2="190" y2="140"/>
+    <line class="wire" x1="170" y1="135" x2="230" y2="135"/>
+    <g transform="translate(230,135)">
+      <polygon class="flag sym" points="0,-12 45,-12 55,0 45,12 0,12"/>
+      <text x="22" y="4" text-anchor="middle" class="net">A1</text>
+    </g>
+
+    <!-- A2 → SW1 (action button) via named net -->
     <text x="164" y="168" text-anchor="end" class="small">A2</text>
-    <line class="wire" x1="170" y1="165" x2="190" y2="165"/>
-    <line class="wire" x1="190" y1="160" x2="190" y2="170"/>
-    <text x="164" y="188" text-anchor="end" class="small">A3</text>
+    <line class="wire" x1="170" y1="165" x2="230" y2="165"/>
+    <g transform="translate(230,165)">
+      <polygon class="flag sym" points="0,-12 45,-12 55,0 45,12 0,12"/>
+      <text x="22" y="4" text-anchor="middle" class="net">A2</text>
+    </g>
+
+    <!-- A3 unused: stub only, marked NC -->
+    <text x="164" y="198" text-anchor="end" class="small">A3</text>
     <line class="wire" x1="170" y1="195" x2="190" y2="195"/>
     <line class="wire" x1="190" y1="190" x2="190" y2="200"/>
-    <text x="200" y="172" class="small">(unused — leave open)</text>
+    <text x="200" y="198" class="small">(A3 unused — leave open)</text>
 
     <!-- ADDR / ALERT pins note -->
     <text x="6" y="220" class="small">ADDR → GND (or floating) for I²C addr 0x48</text>
@@ -386,17 +429,18 @@
        Net summary box — bottom-left, lists every named flag
        ==================================================================== -->
 
-  <g transform="translate(80,720)">
-    <rect class="sym" x="0" y="0" width="540" height="140" rx="3"/>
+  <g transform="translate(80,860)">
+    <rect class="sym" x="0" y="0" width="560" height="160" rx="3"/>
     <text x="12" y="20" class="ref">Nets used in this schematic</text>
     <g class="small" transform="translate(12,38)">
-      <text x="0" y="0">+3V3 — Jetson J1.1 → RV1.CW → U1.VDD</text>
-      <text x="0" y="16">GND — J1.6 → SW1.t2 → SW2.t2 → RV1.CCW → LED1.cathode → U1.GND</text>
+      <text x="0" y="0">+3V3 — J1.1 → RV1.CW → U1.VDD → LED1 anode (common) → R4 → R5</text>
+      <text x="0" y="16">GND — J1.6 → SW1.t2 → SW2.t2 → RV1.CCW → U1.GND</text>
       <text x="0" y="32">SDA — J1.3 (BCM 2) → U1.SDA</text>
       <text x="0" y="48">SCL — J1.5 (BCM 3) → U1.SCL</text>
-      <text x="0" y="64">A0 — RV1.W (wiper) → U1.A0</text>
-      <text x="0" y="80">BCM 17 — J1.11 → SW2.t1   (input, internal pull-up; LOW = device on)</text>
-      <text x="0" y="96">BCM 18 — J1.12 → SW1.t1   (input, internal pull-up; LOW = pressed)</text>
+      <text x="0" y="64">A0 — RV1.W (wiper) → U1.A0    (analog, 0–3.3 V volume)</text>
+      <text x="0" y="80">A1 — SW2.t1 + R4 → U1.A1    (idle ≈ 3.3 V; closed → 0 V → device on)</text>
+      <text x="0" y="96">A2 — SW1.t1 + R5 → U1.A2    (idle ≈ 3.3 V; pressed → 0 V)</text>
+      <text x="0" y="112">BCM 23/24/25 — J1.16/18/22 → R1/R2/R3 → LED1 R/G/B cathodes (LOW = lit)</text>
     </g>
   </g>
 
@@ -404,8 +448,8 @@
        Symbol legend — bottom-right
        ==================================================================== -->
 
-  <g transform="translate(660,720)">
-    <rect class="sym" x="0" y="0" width="560" height="140" rx="3"/>
+  <g transform="translate(660,860)">
+    <rect class="sym" x="0" y="0" width="560" height="160" rx="3"/>
     <text x="12" y="20" class="ref">Symbol legend</text>
 
     <g transform="translate(20,55)">
