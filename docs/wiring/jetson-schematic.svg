@@ -142,7 +142,7 @@
   </g>
 
   <!-- ====================================================================
-       SW2 — power toggle. Signal goes to net flag A1, with R4 = 10 kΩ
+       SW2 — power toggle. Signal goes to net flag A2, with R4 = 10 kΩ
        pulling that node up to +3V3. Other terminal goes to GND.
        Layout: vertical pull-up above the switch, switch horizontal.
        ==================================================================== -->
@@ -162,10 +162,10 @@
     <line class="wire" x1="135" y1="0" x2="135" y2="14"/>
     <circle class="junction" cx="135" cy="14" r="3"/>
 
-    <!-- Switch signal line: A1 flag on the left, switch on the right -->
+    <!-- Switch signal line: A2 flag on the left, switch on the right -->
     <g transform="translate(-10,14)">
       <polygon class="flag sym" points="0,-12 45,-12 55,0 45,12 0,12"/>
-      <text x="22" y="4" text-anchor="middle" class="net">A1</text>
+      <text x="22" y="4" text-anchor="middle" class="net">A2</text>
     </g>
     <line class="wire" x1="55" y1="14" x2="120" y2="14"/>
     <!-- SPST switch drawn open -->
@@ -184,7 +184,7 @@
   </g>
 
   <!-- ====================================================================
-       SW1 — action button (momentary). Signal goes to net flag A2 with
+       SW1 — action button (momentary). Signal goes to net flag A1 with
        R5 = 10 kΩ pull-up to +3V3. Other terminal to GND.
        ==================================================================== -->
   <g transform="translate(320,510)">
@@ -204,7 +204,7 @@
 
     <g transform="translate(-10,14)">
       <polygon class="flag sym" points="0,-12 45,-12 55,0 45,12 0,12"/>
-      <text x="22" y="4" text-anchor="middle" class="net">A2</text>
+      <text x="22" y="4" text-anchor="middle" class="net">A1</text>
     </g>
     <line class="wire" x1="55" y1="14" x2="120" y2="14"/>
     <!-- Push-button with arrow over the contact bar -->
@@ -399,7 +399,7 @@
       <text x="22" y="4" text-anchor="middle" class="net">A0</text>
     </g>
 
-    <!-- A1 → SW2 (power toggle) via named net -->
+    <!-- A1 → SW1 (action button) via named net -->
     <text x="164" y="138" text-anchor="end" class="small">A1</text>
     <line class="wire" x1="170" y1="135" x2="230" y2="135"/>
     <g transform="translate(230,135)">
@@ -407,7 +407,7 @@
       <text x="22" y="4" text-anchor="middle" class="net">A1</text>
     </g>
 
-    <!-- A2 → SW1 (action button) via named net -->
+    <!-- A2 → SW2 (power toggle) via named net -->
     <text x="164" y="168" text-anchor="end" class="small">A2</text>
     <line class="wire" x1="170" y1="165" x2="230" y2="165"/>
     <g transform="translate(230,165)">
@@ -438,8 +438,8 @@
       <text x="0" y="32">SDA — J1.3 (BCM 2) → U1.SDA</text>
       <text x="0" y="48">SCL — J1.5 (BCM 3) → U1.SCL</text>
       <text x="0" y="64">A0 — RV1.W (wiper) → U1.A0    (analog, 0–3.3 V volume)</text>
-      <text x="0" y="80">A1 — SW2.t1 + R4 → U1.A1    (idle ≈ 3.3 V; closed → 0 V → device on)</text>
-      <text x="0" y="96">A2 — SW1.t1 + R5 → U1.A2    (idle ≈ 3.3 V; pressed → 0 V)</text>
+      <text x="0" y="80">A1 — SW1.t1 + R5 → U1.A1    (idle ≈ 3.3 V; pressed → 0 V)</text>
+      <text x="0" y="96">A2 — SW2.t1 + R4 → U1.A2    (idle ≈ 3.3 V; closed → 0 V → device on)</text>
       <text x="0" y="112">BCM 23/24/25 — J1.16/18/22 → R1/R2/R3 → LED1 R/G/B cathodes (LOW = lit)</text>
     </g>
   </g>

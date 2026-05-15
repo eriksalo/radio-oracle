@@ -102,8 +102,8 @@
          #1a1a1a  GND
          #9b59b6  I²C SDA  (BCM 2)
          #8b572a  I²C SCL  (BCM 3)
-         #1abc9c  Power toggle → U1.A1   (was BCM 17, now via ADS)
-         #e6c200  Action button → U1.A2  (was BCM 18, now via ADS)
+         #1abc9c  Power toggle → U1.A2   (was BCM 17, now via ADS)
+         #e6c200  Action button → U1.A1  (was BCM 18, now via ADS)
          #ff4f8b  RGB R cathode (BCM 23, drive LOW = lit on common-anode LED)
          #2ecc71  RGB G cathode (BCM 24)
          #3498db  RGB B cathode (BCM 25)
@@ -142,14 +142,14 @@
          LEFT edge of the ADS1115 box. A 10 kΩ pull-up resistor taps each
          signal to the +3V3 rail at y=720. ============ -->
 
-    <!-- Action button signal (yellow): right terminal (1010, 530) → U1.A2 (1115, 845) -->
-    <path d="M 1010 530 H 1100 V 845 H 1115" stroke="#e6c200"/>
+    <!-- Action button signal (yellow): right terminal (1010, 530) → U1.A1 (1115, 815) -->
+    <path d="M 1010 530 H 1100 V 815 H 1115" stroke="#e6c200"/>
     <!-- R5 pull-up: tap at (1100, 600) → west jog → R5 → south to +3V3 rail (1090, 720) -->
     <path d="M 1100 600 H 1090" stroke="#e6c200"/>
     <path d="M 1090 620 V 720"  stroke="#d83232"/>
 
-    <!-- Power toggle signal (teal): right terminal (1010, 700) → U1.A1 (1115, 815) -->
-    <path d="M 1010 700 H 1070 V 815 H 1115" stroke="#1abc9c"/>
+    <!-- Power toggle signal (teal): right terminal (1010, 700) → U1.A2 (1115, 845) -->
+    <path d="M 1010 700 H 1070 V 845 H 1115" stroke="#1abc9c"/>
     <!-- R4 pull-up: tap at (1070, 760) → west into R4 → north to +3V3 rail (1080, 720) -->
     <path d="M 1080 720 V 740"  stroke="#d83232"/>
     <path d="M 1080 760 H 1070" stroke="#1abc9c"/>
@@ -277,7 +277,7 @@
     <line x1="-90" y1="0" x2="-110" y2="0" stroke="#bbb" stroke-width="3"/>
     <text x="-115" y="-12" text-anchor="end" font-size="10" fill="#222" class="halo">to GND</text>
     <line x1="90"  y1="0" x2="110"  y2="0" stroke="#bbb" stroke-width="3"/>
-    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to U1.A2 (+ R5 to 3V3)</text>
+    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to U1.A1 (+ R5 to 3V3)</text>
   </g>
 
   <!-- ============ Power toggle switch (SPST) ============ -->
@@ -292,7 +292,7 @@
     <line x1="-90" y1="0" x2="-110" y2="0" stroke="#bbb" stroke-width="3"/>
     <text x="-115" y="-12" text-anchor="end" font-size="10" fill="#222" class="halo">to GND</text>
     <line x1="90"  y1="0" x2="110"  y2="0" stroke="#bbb" stroke-width="3"/>
-    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to U1.A1 (+ R4 to 3V3)</text>
+    <text x="115" y="-12" font-size="10" fill="#222" class="halo">to U1.A2 (+ R4 to 3V3)</text>
   </g>
 
   <!-- ============ Volume potentiometer ============ -->
@@ -315,15 +315,15 @@
     <rect x="-65" y="-40" width="130" height="80" rx="4" fill="#1f3a5a" stroke="#000" stroke-width="2"/>
     <text x="0" y="-15" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">ADS1115</text>
     <text x="0" y="2"   text-anchor="middle" font-size="10" fill="#cdd">16-bit I²C ADC</text>
-    <text x="0" y="16"  text-anchor="middle" font-size="8"  fill="#9bf">A0 ← pot · A1 ← power · A2 ← button</text>
+    <text x="0" y="16"  text-anchor="middle" font-size="8"  fill="#9bf">A0 ← pot · A1 ← button · A2 ← power</text>
     <g font-size="8" fill="#fff">
       <circle cx="-50" cy="-40" r="3" fill="#d83232"/><text x="-50" y="-46" text-anchor="middle">VDD</text>
       <circle cx="-10" cy="-40" r="3" fill="#9b59b6"/><text x="-10" y="-46" text-anchor="middle">SDA</text>
       <circle cx="20"  cy="-40" r="3" fill="#8b572a"/><text x="20"  y="-46" text-anchor="middle">SCL</text>
       <circle cx="50"  cy="-40" r="3" fill="#1a1a1a"/><text x="50"  y="-46" text-anchor="middle">GND</text>
-      <!-- Analog inputs on the LEFT edge: A1 = toggle (teal), A2 = button (yellow) -->
-      <circle cx="-65" cy="-15" r="3" fill="#1abc9c"/><text x="-58" y="-12">A1</text>
-      <circle cx="-65" cy="15"  r="3" fill="#e6c200"/><text x="-58" y="18">A2</text>
+      <!-- Analog inputs on the LEFT edge: A1 = button (yellow), A2 = toggle (teal) -->
+      <circle cx="-65" cy="-15" r="3" fill="#e6c200"/><text x="-58" y="-12">A1</text>
+      <circle cx="-65" cy="15"  r="3" fill="#1abc9c"/><text x="-58" y="18">A2</text>
       <!-- A0 = pot wiper (still on the bottom edge) -->
       <circle cx="50"  cy="40"  r="3" fill="#e67e22"/><text x="50"  y="55"  text-anchor="middle">A0</text>
     </g>
@@ -443,9 +443,9 @@
       <line x1="14" y1="62"  x2="44" y2="62"  stroke="#1a1a1a" stroke-width="4"/>
       <text x="50" y="66">GND</text>
       <line x1="14" y1="82"  x2="44" y2="82"  stroke="#e6c200" stroke-width="4"/>
-      <text x="50" y="86">Action button → U1.A2 (via R5 pull-up)</text>
+      <text x="50" y="86">Action button → U1.A1 (via R5 pull-up)</text>
       <line x1="14" y1="102" x2="44" y2="102" stroke="#1abc9c" stroke-width="4"/>
-      <text x="50" y="106">Power toggle → U1.A1 (via R4 pull-up)</text>
+      <text x="50" y="106">Power toggle → U1.A2 (via R4 pull-up)</text>
       <line x1="14" y1="122" x2="44" y2="122" stroke="#e67e22" stroke-width="4"/>
       <text x="50" y="126">Pot wiper → ADS A0</text>
 

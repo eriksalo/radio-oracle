@@ -33,8 +33,8 @@ match the schematic.
 | **R1**    | 1   | 330 Ω resistor, ¼ W                     | RGB R series resistor (LED1.R → BCM 23)    |
 | **R2**    | 1   | 330 Ω resistor, ¼ W                     | RGB G series resistor (LED1.G → BCM 24)    |
 | **R3**    | 1   | 330 Ω resistor, ¼ W                     | RGB B series resistor (LED1.B → BCM 25)    |
-| **R4**    | 1   | 10 kΩ resistor, ¼ W                     | Pull-up for SW2 (U1.A1 → +3V3)             |
-| **R5**    | 1   | 10 kΩ resistor, ¼ W                     | Pull-up for SW1 (U1.A2 → +3V3)             |
+| **R4**    | 1   | 10 kΩ resistor, ¼ W                     | Pull-up for SW2 (U1.A2 → +3V3)             |
+| **R5**    | 1   | 10 kΩ resistor, ¼ W                     | Pull-up for SW1 (U1.A1 → +3V3)             |
 | **SW1**   | 1   | Momentary push-button, NO               | 12 mm panel-mount fits a vintage radio     |
 | **SW2**   | 1   | SPST toggle / rocker switch             | panel-mount                                |
 | **RV1**   | 1   | 10 kΩ linear potentiometer              | 3-terminal: CW · W · CCW                   |
@@ -79,10 +79,10 @@ endpoints. Wire colors match `jetson-wiring.svg` for easy cross-reference.
 | ☐ |  7 | `GND`    | U1.GND             | SW2.t2               | —              | black      |
 | ☐ |  8 | `SDA`    | J1.3 (BCM 2)       | U1.SDA               | —              | purple     |
 | ☐ |  9 | `SCL`    | J1.5 (BCM 3)       | U1.SCL               | —              | brown      |
-| ☐ | 10 | `A1`     | SW2.t1             | U1.A1                | —              | teal       |
-| ☐ | 11 | `A1`     | SW2.t1 / U1.A1     | +3V3 rail            | **R4 = 10 kΩ** | teal       |
-| ☐ | 12 | `A2`     | SW1.t1             | U1.A2                | —              | yellow     |
-| ☐ | 13 | `A2`     | SW1.t1 / U1.A2     | +3V3 rail            | **R5 = 10 kΩ** | yellow     |
+| ☐ | 10 | `A2`     | SW2.t1             | U1.A2                | —              | teal       |
+| ☐ | 11 | `A2`     | SW2.t1 / U1.A2     | +3V3 rail            | **R4 = 10 kΩ** | teal       |
+| ☐ | 12 | `A1`     | SW1.t1             | U1.A1                | —              | yellow     |
+| ☐ | 13 | `A1`     | SW1.t1 / U1.A1     | +3V3 rail            | **R5 = 10 kΩ** | yellow     |
 | ☐ | 14 | `BCM23`  | J1.16 (BCM 23)     | LED1.R\_cathode      | **R1 = 330 Ω** | hot pink   |
 | ☐ | 15 | `BCM24`  | J1.18 (BCM 24)     | LED1.G\_cathode      | **R2 = 330 Ω** | green      |
 | ☐ | 16 | `BCM25`  | J1.22 (BCM 25)     | LED1.B\_cathode      | **R3 = 330 Ω** | blue       |
@@ -175,7 +175,7 @@ the code expects).
       orange-orange-black-black-brown). Anything 220 Ω–1 kΩ is safe.
 - [ ] R4, R5 are 10 kΩ (brown-black-orange, 5-band brown-black-black-red-
       brown). 4.7 kΩ–47 kΩ is fine; lower wastes more current.
-- [ ] SW1's signal goes to **U1.A2** and SW2's signal goes to **U1.A1**
+- [ ] SW1's signal goes to **U1.A1** and SW2's signal goes to **U1.A2**
       (NOT to BCM 17 / BCM 18 — those are unused). The pull-up resistor
       sits on the same node as the signal, tied to +3V3.
 - [ ] U1 ADDR pin is floating or tied to GND (I²C address `0x48`).
@@ -183,7 +183,8 @@ the code expects).
       can invert.
 - [ ] Continuity-check every row in the matrix above with a multimeter
       *before* applying power. With nothing pressed, A1 and A2 should both
-      sit at ≈ 3.3 V; pressing each switch drops its line to ≈ 0 V.
+      sit at ≈ 3.3 V; pressing the button drops A1, flipping the toggle
+      drops A2 to ≈ 0 V.
 
 ---
 
@@ -242,8 +243,8 @@ adc = shared_adc()
 pot = Potentiometer()
 import time
 for _ in range(20):
-    a1 = adc.read_voltage(1)   # SW2 (power toggle)
-    a2 = adc.read_voltage(2)   # SW1 (action button)
+    a1 = adc.read_voltage(1)   # SW1 (action button)
+    a2 = adc.read_voltage(2)   # SW2 (power toggle)
     p  = pot.read()
     print(f'A1={a1:.3f}V  A2={a2:.3f}V  pot={p.pct:5.1f}% ({p.voltage:.3f}V)')
     time.sleep(0.25)

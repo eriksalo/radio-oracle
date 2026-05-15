@@ -75,8 +75,8 @@ class OracleSettings(BaseSettings):
     pot_i2c_bus: int = 7                  # /dev/i2c-N for the ADS1115 (header pins 3/5)
     pot_ads1115_addr: int = 0x48          # default ADDR-floating address
     pot_ads1115_channel: int = 0          # AIN0 (single-ended)
-    action_button_ads1115_channel: int = 2  # AIN2, momentary push-button → GND, 10k pull-up to 3V3
-    power_switch_ads1115_channel: int = 1   # AIN1, SPST toggle → GND, 10k pull-up to 3V3
+    action_button_ads1115_channel: int = 1  # AIN1, momentary push-button → GND, 10k pull-up to 3V3
+    power_switch_ads1115_channel: int = 2   # AIN2, SPST toggle → GND, 10k pull-up to 3V3
 
 
 settings = OracleSettings()
