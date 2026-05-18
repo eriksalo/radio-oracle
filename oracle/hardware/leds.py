@@ -62,7 +62,7 @@ class StatusLEDs:
             import Jetson.GPIO as GPIO  # type: ignore[import-not-found]
 
             self._gpio = GPIO
-            GPIO.setmode(GPIO.BCM)
+            GPIO.setmode(GPIO.BOARD)
             # Common-anode: park each cathode HIGH so the LED is dark at boot.
             for pin in self._pins.values():
                 GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)

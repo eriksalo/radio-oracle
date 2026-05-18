@@ -44,22 +44,22 @@
           (component side up, USB ports facing away from you)
 
                      Pin 2  ●  ● Pin 1
-                     Pin 4  ●  ● Pin 3
+                     Pin 4  ○  ● Pin 3
                      Pin 6  ●  ● Pin 5
                      Pin 8  ○  ○ Pin 7
                     Pin 10  ○  ○ Pin 9
                     Pin 12  ○  ○ Pin 11
                     Pin 14  ○  ○ Pin 13
-                    Pin 16  ○  ○ Pin 15
-                    Pin 18  ○  ○ Pin 17
+                    Pin 16  ●  ○ Pin 15
+                    Pin 18  ●  ○ Pin 17
                     Pin 20  ○  ○ Pin 19
-                    Pin 22  ○  ○ Pin 21
+                    Pin 22  ●  ○ Pin 21
                     Pin 24  ○  ○ Pin 23
                     Pin 26  ○  ○ Pin 25
                     Pin 28  ○  ○ Pin 27
                     Pin 30  ○  ○ Pin 29
-                    Pin 32  ●  ● Pin 31
-                    Pin 34  ●  ● Pin 33
+                    Pin 32  ○  ○ Pin 31
+                    Pin 34  ●  ○ Pin 33
                     Pin 36  ○  ○ Pin 35
                     Pin 38  ○  ○ Pin 37
                     Pin 40  ○  ○ Pin 39
@@ -74,9 +74,9 @@
     │  3   │ YEL    │ I2C SDA    │ ADS1115 SDA          │
     │  5   │ GRN    │ I2C SCL    │ ADS1115 SCL          │
     │  6   │ BLK    │ GND        │ Ground bus           │
-    │ 31   │ BLU    │ GPIO       │ Momentary button     │
-    │ 32   │ WHT    │ PWM0       │ LED (via 330Ω)       │
-    │ 33   │ PUR    │ GPIO       │ On/off switch        │
+    │ 16   │ RED-W  │ GPIO       │ RGB LED red (via 330Ω)   │
+    │ 18   │ GRN-W  │ GPIO       │ RGB LED green (via 330Ω) │
+    │ 22   │ BLU-W  │ GPIO       │ RGB LED blue (via 330Ω)  │
     │ 34   │ BLK    │ GND        │ Ground bus           │
     └──────┴────────┴────────────┴──────────────────────┘
 ```
@@ -131,14 +131,16 @@
     │   └──┘  (GND)        │                    │
     └──────────────────────┘                    │
                                                 │
-    STATUS LED                                  │
-    ┌──────────────────────┐                    │
-    │         330Ω         │                    │
-    │  WHT ──┤├──┤►├── BLK ┼────────────────────┘
-    │  Pin 32     LED  GND │
-    │  (PWM0)   (anode →   │
-    │            cathode)  │
-    └──────────────────────┘
+    RGB LED (common anode)                      │
+    ┌──────────────────────────────────────┐    │
+    │  Anode ── 3.3V (Pin 1)              │    │
+    │                                      │    │
+    │  Pin 16 ──┤330Ω├── Red cathode      │    │
+    │  Pin 18 ──┤330Ω├── Green cathode    │    │
+    │  Pin 22 ──┤330Ω├── Blue cathode     │    │
+    │                                      │    │
+    │  LOW = lit, HIGH = off              │    │
+    └──────────────────────────────────────┘
 ```
 
 ---
@@ -168,26 +170,18 @@ Runs from the top of the 40-pin header (pins 1–6) to the breakout board area.
     GND wire splits to 3 destinations at the breakout board
 ```
 
-### Loom B — GPIO + PWM (to Button / LED / Switch)
+### Loom B — RGB LED (pins 16, 18, 22)
 
-Runs from the bottom of the 40-pin header (pins 31–34) to the front panel.
+Runs from the middle of the 40-pin header to the front panel RGB LED.
 
 ```
     40-Pin Header                         Front Panel
-    ┌────────────┐                        ┌────────────────────────┐
-    │            │   Loom B               │                        │
-    │  Pin 31 ───┼── BLU ─── 22cm ───────►│ Momentary button leg 1 │
-    │  Pin 32 ───┼── WHT ─── 22cm ──┐     │                        │
-    │            │                   │     │  ┌─330Ω─┐              │
-    │            │                   └────►│  ┘      └► LED anode   │
-    │  Pin 33 ───┼── PUR ─── 22cm ───────►│ Switch leg 1           │
-    │  Pin 34 ───┼── BLK ─── 22cm ───┬───►│ Button leg 2 (GND)    │
-    │            │                    └───►│ LED cathode (GND)     │
-    └────────────┘                        └────────────────���───────┘
+    Pin 1  (3.3V) ── 22cm ──────────────► RGB LED anode
+    Pin 16 (GPIO) ── 22cm ──┤330Ω├──────► RGB LED red cathode
+    Pin 18 (GPIO) ── 22cm ──┤330Ω├──────► RGB LED green cathode
+    Pin 22 (GPIO) ── 22cm ──┤330Ω├──────► RGB LED blue cathode
 
-    4 wires, ~22cm, bundled with spiral wrap or sleeving
-    GND wire splits to 2 destinations at the front panel
-    330Ω resistor soldered inline or on perfboard near LED
+    Common anode: LOW = lit, HIGH = off
 ```
 
 ### Interconnect — Breakout to Front Panel
@@ -215,9 +209,9 @@ Runs from the bottom of the 40-pin header (pins 31–34) to the front panel.
     │ ORG    │ 5V power                              │
     │ YEL    │ I2C SDA (data)                        │
     │ GRN    │ I2C SCL (clock)                       │
-    │ BLU    │ Momentary button signal                │
-    │ PUR    │ On/off switch signal                   │
-    │ WHT    │ LED PWM signal                         │
+    │ RED-W  │ RGB LED red cathode                    │
+    │ GRN-W  │ RGB LED green cathode                  │
+    │ BLU-W  │ RGB LED blue cathode                   │
     │ GRY    │ Pot wiper (analog)                     │
     │ BLK    │ Ground (all GND connections)           │
     └────────┴───────────────────────────────────────┘
@@ -252,11 +246,8 @@ Small perfboard or breadboard holding the ADS1115 and LED resistor.
          │     from       pot       switch          │
          │     Pin 6     low-side   leg 2           │
          │                                          │
-         │       ┌──┤├──┤►├──┐                      │
-         │       │  330Ω  LED │   (can also mount   │
-         │       │  WHT   BLK │    LED on front     │
-         │       └────────────┘    panel with long   │
-         │                         leads)            │
+         │   (RGB LED wired directly from pins       │
+         │    16/18/22 to front panel, each via 330Ω) │
          └─────────────────────────────────────────┘
 ```
 
@@ -275,17 +266,17 @@ Small perfboard or breadboard holding the ADS1115 and LED resistor.
     ADS1115 A0         GRY      ADS1115 A0        Pot wiper           □
     Pot high-side      RED      Pin 1  (3.3V)     Pot pin 1           □
     Pot low-side       BLK      GND rail          Pot pin 3           □
-    Switch leg 1       PUR      Pin 33 (GPIO)     Switch terminal     □
-    Switch leg 2       BLK      GND rail          Switch terminal     □
-    Button leg 1       BLU      Pin 31 (GPIO)     Button terminal     □
-    Button leg 2       BLK      Pin 34 (GND)      Button terminal     □
-    LED anode          WHT      Pin 32 (PWM0)     330Ω → LED (+)      □
-    LED cathode        BLK      Pin 34 (GND)      LED (−)             □
+    ADS1115 A1         —        ADS1115 A1        Power switch (10k PU) □
+    ADS1115 A2         —        ADS1115 A2        Action button (10k PU) □
+    LED anode          RED      Pin 1  (3.3V)     RGB LED anode       □
+    LED red cathode    RED-W    Pin 16 (GPIO)     330Ω → LED red      □
+    LED green cathode  GRN-W    Pin 18 (GPIO)     330Ω → LED green    □
+    LED blue cathode   BLU-W    Pin 22 (GPIO)     330Ω → LED blue     □
     USB mic            —        USB-A port        —                   □
     USB speaker        —        USB-A port        —                   □
     ─────────────────────────────────────────────────────────────────────
-    Total wires from 40-pin header: 9
-    Total unique pins used: 9 (1, 2, 3, 5, 6, 31, 32, 33, 34)
+    Total wires from 40-pin header: 10
+    Total unique pins used: 8 (1, 2, 3, 5, 6, 16, 18, 22)
 ```
 
 ---

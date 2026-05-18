@@ -67,9 +67,9 @@ class OracleSettings(BaseSettings):
     # because the Tegra234 GPIO INPUT register has a loopback bug on JP 6.2.x
     # for these pads. See memory/hdr40-pinmux-overlay.md.
     action_button_pin: int = 18  # (legacy wiring on BCM 18; now unused for reads)
-    led_red_pin: int = 23
-    led_green_pin: int = 24
-    led_blue_pin: int = 25
+    led_red_pin: int = 16       # BOARD pin 16 (via 330Ω to common-anode RGB LED)
+    led_green_pin: int = 18     # BOARD pin 18
+    led_blue_pin: int = 22      # BOARD pin 22
     power_switch_pin: int = 17   # (legacy wiring on BCM 17; now unused for reads)
     long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
     pot_i2c_bus: int = 7                  # /dev/i2c-N for the ADS1115 (header pins 3/5)

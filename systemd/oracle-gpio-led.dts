@@ -1,0 +1,38 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    overlay-name = "Oracle Radio RGB LED GPIO";
+    compatible = "nvidia,p3768-0000+p3767-0005-super";
+
+    fragment@0 {
+        target = <&pinmux>;
+        __overlay__ {
+            pinctrl-names = "default";
+            pinctrl-0 = <&oracle_led_pins>;
+            oracle_led_pins: oracle-led-pins {
+                led-red-pin16 {
+                    nvidia,pins = "spi3_cs1_py4";
+                    nvidia,function = "rsvd1";
+                    nvidia,pull = <0x0>;
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x0>;
+                };
+                led-green-pin18 {
+                    nvidia,pins = "spi3_cs0_py3";
+                    nvidia,function = "rsvd1";
+                    nvidia,pull = <0x0>;
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x0>;
+                };
+                led-blue-pin22 {
+                    nvidia,pins = "spi3_miso_py1";
+                    nvidia,function = "rsvd1";
+                    nvidia,pull = <0x0>;
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x0>;
+                };
+            };
+        };
+    };
+};
