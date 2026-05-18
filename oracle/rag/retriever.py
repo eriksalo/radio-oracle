@@ -12,6 +12,7 @@ from oracle.rag.backends.chroma import ChromaBackend
 from oracle.rag.embedder import Embedder
 from oracle.rag.modes import RetrievalMode, params_for
 from oracle.rag.reranker import CrossEncoderReranker
+from oracle.rag.router import route as router_route
 
 
 class Retriever:
@@ -41,9 +42,25 @@ class Retriever:
                 raise
         return self._client
 
+    def _build_backend(self, name: str) -> VectorBackend:
+        kind = settings.collection_backends.get(name, "chroma")
+        if kind == "faiss":
+            from oracle.rag.backends.faiss_ivfpq import FaissIvfPqBackend
+
+            cfg = settings.faiss_collection_config.get(name, {})
+            return FaissIvfPqBackend(
+                name=name,
+                index_path=settings.faiss_index_dir / f"{name}.index",
+                sqlite_path=settings.faiss_index_dir / f"{name}.sqlite",
+                model_name=cfg.get("model", settings.embedding_model),
+                query_prefix=cfg.get("query_prefix", ""),
+                ef_search=cfg.get("ef_search", 64),
+            )
+        return ChromaBackend(name, self._get_client(), self._embedder)
+
     def _get_backend(self, name: str) -> VectorBackend:
         if name not in self._backends:
-            self._backends[name] = ChromaBackend(name, self._get_client(), self._embedder)
+            self._backends[name] = self._build_backend(name)
         return self._backends[name]
 
     def _get_reranker(self) -> CrossEncoderReranker:
@@ -73,7 +90,11 @@ class Retriever:
         final_k = top_k or params.final_top_k
 
         if collection_names is None:
-            collection_names = self.list_collections()
+            available = self.list_collections()
+            routing = router_route(query_text, available=available)
+            if routing.matched:
+                logger.debug(f"Router matched: {routing.matched}; order: {routing.order}")
+            collection_names = routing.order
         if not collection_names:
             logger.warning("No collections available for RAG query")
             return []

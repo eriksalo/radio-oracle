@@ -44,6 +44,25 @@ class OracleSettings(BaseSettings):
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_device: str = "cpu"  # keep off the Jetson's shared VRAM
 
+    # Per-collection backends. "chroma" = current ChromaBackend; "faiss" =
+    # FaissIvfPqBackend reading from faiss_index_dir/<collection>.{index,sqlite}.
+    collection_backends: dict[str, str] = {}
+    faiss_index_dir: Path = Path("data/faiss")
+    # Per-collection FAISS settings; key is the collection name.
+    # Each value: {model: str, query_prefix: str, ef_search: int}
+    faiss_collection_config: dict[str, dict] = {
+        "wikipedia": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 64,
+        },
+        "gutenberg": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 64,
+        },
+    }
+
     # Memory
     db_path: Path = Path("data/oracle.db")
     max_context_turns: int = 10
