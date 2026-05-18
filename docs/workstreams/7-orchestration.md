@@ -1,25 +1,28 @@
 # Workstream 7: Introduction & working flow
 
 The integration layer. Owns the top-level state machine, the boot/shutdown
-lifecycle, the STT input pipeline, the entry-point CLI, and the
-deployment/systemd glue.
+lifecycle, the STT input pipeline, wake word detection, the entry-point CLI,
+and the deployment/systemd glue.
 
 ## Status
 
 Working end-to-end. Three modes: `text`, `voice`, and `hardware`. The
 hardware state machine (Standby/Radio/Librarian) is in `oracle/app.py`
-and ties together every other workstream.
+and ties together every other workstream. Wake word ("librarian") detection
+active in radio mode. Power switch immediately halts all I/O.
 
 ## Scope
 
 - Entry point and mode dispatcher (`__main__.py`)
 - Top-level hardware state machine (`OracleApp`: Standby/Radio/Librarian)
+- Wake word detection (record → Whisper STT → check for keyword)
 - Per-turn voice loop (record → transcribe → LLM → speak), refactored so
   the app can drive one turn at a time
 - Whisper STT (load/unload per utterance for VRAM hygiene)
 - Mode-aware LED transitions (calls Workstream 1 to set colors)
+- Abort propagation: power switch → recording/playback/LLM immediate halt
 - Logging configuration (loguru)
-- systemd service + deployment scripts (Jetson setup, NVMe migration)
+- systemd service + deployment scripts (Jetson setup)
 - Health-check primitives consumed by Workstream 8
 
 ## File ownership
@@ -28,16 +31,16 @@ and ties together every other workstream.
 oracle/
   __main__.py              # CLI, --mode dispatch
   __init__.py
-  core.py                  # voice_init/voice_turn/voice_close + text_repl
+  core.py                  # voice_init/voice_turn/wake_word_listen/voice_close + text_repl
   app.py                   # OracleApp — Standby/Radio/Librarian state machine
   stt.py                   # WhisperSTT (load/unload per utterance)
   stt_worker.py            # STT in subprocess (memory isolation)
   log.py                   # loguru setup
 systemd/
-  oracle.service           # service unit
+  radio-oracle.service     # main service unit
 scripts/
   setup_jetson.sh          # one-time Jetson provisioning
-  migrate_to_nvme.sh       # SD-to-NVMe rootfs migration
+  download_models.sh       # fetch Kokoro + Whisper models
 docs/
   SETUP.md
 ```
@@ -47,8 +50,10 @@ docs/
 ```bash
 ORACLE_MODE=hardware              # text | voice | hardware
 ORACLE_LOG_LEVEL=INFO
-ORACLE_WHISPER_MODEL_PATH=models/whisper-small.en.bin
+ORACLE_WHISPER_MODEL_PATH=models/whisper-base.en.bin
+ORACLE_WHISPER_FORCE_CPU=true
 ORACLE_WHISPER_LANGUAGE=en
+ORACLE_WAKE_WORD=librarian
 ```
 
 ## Dependencies
@@ -69,18 +74,19 @@ For the production unit on Jetson: `[all]` plus the steps in
   `text` and `voice` work on any laptop; `hardware` requires the Jetson.
 
 **Consumes** (everything else):
-- WS 1: `ActionButton`, `PowerSwitch`, `StatusLEDs`
+- WS 1: `ActionButton`, `PowerSwitch`, `StatusLEDs`, `VolumeControl`
 - WS 2: `Retriever` (lazy)
 - WS 3: `Player` (lazy, once it exists)
 - WS 4: `Reader` (lazy, once it exists)
-- WS 5: `PiperTTS`, `play_audio`, `record_until_silence`, `apply_radio_filter`
+- WS 5: `KokoroTTS`, `play_audio`, `record_until_silence`, `apply_radio_filter`
 - WS 6: `stream_chat`, `ConversationStore`, `ContextBuilder`,
   `build_system_prompt`, `get_greeting`
 
 **State machine** (in `oracle/app.py::OracleApp`):
-- power switch open      → STANDBY
-- power switch closed    → RADIO (default; LED green)
-- long-press button      → RADIO ↔ LIBRARIAN
+- power switch open      → STANDBY (LED off, all I/O halted immediately)
+- power switch closed    → RADIO (default; LED green, wake word listening)
+- wake word detected     → one voice turn, then back to RADIO
+- long-press button      → RADIO ↔ LIBRARIAN (continuous voice conversation)
 - short-press in RADIO   → next track / next book paragraph (when those exist)
 
 ## Standalone exercise
@@ -96,9 +102,9 @@ python -m oracle --mode voice
 python -m oracle --mode hardware
 
 # Install + enable as a systemd service
-sudo cp systemd/oracle.service /etc/systemd/system/
-sudo systemctl enable --now oracle
-journalctl -u oracle -f
+sudo cp systemd/radio-oracle.service /etc/systemd/system/
+sudo systemctl enable --now radio-oracle
+journalctl -u radio-oracle -f
 ```
 
 ## TODO
@@ -106,9 +112,8 @@ journalctl -u oracle -f
 - [ ] systemd watchdog integration (sd_notify) so a hung process restarts
 - [ ] Auto-restart backoff (avoid crash loops)
 - [ ] OTA update script: git pull → pip install → systemctl restart
-- [ ] Read-only rootfs with writable overlay for `data/`
 - [ ] Disk-space monitoring (ChromaDB + music + books on 1 TB NVMe)
 - [ ] Nightly SQLite vacuum / WAL checkpoint
 - [ ] Short-press in Librarian = interrupt current TTS playback (currently no-op)
-- [ ] Wake-word listener so the toggle-+-button ritual is optional
 - [ ] Boot greeting customization per power-on time of day
+- [x] Wake-word listener so the toggle-+-button ritual is optional
