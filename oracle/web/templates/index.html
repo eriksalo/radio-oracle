@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ORACLE RADIO // DIAGNOSTICS</title>
+  <link rel="stylesheet" href="/static/pipboy.css">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="header">
+  <h1>⌐ Oracle Radio // Diagnostics</h1>
+  <div class="clock" id="clock">--:--:--</div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="stat">Stat</button>
+  <button class="tab" data-tab="data">Data</button>
+  <button class="tab" data-tab="audio">Audio</button>
+  <button class="tab" data-tab="hw">Hardware</button>
+  <button class="tab" data-tab="tools">Tools</button>
+  <button class="tab" data-tab="log">Log</button>
+</div>
+
+<div class="content">
+
+  <!-- STAT TAB -->
+  <div class="tab-panel active" id="panel-stat">
+    <div class="grid">
+      <div class="panel">
+        <div class="panel-header">// System Status</div>
+        <div class="panel-body" id="health-checks">
+          <div class="loading-text">RUNNING DIAGNOSTICS</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">// Service</div>
+        <div class="panel-body" id="service-status">
+          <div class="loading-text">QUERYING SYSTEMD</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">// System Resources</div>
+      <div class="panel-body" id="system-info">
+        <div class="loading-text">SCANNING HARDWARE</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">// Ollama LLM Engine</div>
+      <div class="panel-body" id="ollama-status">
+        <div class="loading-text">CONNECTING TO OLLAMA</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">// Local Models</div>
+      <div class="panel-body" id="model-files">
+        <div class="loading-text">SCANNING MODELS DIR</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DATA TAB -->
+  <div class="tab-panel" id="panel-data">
+    <div class="panel">
+      <div class="panel-header">// ChromaDB Knowledge Collections</div>
+      <div class="panel-body" id="chroma-status">
+        <div class="loading-text">INDEXING ARCHIVES</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">// Recent Conversations</div>
+      <div class="panel-body" id="conversations">
+        <div class="loading-text">LOADING MEMORY BANKS</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUDIO TAB -->
+  <div class="tab-panel" id="panel-audio">
+    <div class="panel">
+      <div class="panel-header">// Audio Devices</div>
+      <div class="panel-body" id="audio-devices">
+        <div class="loading-text">DETECTING AUDIO HARDWARE</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">// TTS Test</div>
+      <div class="panel-body">
+        <div class="test-input">
+          <input type="text" id="tts-input" placeholder="Enter text to synthesize..." value="The Oracle is operational, citizen.">
+          <button class="btn" id="btn-tts" onclick="testTTS()">Synthesize</button>
+        </div>
+        <div id="tts-result" class="test-result" style="min-height:40px">Awaiting input...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HARDWARE TAB -->
+  <div class="tab-panel" id="panel-hw">
+    <div class="grid">
+      <div class="panel">
+        <div class="panel-header">// Potentiometer (Volume)</div>
+        <div class="panel-body" id="hw-pot">
+          <div class="loading-text">READING ADC</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">// Switches</div>
+        <div class="panel-body" id="hw-switches">
+          <div class="loading-text">READING GPIO</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">// Status LED Control</div>
+      <div class="panel-body">
+        <div style="margin-bottom:12px">
+          <div class="status-row" style="margin-bottom:8px">
+            <span class="status-label">Brightness</span>
+            <span class="status-value" id="led-brightness-label">—</span>
+          </div>
+          <div class="bar-container">
+            <div class="bar-track" style="cursor:pointer;position:relative" id="led-slider-track" onclick="ledSliderClick(event)">
+              <div class="bar-fill" id="led-slider-fill" style="width:0%"></div>
+              <div id="led-slider-thumb" style="position:absolute;top:-3px;width:4px;height:16px;background:var(--green);left:0%;transition:left 0.1s"></div>
+            </div>
+            <div class="bar-label" id="led-slider-value">0%</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn led-preset" onclick="setLED('off')">Off</button>
+          <button class="btn led-preset" onclick="setLED('dim')">Dim</button>
+          <button class="btn led-preset" onclick="setLED('medium')">Medium</button>
+          <button class="btn led-preset" onclick="setLED('bright')">Bright</button>
+        </div>
+        <div id="led-result" style="margin-top:8px;font-size:11px;color:var(--green-dim)"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        // Hardware Live Monitor
+        <button class="btn" style="float:right;padding:3px 10px;font-size:10px" id="hw-poll-btn" onclick="toggleHWPoll()">Start Polling</button>
+      </div>
+      <div class="panel-body">
+        <div id="hw-live" style="font-size:12px;font-variant-numeric:tabular-nums">
+          <div class="status-row">
+            <span class="status-label">Pot</span>
+            <span class="status-value" id="hw-live-pot">—</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Button</span>
+            <span class="status-value" id="hw-live-btn">—</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Switch</span>
+            <span class="status-value" id="hw-live-sw">—</span>
+          </div>
+          <div style="margin-top:10px">
+            <div class="status-label" style="margin-bottom:4px">Volume Level</div>
+            <div class="bar-container">
+              <div class="bar-track"><div class="bar-fill" id="hw-live-pot-bar" style="width:0%"></div></div>
+              <div class="bar-label" id="hw-live-pot-pct">0%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOOLS TAB -->
+  <div class="tab-panel" id="panel-tools">
+    <div class="panel">
+      <div class="panel-header">// RAG Query Test</div>
+      <div class="panel-body">
+        <div class="test-input">
+          <input type="text" id="rag-input" placeholder="Enter search query..." value="how to purify water">
+          <button class="btn" id="btn-rag" onclick="testRAG()">Search</button>
+        </div>
+        <div id="rag-result" class="test-result">Awaiting query...</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">// LLM Prompt Test</div>
+      <div class="panel-body">
+        <div class="test-input">
+          <input type="text" id="llm-input" placeholder="Enter prompt..." value="What is the capital of France?">
+          <button class="btn" id="btn-llm" onclick="testLLM()">Send</button>
+        </div>
+        <div id="llm-result" class="test-result">Awaiting prompt...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOG TAB -->
+  <div class="tab-panel" id="panel-log">
+    <div class="panel">
+      <div class="panel-header">
+        // Service Journal
+        <button class="btn" style="float:right;padding:3px 10px;font-size:10px" onclick="loadJournal()">Refresh</button>
+      </div>
+      <div class="panel-body" style="padding:0">
+        <div class="journal" id="journal">
+          <div class="loading-text">LOADING JOURNAL</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// === Tab switching ===
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// === Clock ===
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toLocaleTimeString('en-US', { hour12: false }) + ' // ' +
+    now.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// === Data loading ===
+async function fetchJSON(url) {
+  const resp = await fetch(url);
+  return resp.json();
+}
+
+function statusBadge(ok) {
+  return ok
+    ? '<span class="status-ok">OPERATIONAL</span>'
+    : '<span class="status-fail">OFFLINE</span>';
+}
+
+function makeBar(percent, label) {
+  const cls = percent > 90 ? 'crit' : percent > 75 ? 'warn' : '';
+  return `<div class="bar-container">
+    <div class="bar-track"><div class="bar-fill ${cls}" style="width:${percent}%"></div></div>
+    <div class="bar-label">${label}</div>
+  </div>`;
+}
+
+// Health checks
+async function loadHealth() {
+  try {
+    const data = await fetchJSON('/api/health');
+    let html = '';
+    for (const [key, ok] of Object.entries(data)) {
+      const label = key.replace(/_/g, ' ');
+      html += `<div class="status-row">
+        <span class="status-label">${label}</span>
+        <span class="status-value">${statusBadge(ok)}</span>
+      </div>`;
+    }
+    document.getElementById('health-checks').innerHTML = html;
+  } catch(e) {
+    document.getElementById('health-checks').innerHTML =
+      '<span class="status-fail">DIAGNOSTICS UNAVAILABLE</span>';
+  }
+}
+
+// Service
+async function loadService() {
+  try {
+    const data = await fetchJSON('/api/service');
+    const isActive = data.status === 'active';
+    let memMB = '';
+    if (data.memory_bytes && data.memory_bytes !== '[not set]') {
+      memMB = (parseInt(data.memory_bytes) / (1024*1024)).toFixed(0) + ' MB';
+    }
+    document.getElementById('service-status').innerHTML = `
+      <div class="status-row">
+        <span class="status-label">radio-oracle.service</span>
+        <span class="status-value">${isActive ? '<span class="status-ok">ACTIVE</span>' : '<span class="status-fail">' + data.status.toUpperCase() + '</span>'}</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">PID</span>
+        <span class="status-value">${data.pid || '—'}</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Memory</span>
+        <span class="status-value">${memMB || '—'}</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Started</span>
+        <span class="status-value">${data.started || '—'}</span>
+      </div>`;
+  } catch(e) {
+    document.getElementById('service-status').innerHTML =
+      '<span class="status-fail">CANNOT QUERY SYSTEMD</span>';
+  }
+}
+
+// System info
+async function loadSystem() {
+  try {
+    const data = await fetchJSON('/api/system');
+    let html = '<div class="grid">';
+
+    // Memory
+    if (data.memory) {
+      html += `<div>
+        <div class="status-row"><span class="status-label">Memory</span>
+          <span class="status-value">${data.memory.used_mb} / ${data.memory.total_mb} MB</span></div>
+        ${makeBar(data.memory.percent, data.memory.percent + '%')}
+      </div>`;
+    }
+
+    // Disk
+    if (data.disk) {
+      html += `<div>
+        <div class="status-row"><span class="status-label">Disk</span>
+          <span class="status-value">${data.disk.used_gb} / ${data.disk.total_gb} GB</span></div>
+        ${makeBar(data.disk.percent, data.disk.percent + '%')}
+      </div>`;
+    }
+
+    html += '</div>';
+
+    // Extra stats
+    html += '<div style="margin-top:12px">';
+    if (data.swap) {
+      html += `<div class="status-row"><span class="status-label">Swap</span>
+        <span class="status-value">${data.swap.used_mb} / ${data.swap.total_mb} MB</span></div>`;
+    }
+    if (data.load_avg) {
+      html += `<div class="status-row"><span class="status-label">Load Avg</span>
+        <span class="status-value">${data.load_avg['1m']} / ${data.load_avg['5m']} / ${data.load_avg['15m']}</span></div>`;
+    }
+    if (data.cpu_temp_c != null) {
+      const tempClass = data.cpu_temp_c > 80 ? 'status-fail' : data.cpu_temp_c > 65 ? 'status-warn' : 'status-ok';
+      html += `<div class="status-row"><span class="status-label">CPU Temp</span>
+        <span class="status-value ${tempClass}">${data.cpu_temp_c}°C</span></div>`;
+    }
+    if (data.uptime) {
+      html += `<div class="status-row"><span class="status-label">Uptime</span>
+        <span class="status-value">${data.uptime}</span></div>`;
+    }
+    if (data.hostname) {
+      html += `<div class="status-row"><span class="status-label">Hostname</span>
+        <span class="status-value">${data.hostname}</span></div>`;
+    }
+    html += '</div>';
+
+    document.getElementById('system-info').innerHTML = html;
+  } catch(e) {
+    document.getElementById('system-info').innerHTML =
+      '<span class="status-fail">HARDWARE SCAN FAILED</span>';
+  }
+}
+
+// Ollama
+async function loadOllama() {
+  try {
+    const data = await fetchJSON('/api/ollama');
+    if (data.status !== 'online') {
+      document.getElementById('ollama-status').innerHTML =
+        '<span class="status-fail">OLLAMA ENGINE OFFLINE</span>';
+      return;
+    }
+    let html = `<div class="status-row">
+      <span class="status-label">Status</span>
+      <span class="status-value status-ok">ONLINE</span>
+    </div>
+    <div class="status-row">
+      <span class="status-label">Configured Model</span>
+      <span class="status-value">${data.configured_model}</span>
+    </div>
+    <div class="status-row">
+      <span class="status-label">Running</span>
+      <span class="status-value">${data.running.length > 0 ? data.running.join(', ') : '(idle)'}</span>
+    </div>`;
+    if (data.models.length) {
+      html += '<div style="margin-top:8px"><table class="collection-table"><tr><th>Model</th><th>Size</th></tr>';
+      data.models.forEach(m => {
+        html += `<tr><td>${m.name}</td><td class="num">${m.size_gb} GB</td></tr>`;
+      });
+      html += '</table></div>';
+    }
+    document.getElementById('ollama-status').innerHTML = html;
+  } catch(e) {
+    document.getElementById('ollama-status').innerHTML =
+      '<span class="status-fail">CANNOT REACH OLLAMA</span>';
+  }
+}
+
+// Model files
+async function loadModels() {
+  try {
+    const data = await fetchJSON('/api/models');
+    if (!data.files.length) {
+      document.getElementById('model-files').innerHTML = '<span class="status-warn">NO MODELS FOUND</span>';
+      return;
+    }
+    let html = '<table class="collection-table"><tr><th>File</th><th>Size</th></tr>';
+    data.files.forEach(f => {
+      html += `<tr><td>${f.name}</td><td class="num">${f.size_mb} MB</td></tr>`;
+    });
+    html += '</table>';
+    document.getElementById('model-files').innerHTML = html;
+  } catch(e) {
+    document.getElementById('model-files').innerHTML =
+      '<span class="status-fail">SCAN FAILED</span>';
+  }
+}
+
+// ChromaDB
+async function loadChroma() {
+  try {
+    const data = await fetchJSON('/api/chroma');
+    if (data.error) {
+      document.getElementById('chroma-status').innerHTML =
+        `<span class="status-fail">ERROR: ${data.error}</span>`;
+      return;
+    }
+    let html = `<div class="status-row" style="margin-bottom:8px">
+      <span class="status-label">Path</span>
+      <span class="status-value">${data.path}</span>
+    </div>
+    <div class="status-row" style="margin-bottom:12px">
+      <span class="status-label">Total Chunks</span>
+      <span class="status-value">${data.total_chunks.toLocaleString()}</span>
+    </div>`;
+
+    html += '<table class="collection-table"><tr><th>Collection</th><th>Chunks</th><th>Status</th></tr>';
+    data.collections.forEach(c => {
+      const statusHtml = c.status === 'ok'
+        ? '<span class="status-ok">OK</span>'
+        : '<span class="status-fail">ERROR</span>';
+      html += `<tr>
+        <td>${c.name}</td>
+        <td class="num">${c.chunks.toLocaleString()}</td>
+        <td>${statusHtml}</td>
+      </tr>`;
+    });
+    html += '</table>';
+    document.getElementById('chroma-status').innerHTML = html;
+  } catch(e) {
+    document.getElementById('chroma-status').innerHTML =
+      '<span class="status-fail">ARCHIVE ACCESS FAILED</span>';
+  }
+}
+
+// Conversations
+async function loadConversations() {
+  try {
+    const data = await fetchJSON('/api/conversations');
+    if (!data.sessions.length) {
+      document.getElementById('conversations').innerHTML = 'No conversations recorded.';
+      return;
+    }
+    let html = '';
+    data.sessions.forEach(s => {
+      html += `<div class="conversation">
+        <div class="meta">Session ${s.session_id} // ${s.started} // ${s.message_count} messages</div>`;
+      if (s.summary) {
+        html += `<div class="msg" style="color:var(--green-dim);font-style:italic">${s.summary}</div>`;
+      }
+      s.preview.forEach(m => {
+        html += `<div class="msg ${m.role}">${m.role.toUpperCase()}: ${m.content.substring(0, 150)}${m.content.length > 150 ? '...' : ''}</div>`;
+      });
+      html += '</div>';
+    });
+    document.getElementById('conversations').innerHTML = html;
+  } catch(e) {
+    document.getElementById('conversations').innerHTML =
+      '<span class="status-fail">MEMORY BANKS INACCESSIBLE</span>';
+  }
+}
+
+// Audio devices
+async function loadAudio() {
+  try {
+    const data = await fetchJSON('/api/audio');
+    if (!data.devices.length) {
+      document.getElementById('audio-devices').innerHTML = '<span class="status-warn">NO DEVICES DETECTED</span>';
+      return;
+    }
+    let html = '';
+    data.devices.forEach(d => {
+      const type = d.inputs > 0 && d.outputs > 0 ? 'IN/OUT'
+        : d.inputs > 0 ? 'INPUT' : 'OUTPUT';
+      html += `<div class="device-item">
+        <span class="device-name">[${d.index}] ${d.name}</span>
+        <span class="device-channels">${type} // ${d.sample_rate} Hz</span>
+      </div>`;
+    });
+    document.getElementById('audio-devices').innerHTML = html;
+  } catch(e) {
+    document.getElementById('audio-devices').innerHTML =
+      '<span class="status-fail">AUDIO SUBSYSTEM ERROR</span>';
+  }
+}
+
+// Journal
+async function loadJournal() {
+  try {
+    const data = await fetchJSON('/api/journal?n=100');
+    const el = document.getElementById('journal');
+    if (!data.lines.length) {
+      el.innerHTML = '<div>No journal entries.</div>';
+      return;
+    }
+    el.innerHTML = data.lines.map(l => `<div>${escapeHtml(l)}</div>`).join('');
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {
+    document.getElementById('journal').innerHTML = '<div class="status-fail">JOURNAL UNAVAILABLE</div>';
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// === Test tools ===
+
+async function testRAG() {
+  const input = document.getElementById('rag-input').value.trim();
+  if (!input) return;
+  const btn = document.getElementById('btn-rag');
+  const result = document.getElementById('rag-result');
+  btn.disabled = true;
+  result.textContent = 'QUERYING ARCHIVES...';
+  try {
+    const resp = await fetch('/api/test/rag', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: input})
+    });
+    const data = await resp.json();
+    if (data.error) {
+      result.innerHTML = `<span class="status-fail">${escapeHtml(data.error)}</span>`;
+    } else if (!data.results.length) {
+      result.textContent = 'No results found.';
+    } else {
+      result.innerHTML = data.results.map(r =>
+        `<div style="margin-bottom:8px"><span class="source-tag">[${r.source}]</span> ${r.title ? escapeHtml(r.title) + ' ' : ''}(dist: ${r.distance})\n${escapeHtml(r.text)}</div>`
+      ).join('');
+    }
+  } catch(e) {
+    result.innerHTML = `<span class="status-fail">REQUEST FAILED: ${escapeHtml(e.message)}</span>`;
+  }
+  btn.disabled = false;
+}
+
+async function testLLM() {
+  const input = document.getElementById('llm-input').value.trim();
+  if (!input) return;
+  const btn = document.getElementById('btn-llm');
+  const result = document.getElementById('llm-result');
+  btn.disabled = true;
+  result.textContent = 'PROCESSING QUERY...';
+  try {
+    const resp = await fetch('/api/test/llm', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt: input})
+    });
+    const data = await resp.json();
+    if (data.error) {
+      result.innerHTML = `<span class="status-fail">${escapeHtml(data.error)}</span>`;
+    } else {
+      result.textContent = data.response;
+    }
+  } catch(e) {
+    result.innerHTML = `<span class="status-fail">REQUEST FAILED: ${escapeHtml(e.message)}</span>`;
+  }
+  btn.disabled = false;
+}
+
+async function testTTS() {
+  const input = document.getElementById('tts-input').value.trim();
+  if (!input) return;
+  const btn = document.getElementById('btn-tts');
+  const result = document.getElementById('tts-result');
+  btn.disabled = true;
+  result.textContent = 'SYNTHESIZING AUDIO...';
+  try {
+    const resp = await fetch('/api/test/tts', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: input})
+    });
+    if (!resp.ok) {
+      const data = await resp.json();
+      result.innerHTML = `<span class="status-fail">${escapeHtml(data.error)}</span>`;
+    } else {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      result.innerHTML = `<audio controls autoplay src="${url}" style="width:100%;filter:sepia(100%) hue-rotate(80deg)"></audio>
+        <div style="margin-top:6px;color:var(--green-dim)">Audio synthesized successfully.</div>`;
+    }
+  } catch(e) {
+    result.innerHTML = `<span class="status-fail">REQUEST FAILED: ${escapeHtml(e.message)}</span>`;
+  }
+  btn.disabled = false;
+}
+
+// === Hardware ===
+
+async function loadHardware() {
+  try {
+    const data = await fetchJSON('/api/hardware');
+
+    // Potentiometer
+    const potEl = document.getElementById('hw-pot');
+    if (data.potentiometer && !data.potentiometer.error) {
+      const p = data.potentiometer;
+      potEl.innerHTML = `
+        <div class="status-row">
+          <span class="status-label">Raw ADC</span>
+          <span class="status-value">${p.raw}</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Voltage</span>
+          <span class="status-value">${p.voltage}V</span>
+        </div>
+        <div class="status-row" style="margin-bottom:8px">
+          <span class="status-label">Position</span>
+          <span class="status-value">${p.percent}%</span>
+        </div>
+        ${makeBar(p.percent, p.percent + '%')}`;
+    } else {
+      const err = data.potentiometer?.error || 'unavailable';
+      potEl.innerHTML = `<span class="status-warn">ADC: ${escapeHtml(err)}</span>
+        <div style="margin-top:6px;font-size:11px;color:var(--green-dim)">
+        Requires ADS1115 on I2C bus 1 (addr 0x48).<br>
+        Install: pip install smbus2</div>`;
+    }
+
+    // Switches
+    const swEl = document.getElementById('hw-switches');
+    let swHtml = '';
+
+    // On/off switch
+    if (data.switch && !data.switch.error) {
+      const onOff = data.switch.on;
+      swHtml += `<div class="status-row">
+        <span class="status-label">On/Off Switch (Pin 33)</span>
+        <span class="status-value ${onOff ? 'status-ok' : 'status-fail'}">${onOff ? 'ON' : 'OFF'}</span>
+      </div>`;
+    } else {
+      swHtml += `<div class="status-row">
+        <span class="status-label">On/Off Switch (Pin 33)</span>
+        <span class="status-value status-warn">N/A</span>
+      </div>`;
+    }
+
+    // Momentary button
+    if (data.button && !data.button.error) {
+      const pressed = data.button.pressed;
+      swHtml += `<div class="status-row">
+        <span class="status-label">Momentary Button (Pin 31)</span>
+        <span class="status-value ${pressed ? 'status-ok' : ''}">${pressed ? 'PRESSED' : 'RELEASED'}</span>
+      </div>`;
+    } else {
+      swHtml += `<div class="status-row">
+        <span class="status-label">Momentary Button (Pin 31)</span>
+        <span class="status-value status-warn">N/A</span>
+      </div>`;
+    }
+
+    swEl.innerHTML = swHtml || '<span class="status-warn">GPIO UNAVAILABLE</span>';
+  } catch(e) {
+    document.getElementById('hw-pot').innerHTML =
+      '<span class="status-fail">HARDWARE READ FAILED</span>';
+    document.getElementById('hw-switches').innerHTML =
+      '<span class="status-fail">HARDWARE READ FAILED</span>';
+  }
+}
+
+// LED control
+async function setLED(color) {
+  const result = document.getElementById('led-result');
+  try {
+    const resp = await fetch('/api/hardware/led', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({color})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      result.textContent = `LED set to ${data.color.toUpperCase()} (${data.brightness}%)`;
+      updateLEDSlider(data.brightness);
+    } else {
+      result.innerHTML = '<span class="status-warn">LED control unavailable (GPIO not accessible)</span>';
+    }
+  } catch(e) {
+    result.innerHTML = `<span class="status-fail">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function setLEDBrightness(brightness) {
+  const result = document.getElementById('led-result');
+  try {
+    const resp = await fetch('/api/hardware/led', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({brightness})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      result.textContent = `LED brightness: ${data.brightness}%`;
+      updateLEDSlider(data.brightness);
+    } else {
+      result.innerHTML = '<span class="status-warn">LED control unavailable</span>';
+    }
+  } catch(e) {
+    result.innerHTML = `<span class="status-fail">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function updateLEDSlider(pct) {
+  document.getElementById('led-slider-fill').style.width = pct + '%';
+  document.getElementById('led-slider-thumb').style.left = pct + '%';
+  document.getElementById('led-slider-value').textContent = pct + '%';
+  document.getElementById('led-brightness-label').textContent = pct + '%';
+}
+
+function ledSliderClick(e) {
+  const track = document.getElementById('led-slider-track');
+  const rect = track.getBoundingClientRect();
+  const pct = Math.round(Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)));
+  updateLEDSlider(pct);
+  setLEDBrightness(pct);
+}
+
+// Live hardware polling
+let hwPollInterval = null;
+
+function toggleHWPoll() {
+  const btn = document.getElementById('hw-poll-btn');
+  if (hwPollInterval) {
+    clearInterval(hwPollInterval);
+    hwPollInterval = null;
+    btn.textContent = 'Start Polling';
+  } else {
+    pollHW();
+    hwPollInterval = setInterval(pollHW, 500);
+    btn.textContent = 'Stop Polling';
+  }
+}
+
+async function pollHW() {
+  try {
+    const data = await fetchJSON('/api/hardware');
+
+    // Pot
+    if (data.potentiometer && !data.potentiometer.error) {
+      const pct = data.potentiometer.percent;
+      document.getElementById('hw-live-pot').textContent =
+        `${data.potentiometer.voltage}V (${pct}%)`;
+      document.getElementById('hw-live-pot-bar').style.width = pct + '%';
+      document.getElementById('hw-live-pot-pct').textContent = pct + '%';
+    } else {
+      document.getElementById('hw-live-pot').innerHTML =
+        '<span class="status-warn">N/A</span>';
+    }
+
+    // Button
+    if (data.button && !data.button.error) {
+      const el = document.getElementById('hw-live-btn');
+      if (data.button.pressed) {
+        el.innerHTML = '<span class="status-ok">PRESSED</span>';
+      } else {
+        el.textContent = 'RELEASED';
+      }
+    }
+
+    // Switch
+    if (data.switch && !data.switch.error) {
+      const el = document.getElementById('hw-live-sw');
+      if (data.switch.on) {
+        el.innerHTML = '<span class="status-ok">ON</span>';
+      } else {
+        el.innerHTML = '<span class="status-fail">OFF</span>';
+      }
+    }
+  } catch(e) { /* ignore polling errors */ }
+}
+
+// === Init: load all data ===
+async function init() {
+  // Load stat tab data in parallel
+  await Promise.all([
+    loadHealth(),
+    loadService(),
+    loadSystem(),
+    loadOllama(),
+    loadModels(),
+  ]);
+
+  // Load other tabs in background
+  loadChroma();
+  loadAudio();
+  loadHardware();
+  loadConversations();
+  loadJournal();
+}
+
+init();
+
+// Auto-refresh stat tab every 15s
+setInterval(() => {
+  loadHealth();
+  loadService();
+  loadSystem();
+}, 15000);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,20 @@
+[Unit]
+Description=Oracle Radio - Diagnostic Web GUI
+After=network.target
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/radio-oracle
+ExecStart=/opt/radio-oracle/.venv/bin/python -m oracle.web.app
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+EnvironmentFile=-/opt/radio-oracle/.env
+
+[Install]
+WantedBy=multi-user.target
