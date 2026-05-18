@@ -48,28 +48,42 @@ from loguru import logger
 _DOC_KEY = "chroma:document"
 
 
-def get_source_id_range(db_path: str, collection_name: str) -> tuple[int, int, int]:
-    """Return (min_segment_row_id, max_segment_row_id, total_rows) for the
-    METADATA segment of `collection_name`. We range-partition over the
-    internal `embeddings.id` (autoincrement), not `embedding_id` (md5)."""
+def get_source_id_range(db_path: str, collection_name: str) -> tuple[str, int, int, int]:
+    """Return (segment_id, min_embedding_row_id, max_embedding_row_id, total_rows)
+    for the METADATA segment of `collection_name`.
+
+    Workers need the segment_id so they can filter the embeddings range scan
+    — chromadb assigns embeddings.id globally across all collections, so an
+    id range from one collection's MIN/MAX may overlap with rows from other
+    collections that were ingested in the same span.
+    """
     sqlite_path = Path(db_path) / "chroma.sqlite3"
     con = sqlite3.connect(str(sqlite_path))
     try:
         cur = con.cursor()
         cur.execute(
             """
-            SELECT MIN(e.id), MAX(e.id), COUNT(e.id)
-            FROM embeddings e
-            JOIN segments s ON s.id = e.segment_id
+            SELECT s.id FROM segments s
             JOIN collections c ON c.id = s.collection
             WHERE c.name = ? AND s.scope = 'METADATA'
             """,
             (collection_name,),
         )
+        seg_row = cur.fetchone()
+        if seg_row is None:
+            raise RuntimeError(f"No METADATA segment for {collection_name!r}")
+        segment_id = seg_row[0]
+        cur.execute(
+            """
+            SELECT MIN(id), MAX(id), COUNT(id)
+            FROM embeddings WHERE segment_id = ?
+            """,
+            (segment_id,),
+        )
         row = cur.fetchone()
         if row is None or row[0] is None:
-            raise RuntimeError(f"Collection {collection_name!r} not found or empty")
-        return int(row[0]), int(row[1]), int(row[2])
+            raise RuntimeError(f"Collection {collection_name!r} segment is empty")
+        return segment_id, int(row[0]), int(row[1]), int(row[2])
     finally:
         con.close()
 
@@ -124,6 +138,7 @@ def _producer_worker(
     worker_id: int,
     db_path: str,
     source_collection: str,
+    source_segment_id: str,
     id_start: int,
     id_end: int,
     lookup_path: str,
@@ -153,22 +168,29 @@ def _producer_worker(
     last_tick = 0
 
     sqlite_path = Path(db_path) / "chroma.sqlite3"
-    con = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
-    # Bigger cache speeds the streaming index scans on large DBs.
-    con.execute("PRAGMA cache_size = -65536")  # 64 MB per connection
-    con.execute("PRAGMA mmap_size = 268435456")  # 256 MB mmap hint
+    # Each cursor needs its own connection — Python's sqlite3 serializes
+    # concurrent cursors on a shared connection (~10x slowdown observed).
+    con_e = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+    con_m = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+    for c in (con_e, con_m):
+        c.execute("PRAGMA cache_size = -32768")  # 32 MB per connection
+        c.execute("PRAGMA mmap_size = 268435456")  # 256 MB mmap hint
 
-    cur_e = con.cursor()
-    cur_m = con.cursor()
-    # `embeddings` is a rowid table; PRIMARY KEY = id. Range scan by id is
-    # an index seek + sequential range read.
+    cur_e = con_e.cursor()
+    cur_m = con_m.cursor()
+    # `embeddings` is a rowid table; PRIMARY KEY = id. Filter by segment_id
+    # so we don't accidentally pick up rows belonging to other collections
+    # that share the id range (chromadb assigns ids globally across
+    # collections, not per-collection).
     cur_e.execute(
         """SELECT id, embedding_id FROM embeddings
-           WHERE id >= ? AND id < ? ORDER BY id""",
-        (id_start, id_end),
+           WHERE segment_id = ? AND id >= ? AND id < ? ORDER BY id""",
+        (source_segment_id, id_start, id_end),
     )
     # `embedding_metadata` has PRIMARY KEY (id, key). Range scan by id reads
-    # all keys for each row in order with no extra seek per key.
+    # all keys for each row in order with no extra seek per key. We don't
+    # need to filter by segment here — the merge below only consumes
+    # metadata for ids that came out of cur_e, which is already segment-filtered.
     cur_m.execute(
         """SELECT id, key, string_value, int_value FROM embedding_metadata
            WHERE id >= ? AND id < ? ORDER BY id, key""",
@@ -247,7 +269,8 @@ def _producer_worker(
         out_queue.put((_PRODUCER_DONE, worker_id, {"error": repr(e), "stats": stats}))
         return
     finally:
-        con.close()
+        con_e.close()
+        con_m.close()
 
     out_queue.put((_PRODUCER_DONE, worker_id, {"stats": stats}))
 
@@ -328,9 +351,10 @@ def reembed(
     dry_run: bool,
 ) -> None:
     logger.info(f"=== Re-embedding {source} -> {target} with {model_name} ===")
-    id_min, id_max, source_total = get_source_id_range(db_path, source)
+    source_segment_id, id_min, id_max, source_total = get_source_id_range(db_path, source)
     logger.info(
-        f"Source has {source_total} chunks (id range {id_min}..{id_max})"
+        f"Source has {source_total} chunks (segment {source_segment_id}, "
+        f"id range {id_min}..{id_max})"
     )
 
     target_existing = load_target_existing_ids(db_path, target)
@@ -363,7 +387,10 @@ def reembed(
             continue
         p = mp.Process(
             target=_producer_worker,
-            args=(wid, db_path, source, start, end, lookup_path, batch_size, work_queue),
+            args=(
+                wid, db_path, source, source_segment_id,
+                start, end, lookup_path, batch_size, work_queue,
+            ),
             name=f"reembed-prod-{wid}",
             daemon=True,
         )
