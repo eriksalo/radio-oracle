@@ -164,7 +164,9 @@ class OracleApp:
         return False
 
     async def _shutdown(self, voice_ctx) -> None:
-        for op in (self.button.cleanup, self.power.cleanup, self.leds.cleanup):
+        from oracle.hardware.volume import get_volume_control
+
+        for op in (self.button.cleanup, self.power.cleanup, self.leds.cleanup, get_volume_control().cleanup):
             try:
                 op()
             except Exception as e:  # noqa: BLE001

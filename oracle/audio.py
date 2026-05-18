@@ -100,12 +100,23 @@ def _resample_to_playback(audio: np.ndarray, src_sr: int) -> tuple[np.ndarray, i
     return out, dst_sr
 
 
+def _apply_volume(audio: np.ndarray) -> np.ndarray:
+    """Scale audio by the hardware volume knob (pot) gain."""
+    from oracle.hardware.volume import get_volume_control
+
+    gain = get_volume_control().gain
+    if gain < 1.0:
+        return (audio * gain).astype(np.float32)
+    return audio
+
+
 def play_audio(audio: np.ndarray, sample_rate: int | None = None) -> None:
     """Play audio through configured output device."""
     import sounddevice as sd
 
     src_sr = sample_rate or settings.audio_sample_rate
     out, dst_sr = _resample_to_playback(audio, src_sr)
+    out = _apply_volume(out)
     sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
     sd.wait()
 
@@ -127,6 +138,7 @@ def play_wav_bytes(wav_bytes: bytes) -> None:
         if channels > 1:
             audio = audio.reshape(-1, channels)
         out, dst_sr = _resample_to_playback(audio, src_sr)
+        out = _apply_volume(out)
         sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
         sd.wait()
 
