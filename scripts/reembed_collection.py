@@ -88,32 +88,113 @@ def get_source_id_range(db_path: str, collection_name: str) -> tuple[str, int, i
         con.close()
 
 
-def load_target_existing_ids(db_path: str, collection_name: str) -> set[str]:
-    """Embedding IDs already in the target collection (md5 strings)."""
-    sqlite_path = Path(db_path) / "chroma.sqlite3"
-    if not sqlite_path.exists():
+def load_target_existing_ids(out_dir: Path, target: str) -> set[str]:
+    """Chunk IDs already written to the target flat-file store. Reading the
+    sqlite chunk table is O(n) but cheap (~1M IDs/sec)."""
+    text_path = out_dir / f"{target}.text.sqlite"
+    if not text_path.exists():
         return set()
-    con = sqlite3.connect(str(sqlite_path))
+    con = sqlite3.connect(str(text_path))
     try:
-        cur = con.cursor()
-        cur.execute(
-            "SELECT id FROM collections WHERE name = ?", (collection_name,)
-        )
-        row = cur.fetchone()
-        if row is None:
-            return set()
-        cur.execute(
-            """
-            SELECT e.embedding_id
-            FROM embeddings e
-            JOIN segments s ON s.id = e.segment_id
-            WHERE s.collection = ? AND s.scope = 'METADATA'
-            """,
-            (row[0],),
-        )
+        cur = con.execute("SELECT chunk_id FROM chunks")
         return {r[0] for r in cur.fetchall()}
+    except sqlite3.OperationalError:
+        return set()
     finally:
         con.close()
+
+
+# --- Flat-file writer ------------------------------------------------------
+
+
+class FlatVectorStore:
+    """Append-only float32 .vectors.f32 + chunk-metadata .text.sqlite.
+
+    Row N in the .f32 file (offset = N * dim * 4) corresponds to chunks.row_id
+    = N in the sqlite. Both are produced in lockstep by the upsert thread, so
+    there's never a partial commit visible to other readers.
+    """
+
+    def __init__(self, out_dir: Path, name: str, dim: int):
+        self.dim = dim
+        self.vec_path = out_dir / f"{name}.vectors.f32"
+        self.text_path = out_dir / f"{name}.text.sqlite"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Append-mode binary file; row count derives from filesize.
+        self._fp = open(self.vec_path, "ab")
+        existing_bytes = self.vec_path.stat().st_size
+        if existing_bytes % (dim * 4) != 0:
+            raise RuntimeError(
+                f"{self.vec_path} size {existing_bytes} is not a multiple of "
+                f"dim*4 ({dim*4}); refusing to append to a corrupted file"
+            )
+        self.next_row = existing_bytes // (dim * 4)
+        # check_same_thread=False so the upsert thread can use this connection
+        # (single writer, no concurrency concerns).
+        self._con = sqlite3.connect(str(self.text_path), check_same_thread=False)
+        self._con.execute("PRAGMA journal_mode = WAL")
+        self._con.execute("PRAGMA synchronous = NORMAL")
+        self._con.execute(
+            """CREATE TABLE IF NOT EXISTS chunks (
+                row_id INTEGER PRIMARY KEY,
+                chunk_id TEXT NOT NULL UNIQUE,
+                text TEXT NOT NULL,
+                source TEXT,
+                url TEXT,
+                title TEXT,
+                chunk_index INTEGER
+            )"""
+        )
+        self._con.execute(
+            "CREATE INDEX IF NOT EXISTS chunks_chunk_id ON chunks (chunk_id)"
+        )
+        self._con.commit()
+
+    def append(
+        self,
+        vectors: "np.ndarray",  # noqa: F821 — numpy imported in caller
+        chunk_ids: list[str],
+        texts: list[str],
+        metas: list[dict],
+    ) -> int:
+        n = vectors.shape[0]
+        assert vectors.shape[1] == self.dim
+        assert vectors.dtype.name == "float32"
+        assert n == len(chunk_ids) == len(texts) == len(metas)
+
+        first_row = self.next_row
+        # Append vectors as raw bytes — fastest path, no header to update.
+        self._fp.write(vectors.tobytes(order="C"))
+        self._fp.flush()
+        rows = [
+            (
+                first_row + i,
+                chunk_ids[i],
+                texts[i],
+                metas[i].get("source", ""),
+                metas[i].get("url", ""),
+                metas[i].get("title", ""),
+                int(metas[i].get("chunk_index", 0)),
+            )
+            for i in range(n)
+        ]
+        self._con.executemany(
+            "INSERT OR IGNORE INTO chunks VALUES (?,?,?,?,?,?,?)", rows
+        )
+        self._con.commit()
+        self.next_row += n
+        return first_row
+
+    def close(self) -> None:
+        try:
+            self._fp.flush()
+            self._fp.close()
+        except Exception:
+            pass
+        try:
+            self._con.close()
+        except Exception:
+            pass
 
 
 def _dump_lookup(existing: set[str]) -> str:
@@ -311,28 +392,6 @@ def encode_batch(model, texts: list[str], batch_size: int, prefix: str = ""):
     )
 
 
-# --- Target chromadb writer ------------------------------------------------
-
-
-def get_target_collection(db_path: str, collection_name: str):
-    import chromadb
-
-    client = chromadb.PersistentClient(path=db_path)
-    return client.get_or_create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"},
-    )
-
-
-def upsert_batch(collection, ids, texts, embeddings, metadatas) -> None:
-    collection.upsert(
-        ids=ids,
-        documents=texts,
-        embeddings=embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings,
-        metadatas=metadatas,
-    )
-
-
 # --- Driver ----------------------------------------------------------------
 
 
@@ -340,6 +399,8 @@ def reembed(
     source: str,
     target: str,
     db_path: str,
+    out_dir: Path,
+    dim: int,
     model_name: str,
     workers: int,
     batch_size: int,
@@ -350,6 +411,8 @@ def reembed(
     prefix: str,
     dry_run: bool,
 ) -> None:
+    import numpy as np
+
     logger.info(f"=== Re-embedding {source} -> {target} with {model_name} ===")
     source_segment_id, id_min, id_max, source_total = get_source_id_range(db_path, source)
     logger.info(
@@ -357,7 +420,7 @@ def reembed(
         f"id range {id_min}..{id_max})"
     )
 
-    target_existing = load_target_existing_ids(db_path, target)
+    target_existing = load_target_existing_ids(out_dir, target)
     logger.info(f"Target {target!r} already has {len(target_existing)} chunks (resume)")
 
     lookup_path = _dump_lookup(target_existing)
@@ -365,11 +428,14 @@ def reembed(
     logger.info(f"Wrote lookup pickle ({size_mb:.1f} MB) at {lookup_path}")
 
     if dry_run:
-        collection = None
+        store = None
         model = None
         logger.info("DRY RUN — will count emit candidates only")
     else:
-        collection = get_target_collection(db_path, target)
+        store = FlatVectorStore(out_dir, target, dim=dim)
+        logger.info(
+            f"Output: {store.vec_path} (resume from row {store.next_row}) + {store.text_path}"
+        )
         model = build_embedder(model_name, device=device, fp16=fp16)
 
     work_queue: mp.Queue = mp.Queue(maxsize=queue_depth)
@@ -405,7 +471,8 @@ def reembed(
                     break
                 ids, texts, embs, metas = item
                 if not dry_run:
-                    upsert_batch(collection, ids, texts, embs, metas)
+                    embs32 = embs.astype("float32", copy=False)
+                    store.append(embs32, ids, texts, metas)
                 upsert_queue.task_done()
         except Exception as e:
             upsert_error["err"] = repr(e)
@@ -413,7 +480,7 @@ def reembed(
         finally:
             upsert_done.set()
 
-    upsert_thread = threading.Thread(target=_upsert_loop, name="chroma-upsert", daemon=True)
+    upsert_thread = threading.Thread(target=_upsert_loop, name="flat-writer", daemon=True)
     upsert_thread.start()
 
     new_chunks = 0
@@ -485,6 +552,8 @@ def reembed(
 
     if upsert_error:
         logger.error(f"Upsert error: {upsert_error['err']}")
+    if store is not None:
+        store.close()
     elapsed = time.time() - t0
     agg = recompute()
     rate = new_chunks / elapsed if elapsed > 0 else 0
@@ -492,8 +561,8 @@ def reembed(
         f"=== Done: {target} ===  new={new_chunks} scanned={agg['scanned']} "
         f"skipped={agg['skipped_existing']}  {elapsed/60:.1f} min  {rate:.0f}/sec"
     )
-    if not dry_run:
-        logger.info(f"  Collection total: {collection.count()} chunks")
+    if not dry_run and store is not None:
+        logger.info(f"  Total rows in {store.vec_path.name}: {store.next_row}")
 
 
 def main() -> None:
@@ -507,9 +576,14 @@ def main() -> None:
         "--prefix", default="search_document: ",
         help="Per-text prefix required by some models (default for nomic-v1.5)",
     )
-    p.add_argument("--db-path", default="data/chroma")
+    p.add_argument("--db-path", default="data/chroma", help="Source chromadb persist dir")
+    p.add_argument(
+        "--out-dir", default="data/embeddings",
+        help="Where to write <target>.vectors.f32 and <target>.text.sqlite",
+    )
+    p.add_argument("--dim", type=int, default=768, help="Embedding dimension (nomic-v1.5 = 768)")
     p.add_argument("--workers", type=int, default=0, help="0 = min(cpu_count, 12)")
-    p.add_argument("--batch-size", type=int, default=1000, help="Producer emit batch")
+    p.add_argument("--batch-size", type=int, default=2000, help="Producer emit batch")
     p.add_argument("--encode-batch-size", type=int, default=256, help="GPU sub-batch")
     p.add_argument("--queue-depth", type=int, default=8)
     p.add_argument("--device", default="auto")
@@ -528,6 +602,8 @@ def main() -> None:
         source=args.source,
         target=args.target,
         db_path=args.db_path,
+        out_dir=Path(args.out_dir),
+        dim=args.dim,
         model_name=args.model,
         workers=workers,
         batch_size=args.batch_size,
