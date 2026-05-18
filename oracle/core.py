@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sys
 from dataclasses import dataclass
@@ -151,7 +152,12 @@ async def wake_word_listen(
     def aborted() -> bool:
         return should_abort() if should_abort is not None else False
 
-    audio = record_until_silence(should_abort=should_abort)
+    try:
+        audio = record_until_silence(should_abort=should_abort)
+    except (ValueError, OSError) as e:
+        logger.warning(f"Mic unavailable for wake word: {e}")
+        await asyncio.sleep(5)  # back off before retrying
+        return None
     if aborted() or len(audio) == 0:
         return None
 
@@ -202,7 +208,11 @@ async def voice_turn(
         if leds is not None:
             leds.set_mode("librarian")
         logger.info("Listening...")
-        audio = record_until_silence(should_abort=should_abort)
+        try:
+            audio = record_until_silence(should_abort=should_abort)
+        except (ValueError, OSError) as e:
+            logger.warning(f"Mic unavailable for voice turn: {e}")
+            return False
         if aborted() or len(audio) == 0:
             return False
 

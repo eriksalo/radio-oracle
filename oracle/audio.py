@@ -147,6 +147,40 @@ def _wait_or_abort(should_abort: AbortCheck) -> None:
         time.sleep(0.05)
 
 
+def _resolve_device(name: str, kind: str) -> int | str:
+    """Resolve a device name to its integer index (once) for reliable reuse.
+
+    sounddevice's built-in name matching can fail after a stream closes on
+    some ALSA backends, so we search the device list manually and cache the
+    integer index.
+    """
+    import sounddevice as sd
+
+    kind_key = f"max_{kind}_channels"
+    devices = sd.query_devices()
+    for idx, dev in enumerate(devices):
+        if name in dev["name"] and dev[kind_key] > 0:
+            logger.info(f"Resolved {kind} device {name!r} → index {idx} ({dev['name']})")
+            return idx
+    # Log all devices for debugging
+    logger.warning(f"Could not resolve {kind} device {name!r}. Available devices:")
+    for idx, dev in enumerate(devices):
+        logger.warning(f"  [{idx}] {dev['name']} ({kind_key}={dev[kind_key]})")
+    return name  # fall back to string matching
+
+
+# Cache resolved device indices so we only do the lookup once.
+_output_device_id: int | str | None = None
+
+
+def _get_output_device() -> int | str:
+    global _output_device_id
+    if _output_device_id is None:
+        _output_device_id = _resolve_device(settings.audio_output_device, "output")
+        logger.debug(f"Resolved output device: {settings.audio_output_device!r} → {_output_device_id}")
+    return _output_device_id
+
+
 def play_audio(
     audio: np.ndarray,
     sample_rate: int | None = None,
@@ -158,7 +192,7 @@ def play_audio(
     src_sr = sample_rate or settings.audio_sample_rate
     out, dst_sr = _resample_to_playback(audio, src_sr)
     out = _apply_volume(out)
-    sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
+    sd.play(out, samplerate=dst_sr, device=_get_output_device())
     _wait_or_abort(should_abort)
 
 
@@ -180,7 +214,7 @@ def play_wav_bytes(wav_bytes: bytes, should_abort: AbortCheck = None) -> None:
             audio = audio.reshape(-1, channels)
         out, dst_sr = _resample_to_playback(audio, src_sr)
         out = _apply_volume(out)
-        sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
+        sd.play(out, samplerate=dst_sr, device=_get_output_device())
         _wait_or_abort(should_abort)
 
 
