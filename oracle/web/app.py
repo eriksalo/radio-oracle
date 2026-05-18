@@ -291,136 +291,101 @@ async def model_files():
     return {"files": files}
 
 
-# --- Hardware ---
+# --- Hardware singletons ---
 
-def _read_gpio(pin: int) -> bool | None:
-    """Read a GPIO pin state. Returns True (HIGH), False (LOW), or None if unavailable."""
-    try:
-        import Jetson.GPIO as GPIO
-
-        GPIO.setmode(GPIO.BOARD)
-        GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        val = GPIO.input(pin)
-        return bool(val)
-    except Exception:
-        # Try sysfs fallback
-        try:
-            # Map board pin to sysfs GPIO number (Jetson Orin Nano)
-            sysfs = Path(f"/sys/class/gpio/gpio{_board_to_sysfs(pin)}/value")
-            if sysfs.exists():
-                return sysfs.read_text().strip() == "1"
-        except Exception:
-            pass
-    return None
+_pot: object | None = None
+_action_btn: object | None = None
+_power_sw: object | None = None
+_leds: object | None = None
 
 
-def _board_to_sysfs(board_pin: int) -> int:
-    """Map Jetson Orin Nano board pin to sysfs GPIO number (common mappings)."""
-    # These are approximate — Jetson Orin Nano Super specific
-    mapping = {
-        31: 316,  # momentary button
-        33: 317,  # on/off switch
-    }
-    return mapping.get(board_pin, board_pin)
+def _get_pot():
+    global _pot
+    if _pot is None:
+        from oracle.hardware.pot import Potentiometer
+        _pot = Potentiometer()
+    return _pot
 
 
-def _read_ads1115() -> dict | None:
-    """Read ADS1115 ADC channel 0 (potentiometer) via I2C."""
-    try:
-        import smbus2
-
-        bus = smbus2.SMBus(1)
-        addr = 0x48
-
-        # Config: AINp=A0, AINn=GND, FSR=+/-4.096V, single-shot, 128SPS
-        config = 0xC383
-        bus.write_i2c_block_data(addr, 0x01, [(config >> 8) & 0xFF, config & 0xFF])
-
-        import time
-        time.sleep(0.01)
-
-        # Read conversion
-        data = bus.read_i2c_block_data(addr, 0x00, 2)
-        raw = (data[0] << 8) | data[1]
-        if raw > 32767:
-            raw -= 65536
-
-        # Convert to voltage (FSR = 4.096V, 16-bit signed)
-        voltage = raw * 4.096 / 32767
-        # Convert to 0-100% (3.3V pot rail)
-        percent = max(0.0, min(100.0, (voltage / 3.3) * 100))
-
-        bus.close()
-        return {"raw": raw, "voltage": round(voltage, 3), "percent": round(percent, 1)}
-    except Exception as e:
-        return {"error": str(e)}
+def _get_switches():
+    global _action_btn, _power_sw
+    if _action_btn is None:
+        from oracle.hardware.switch_adc import make_action_button_switch, make_power_switch_switch
+        _action_btn = make_action_button_switch()
+        _power_sw = make_power_switch_switch()
+    return _action_btn, _power_sw
 
 
-def _set_led_pwm(duty: int) -> bool:
-    """Set LED brightness via PWM on pin 32 (PWM0). duty: 0-100."""
-    try:
-        import Jetson.GPIO as GPIO
-
-        GPIO.setmode(GPIO.BOARD)
-        GPIO.setup(32, GPIO.OUT)
-        pwm = GPIO.PWM(32, 1000)  # 1kHz
-        pwm.start(max(0, min(100, duty)))
-        # Store reference so it doesn't get garbage collected
-        _set_led_pwm._pwm = pwm
-        return True
-    except Exception:
-        # sysfs fallback for basic on/off
-        try:
-            pin_path = Path(f"/sys/class/gpio/gpio{_board_to_sysfs(32)}")
-            if not pin_path.exists():
-                Path("/sys/class/gpio/export").write_text(str(_board_to_sysfs(32)))
-            (pin_path / "direction").write_text("out")
-            (pin_path / "value").write_text("1" if duty > 0 else "0")
-            return True
-        except Exception:
-            return False
+def _get_leds():
+    global _leds
+    if _leds is None:
+        from oracle.hardware.leds import StatusLEDs
+        _leds = StatusLEDs()
+    return _leds
 
 
 @app.get("/api/hardware")
 async def hardware_status():
-    """Read all hardware inputs: pot, button, switch."""
+    """Read all hardware inputs: pot, button, switch, LED mode."""
     result: dict = {}
 
     # Potentiometer via ADS1115
-    result["potentiometer"] = _read_ads1115()
-
-    # Momentary button (pin 31, active LOW with pull-up)
-    btn_val = _read_gpio(31)
-    if btn_val is not None:
-        result["button"] = {"pin": 31, "pressed": not btn_val, "raw": btn_val}
+    pot = _get_pot()
+    if pot.available:
+        reading = pot.read()
+        if reading:
+            result["potentiometer"] = {
+                "raw": reading.raw, "voltage": reading.voltage, "percent": reading.pct,
+            }
+        else:
+            result["potentiometer"] = {"error": "read failed"}
     else:
-        result["button"] = {"pin": 31, "error": "GPIO unavailable"}
+        result["potentiometer"] = {"error": pot.error or "unavailable"}
 
-    # On/off switch (pin 33, active LOW with pull-up)
-    sw_val = _read_gpio(33)
-    if sw_val is not None:
-        result["switch"] = {"pin": 33, "on": not sw_val, "raw": sw_val}
+    # Switches via ADS1115
+    action_btn, power_sw = _get_switches()
+
+    btn_reading = action_btn.read()
+    if btn_reading:
+        result["button"] = {
+            "channel": btn_reading.channel, "pressed": btn_reading.closed,
+            "voltage": btn_reading.voltage,
+        }
     else:
-        result["switch"] = {"pin": 33, "error": "GPIO unavailable"}
+        result["button"] = {"error": action_btn.error or "unavailable"}
+
+    sw_reading = power_sw.read()
+    if sw_reading:
+        result["switch"] = {
+            "channel": sw_reading.channel, "on": sw_reading.closed,
+            "voltage": sw_reading.voltage,
+        }
+    else:
+        result["switch"] = {"error": power_sw.error or "unavailable"}
+
+    # LED current mode
+    leds = _get_leds()
+    result["led"] = {"mode": leds.mode}
 
     return result
 
 
 @app.post("/api/hardware/led")
 async def set_led(request: Request):
-    """Set LED brightness. Expects {"brightness": 0-100} or {"color": "off|dim|bright|pulse"}."""
+    """Set LED mode or direct RGB. Expects {"mode": "off|radio|..."} or {"r": bool, "g": bool, "b": bool}."""
     body = await request.json()
+    leds = _get_leds()
 
-    if "brightness" in body:
-        duty = int(body["brightness"])
-        ok = _set_led_pwm(duty)
-        return {"brightness": duty, "ok": ok}
+    if "r" in body or "g" in body or "b" in body:
+        color = leds.set_rgb(body.get("r", False), body.get("g", False), body.get("b", False))
+        return {"ok": True, "r": color.r, "g": color.g, "b": color.b}
 
-    color = body.get("color", "off")
-    presets = {"off": 0, "dim": 15, "medium": 50, "bright": 100}
-    duty = presets.get(color, 0)
-    ok = _set_led_pwm(duty)
-    return {"color": color, "brightness": duty, "ok": ok}
+    mode = body.get("mode", "off")
+    from oracle.hardware.leds import MODE_COLORS
+    if mode not in MODE_COLORS:
+        return JSONResponse({"error": f"unknown mode: {mode}", "valid": list(MODE_COLORS)}, status_code=400)
+    leds.set_mode(mode)
+    return {"ok": True, "mode": mode}
 
 
 # --- Test tools ---

@@ -114,33 +114,39 @@
       <div class="panel">
         <div class="panel-header">// Switches</div>
         <div class="panel-body" id="hw-switches">
-          <div class="loading-text">READING GPIO</div>
+          <div class="loading-text">READING ADC</div>
         </div>
       </div>
     </div>
 
     <div class="panel">
-      <div class="panel-header">// Status LED Control</div>
+      <div class="panel-header">// RGB LED Control</div>
       <div class="panel-body">
+        <div class="status-row" style="margin-bottom:12px">
+          <span class="status-label">Current Mode</span>
+          <span class="status-value" id="led-current-mode">—</span>
+        </div>
+
         <div style="margin-bottom:12px">
-          <div class="status-row" style="margin-bottom:8px">
-            <span class="status-label">Brightness</span>
-            <span class="status-value" id="led-brightness-label">—</span>
-          </div>
-          <div class="bar-container">
-            <div class="bar-track" style="cursor:pointer;position:relative" id="led-slider-track" onclick="ledSliderClick(event)">
-              <div class="bar-fill" id="led-slider-fill" style="width:0%"></div>
-              <div id="led-slider-thumb" style="position:absolute;top:-3px;width:4px;height:16px;background:var(--green);left:0%;transition:left 0.1s"></div>
-            </div>
-            <div class="bar-label" id="led-slider-value">0%</div>
+          <div class="status-label" style="margin-bottom:6px">Mode Presets</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn led-preset" onclick="setLEDMode('off')">Off</button>
+            <button class="btn led-preset" onclick="setLEDMode('radio')" style="border-color:#30ff50">Radio</button>
+            <button class="btn led-preset" onclick="setLEDMode('librarian')" style="border-color:#3090ff">Librarian</button>
+            <button class="btn led-preset" onclick="setLEDMode('thinking')" style="border-color:#ffb020">Thinking</button>
+            <button class="btn led-preset" onclick="setLEDMode('speaking')" style="border-color:#30ffcc">Speaking</button>
+            <button class="btn led-preset" onclick="setLEDMode('error')" style="border-color:#ff3030">Error</button>
           </div>
         </div>
 
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn led-preset" onclick="setLED('off')">Off</button>
-          <button class="btn led-preset" onclick="setLED('dim')">Dim</button>
-          <button class="btn led-preset" onclick="setLED('medium')">Medium</button>
-          <button class="btn led-preset" onclick="setLED('bright')">Bright</button>
+        <div>
+          <div class="status-label" style="margin-bottom:6px">Direct RGB</div>
+          <div style="display:flex;gap:12px;align-items:center">
+            <label style="font-size:12px"><input type="checkbox" id="led-r"> R</label>
+            <label style="font-size:12px"><input type="checkbox" id="led-g"> G</label>
+            <label style="font-size:12px"><input type="checkbox" id="led-b"> B</label>
+            <button class="btn" onclick="setLEDRGB()" style="padding:4px 12px">Apply</button>
+          </div>
         </div>
         <div id="led-result" style="margin-top:8px;font-size:11px;color:var(--green-dim)"></div>
       </div>
@@ -618,6 +624,22 @@ async function testTTS() {
 
 // === Hardware ===
 
+function renderSwitch(label, data, field) {
+  if (data && !data.error) {
+    const on = data[field];
+    const v = data.voltage != null ? ` (${data.voltage}V)` : '';
+    return `<div class="status-row">
+      <span class="status-label">${label} (AIN${data.channel})</span>
+      <span class="status-value ${on ? 'status-ok' : 'status-fail'}">${on ? (field === 'pressed' ? 'PRESSED' : 'ON') : (field === 'pressed' ? 'RELEASED' : 'OFF')}${v}</span>
+    </div>`;
+  }
+  const err = data?.error || 'unavailable';
+  return `<div class="status-row">
+    <span class="status-label">${label}</span>
+    <span class="status-value status-warn">${escapeHtml(err)}</span>
+  </div>`;
+}
+
 async function loadHardware() {
   try {
     const data = await fetchJSON('/api/hardware');
@@ -642,45 +664,19 @@ async function loadHardware() {
         ${makeBar(p.percent, p.percent + '%')}`;
     } else {
       const err = data.potentiometer?.error || 'unavailable';
-      potEl.innerHTML = `<span class="status-warn">ADC: ${escapeHtml(err)}</span>
-        <div style="margin-top:6px;font-size:11px;color:var(--green-dim)">
-        Requires ADS1115 on I2C bus 1 (addr 0x48).<br>
-        Install: pip install smbus2</div>`;
+      potEl.innerHTML = `<span class="status-warn">ADC: ${escapeHtml(err)}</span>`;
     }
 
     // Switches
     const swEl = document.getElementById('hw-switches');
-    let swHtml = '';
+    let swHtml = renderSwitch('Power Switch', data.switch, 'on');
+    swHtml += renderSwitch('Action Button', data.button, 'pressed');
+    swEl.innerHTML = swHtml;
 
-    // On/off switch
-    if (data.switch && !data.switch.error) {
-      const onOff = data.switch.on;
-      swHtml += `<div class="status-row">
-        <span class="status-label">On/Off Switch (Pin 33)</span>
-        <span class="status-value ${onOff ? 'status-ok' : 'status-fail'}">${onOff ? 'ON' : 'OFF'}</span>
-      </div>`;
-    } else {
-      swHtml += `<div class="status-row">
-        <span class="status-label">On/Off Switch (Pin 33)</span>
-        <span class="status-value status-warn">N/A</span>
-      </div>`;
+    // LED mode
+    if (data.led) {
+      document.getElementById('led-current-mode').textContent = data.led.mode.toUpperCase();
     }
-
-    // Momentary button
-    if (data.button && !data.button.error) {
-      const pressed = data.button.pressed;
-      swHtml += `<div class="status-row">
-        <span class="status-label">Momentary Button (Pin 31)</span>
-        <span class="status-value ${pressed ? 'status-ok' : ''}">${pressed ? 'PRESSED' : 'RELEASED'}</span>
-      </div>`;
-    } else {
-      swHtml += `<div class="status-row">
-        <span class="status-label">Momentary Button (Pin 31)</span>
-        <span class="status-value status-warn">N/A</span>
-      </div>`;
-    }
-
-    swEl.innerHTML = swHtml || '<span class="status-warn">GPIO UNAVAILABLE</span>';
   } catch(e) {
     document.getElementById('hw-pot').innerHTML =
       '<span class="status-fail">HARDWARE READ FAILED</span>';
@@ -690,59 +686,46 @@ async function loadHardware() {
 }
 
 // LED control
-async function setLED(color) {
+async function setLEDMode(mode) {
   const result = document.getElementById('led-result');
   try {
     const resp = await fetch('/api/hardware/led', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({color})
+      body: JSON.stringify({mode})
     });
     const data = await resp.json();
     if (data.ok) {
-      result.textContent = `LED set to ${data.color.toUpperCase()} (${data.brightness}%)`;
-      updateLEDSlider(data.brightness);
+      result.textContent = `LED mode: ${data.mode.toUpperCase()}`;
+      document.getElementById('led-current-mode').textContent = data.mode.toUpperCase();
     } else {
-      result.innerHTML = '<span class="status-warn">LED control unavailable (GPIO not accessible)</span>';
+      result.innerHTML = `<span class="status-warn">${escapeHtml(data.error || 'LED control unavailable')}</span>`;
     }
   } catch(e) {
     result.innerHTML = `<span class="status-fail">${escapeHtml(e.message)}</span>`;
   }
 }
 
-async function setLEDBrightness(brightness) {
+async function setLEDRGB() {
+  const r = document.getElementById('led-r').checked;
+  const g = document.getElementById('led-g').checked;
+  const b = document.getElementById('led-b').checked;
   const result = document.getElementById('led-result');
   try {
     const resp = await fetch('/api/hardware/led', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({brightness})
+      body: JSON.stringify({r, g, b})
     });
     const data = await resp.json();
     if (data.ok) {
-      result.textContent = `LED brightness: ${data.brightness}%`;
-      updateLEDSlider(data.brightness);
-    } else {
-      result.innerHTML = '<span class="status-warn">LED control unavailable</span>';
+      const channels = [data.r && 'R', data.g && 'G', data.b && 'B'].filter(Boolean);
+      result.textContent = channels.length ? `LED: ${channels.join('+')}` : 'LED: OFF';
+      document.getElementById('led-current-mode').textContent = 'MANUAL';
     }
   } catch(e) {
     result.innerHTML = `<span class="status-fail">${escapeHtml(e.message)}</span>`;
   }
-}
-
-function updateLEDSlider(pct) {
-  document.getElementById('led-slider-fill').style.width = pct + '%';
-  document.getElementById('led-slider-thumb').style.left = pct + '%';
-  document.getElementById('led-slider-value').textContent = pct + '%';
-  document.getElementById('led-brightness-label').textContent = pct + '%';
-}
-
-function ledSliderClick(e) {
-  const track = document.getElementById('led-slider-track');
-  const rect = track.getBoundingClientRect();
-  const pct = Math.round(Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)));
-  updateLEDSlider(pct);
-  setLEDBrightness(pct);
 }
 
 // Live hardware polling
@@ -795,6 +778,11 @@ async function pollHW() {
       } else {
         el.innerHTML = '<span class="status-fail">OFF</span>';
       }
+    }
+
+    // LED mode
+    if (data.led) {
+      document.getElementById('led-current-mode').textContent = data.led.mode.toUpperCase();
     }
   } catch(e) { /* ignore polling errors */ }
 }
