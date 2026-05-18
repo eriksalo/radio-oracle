@@ -2,14 +2,15 @@
 
 States:
   STANDBY   — power switch open. LED off, no audio, button ignored.
-  RADIO     — power on, default. Music player (placeholder until implemented).
-  LIBRARIAN — long-press toggles into here. Voice conversation loop.
+  RADIO     — power on, default. Music plays; wake word triggers one voice turn.
+  LIBRARIAN — long-press toggles into here. Voice conversation loop; music paused.
 
 Transitions:
-  power-on          : STANDBY  -> RADIO
-  power-off         : *        -> STANDBY
-  long-press button : RADIO   <-> LIBRARIAN
-  short-press button: RADIO    -> "next track" (placeholder); no-op in LIBRARIAN
+  power-on          : STANDBY  -> RADIO  (music starts)
+  power-off         : *        -> STANDBY (music stops, all I/O halted)
+  long-press button : RADIO   <-> LIBRARIAN (music pauses/resumes)
+  short-press button: RADIO    -> next track; no-op in LIBRARIAN
+  wake word detected: RADIO    -> pause music, one voice turn, resume music
 """
 
 from __future__ import annotations
@@ -38,6 +39,26 @@ class OracleApp:
         self._state_writer.set_mode(self._state)
         self._state_writer.set_power(self.power.is_on)
         self.power.add_listener(self._state_writer.set_power)
+        self._player = None  # lazy init
+
+    def _get_player(self):
+        """Lazily create the music player (only if catalog has tracks)."""
+        if self._player is not None:
+            return self._player
+        try:
+            from oracle.music.player import Player
+
+            self._player = Player()
+            count = self._player._catalog.count()
+            if count > 0:
+                logger.info(f"Music player ready ({count} tracks)")
+            else:
+                logger.info("Music catalog empty — player disabled")
+                self._player = None
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Music player unavailable: {e}")
+            self._player = None
+        return self._player
 
     async def run(self) -> None:
         from oracle.core import (
@@ -81,13 +102,14 @@ class OracleApp:
                         leds=self.leds,
                         should_abort=self._should_exit_librarian,
                     )
-                    # Re-assert color after a turn (it may have ended in
-                    # "speaking"/"thinking"); the next loop iteration will
-                    # honor any pending state change from buttons.
                     if self._state == "librarian":
                         self.leds.set_mode("librarian")
                 elif self._state == "radio":
-                    # Listen for wake word; on detection, do one voice turn.
+                    # Ensure music is playing in radio mode.
+                    self._ensure_music()
+
+                    # Listen for wake word; on detection, pause music, do one
+                    # voice turn, then resume.
                     remainder = await wake_word_listen(
                         voice_ctx,
                         leds=self.leds,
@@ -95,6 +117,7 @@ class OracleApp:
                     )
                     self._handle_buttons()
                     if remainder is not None and self._state == "radio":
+                        self._pause_music()
                         self.leds.set_mode("librarian")
                         if remainder:
                             await voice_turn(
@@ -110,6 +133,7 @@ class OracleApp:
                                 should_abort=lambda: not self.power.is_on,
                             )
                         self.leds.set_mode("radio")
+                        self._resume_music()
         except KeyboardInterrupt:
             logger.info("Oracle interrupted")
         except Exception as e:  # noqa: BLE001
@@ -119,19 +143,52 @@ class OracleApp:
         finally:
             await self._shutdown(voice_ctx)
 
+    # ---------------------------------------------------------------- music
+
+    def _ensure_music(self) -> None:
+        """Start music if not already playing."""
+        player = self._get_player()
+        if player and not player.is_playing:
+            player.play()
+
+    def _pause_music(self) -> None:
+        if self._player and self._player.is_playing:
+            self._player.pause()
+
+    def _resume_music(self) -> None:
+        if self._player and self._player.is_playing:
+            self._player.resume()
+
+    def _stop_music(self) -> None:
+        if self._player:
+            self._player.stop()
+
+    def _next_track(self) -> None:
+        player = self._get_player()
+        if player:
+            track = player.next()
+            if track:
+                logger.info(f"Next track: {track.artist} — {track.title}")
+
     # ---------------------------------------------------------------- state
 
     def _enter(self, state: State) -> None:
         if state == self._state:
             return
-        logger.info(f"Mode: {self._state} -> {state}")
+        old = self._state
+        logger.info(f"Mode: {old} -> {state}")
         self._state = state
         self._state_writer.set_mode(state)
+
         if state == "standby":
+            self._stop_music()
             self.leds.set_mode("off")
         elif state == "radio":
             self.leds.set_mode("radio")
+            if old == "librarian":
+                self._resume_music()
         elif state == "librarian":
+            self._pause_music()
             self.leds.set_mode("librarian")
 
     def _drain_events(self) -> list[ButtonEvent]:
@@ -152,10 +209,9 @@ class OracleApp:
                     self._enter("radio")
             elif evt.kind == "short":
                 if self._state == "radio":
-                    logger.info("Radio: next track (placeholder)")
+                    self._next_track()
 
     def _should_exit_librarian(self) -> bool:
-        # Peek (not pop) — _handle_buttons drains the queue at top of loop.
         if not self.power.is_on:
             return True
         for evt in list(self.button.events.queue):
@@ -165,6 +221,10 @@ class OracleApp:
 
     async def _shutdown(self, voice_ctx) -> None:
         from oracle.hardware.volume import get_volume_control
+
+        self._stop_music()
+        if self._player:
+            self._player.close()
 
         for op in (self.button.cleanup, self.power.cleanup, self.leds.cleanup, get_volume_control().cleanup):
             try:

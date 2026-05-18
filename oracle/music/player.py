@@ -26,6 +26,7 @@ class Player:
         self._stop_event = threading.Event()
         self._paused = threading.Event()
         self._paused.set()  # starts unpaused
+        self._continuous = True
         self._lock = threading.Lock()
 
     @property
@@ -40,8 +41,12 @@ class Player:
     def is_paused(self) -> bool:
         return not self._paused.is_set()
 
-    def play(self, track: Track | None = None) -> Track | None:
-        """Start playing a track. If None, pick a random one."""
+    def play(self, track: Track | None = None, continuous: bool = True) -> Track | None:
+        """Start playing a track. If None, pick a random one.
+
+        With *continuous=True* (default), automatically advances to the
+        next random track when the current one ends — true radio behaviour.
+        """
         self.stop()
         if track is None:
             track = self._catalog.random_track()
@@ -52,6 +57,7 @@ class Player:
         self._current = track
         self._stop_event.clear()
         self._paused.set()
+        self._continuous = continuous
         self._thread = threading.Thread(
             target=self._play_thread, args=(track,), name="music-player", daemon=True
         )
@@ -108,8 +114,19 @@ class Player:
         self._current = None
 
     def _play_thread(self, track: Track) -> None:
-        """Background thread target for single-track playback."""
+        """Background thread: play track, then auto-advance if continuous."""
         self._play_file(track)
+        # Auto-advance to next random track in continuous mode.
+        while self._continuous and not self._stop_event.is_set():
+            next_track = self._catalog.random_track()
+            if next_track is None:
+                break
+            self._current = next_track
+            logger.info(f"Playing: {next_track.artist} — {next_track.title}")
+            time.sleep(1.0)  # brief pause between tracks
+            if self._stop_event.is_set():
+                break
+            self._play_file(next_track)
         self._current = None
 
     def _play_file(self, track: Track) -> None:
@@ -121,7 +138,6 @@ class Player:
             return
 
         try:
-            info = miniaudio.mp3_get_file_info(track.path) if track.path.endswith(".mp3") else None
             decoded = miniaudio.decode_file(
                 track.path,
                 output_format=miniaudio.SampleFormat.FLOAT32,
