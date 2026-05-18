@@ -26,17 +26,30 @@ async def _init_common() -> tuple[str, ConversationStore, str]:
     return system_prompt, store, session_id
 
 
+_RETRIEVER = None
+
+
 def _try_rag_query(user_input: str) -> str:
-    """Attempt RAG retrieval. Returns empty string if RAG unavailable."""
+    """Attempt RAG retrieval. Returns empty string if RAG unavailable.
+
+    Detects "go deeper" phrasing in the user's message and switches to the
+    Tier-2 cross-encoder-reranked retrieval path. The retriever singleton is
+    reused across turns so embedder + reranker stay loaded.
+    """
+    global _RETRIEVER
     try:
+        from oracle.rag.modes import detect_mode
         from oracle.rag.retriever import Retriever
 
-        retriever = Retriever()
-        collections = retriever.list_collections()
-        if not collections:
-            return ""
-        results = retriever.query(user_input)
-        return retriever.format_context(results)
+        if _RETRIEVER is None:
+            _RETRIEVER = Retriever()
+            if not _RETRIEVER.list_collections():
+                return ""
+        mode = detect_mode(user_input)
+        if mode == "deep":
+            logger.info("RAG: Tier-2 (deep) retrieval triggered")
+        results = _RETRIEVER.query(user_input, mode=mode)
+        return _RETRIEVER.format_context(results)
     except Exception as e:
         logger.debug(f"RAG unavailable: {e}")
         return ""

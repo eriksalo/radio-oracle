@@ -1,4 +1,4 @@
-"""ChromaDB-based semantic retrieval."""
+"""Semantic retrieval across pluggable vector backends with tiered modes."""
 
 from __future__ import annotations
 
@@ -7,20 +7,27 @@ from pathlib import Path
 from loguru import logger
 
 from config.settings import settings
+from oracle.rag.backends import Hit, VectorBackend
+from oracle.rag.backends.chroma import ChromaBackend
 from oracle.rag.embedder import Embedder
+from oracle.rag.modes import RetrievalMode, params_for
+from oracle.rag.reranker import CrossEncoderReranker
 
 
 class Retriever:
-    """Semantic search across ChromaDB collections."""
+    """Semantic search dispatching to per-collection `VectorBackend`s."""
 
     def __init__(
         self,
         chroma_path: Path | None = None,
         embedder: Embedder | None = None,
+        reranker: CrossEncoderReranker | None = None,
     ):
         self._chroma_path = chroma_path or settings.chroma_path
         self._embedder = embedder or Embedder()
+        self._reranker = reranker  # lazy-built only when first deep query lands
         self._client = None
+        self._backends: dict[str, VectorBackend] = {}
 
     def _get_client(self):
         if self._client is None:
@@ -34,8 +41,17 @@ class Retriever:
                 raise
         return self._client
 
+    def _get_backend(self, name: str) -> VectorBackend:
+        if name not in self._backends:
+            self._backends[name] = ChromaBackend(name, self._get_client(), self._embedder)
+        return self._backends[name]
+
+    def _get_reranker(self) -> CrossEncoderReranker:
+        if self._reranker is None:
+            self._reranker = CrossEncoderReranker()
+        return self._reranker
+
     def list_collections(self) -> list[str]:
-        """List all available collection names."""
         client = self._get_client()
         return [c.name for c in client.list_collections()]
 
@@ -44,58 +60,44 @@ class Retriever:
         query_text: str,
         collection_names: list[str] | None = None,
         top_k: int | None = None,
+        mode: RetrievalMode = "snappy",
     ) -> list[dict]:
         """Search across one or more collections.
 
-        Args:
-            query_text: Natural language query
-            collection_names: Collections to search (None = all)
-            top_k: Number of results per collection
-
-        Returns:
-            List of dicts with 'text', 'source', 'distance' keys, sorted by distance
+        Returns dicts shaped `{text, source, distance, metadata, chunk_id}`,
+        sorted by distance (lower = more relevant), truncated to the mode's
+        `final_top_k` (or the explicit `top_k` override if provided).
         """
-        k = top_k or settings.rag_top_k
-        client = self._get_client()
+        params = params_for(mode, settings)
+        per_coll_k = params.per_collection_top_k
+        final_k = top_k or params.final_top_k
 
         if collection_names is None:
             collection_names = self.list_collections()
-
         if not collection_names:
             logger.warning("No collections available for RAG query")
             return []
 
-        query_embedding = self._embedder.embed_single(query_text)
-        results: list[dict] = []
-
+        hits: list[Hit] = []
         for name in collection_names:
             try:
-                collection = client.get_collection(name)
-                hits = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=k,
-                )
-                for i, doc in enumerate(hits["documents"][0]):
-                    metadata = hits["metadatas"][0][i] if hits["metadatas"] else {}
-                    results.append(
-                        {
-                            "text": doc,
-                            "source": name,
-                            "distance": hits["distances"][0][i] if hits["distances"] else 0.0,
-                            "metadata": metadata,
-                        }
-                    )
+                hits.extend(self._get_backend(name).query(query_text, per_coll_k))
             except Exception as e:
-                logger.warning(f"Error querying collection '{name}': {e}")
+                logger.warning(f"Backend '{name}' raised during query: {e}")
 
-        results.sort(key=lambda x: x["distance"])
-        return results[:k]
+        hits.sort(key=lambda h: h.distance)
+
+        if params.rerank_pool > 0 and hits:
+            pool = hits[: params.rerank_pool]
+            hits = self._get_reranker().rerank(query_text, pool, final_k)
+        else:
+            hits = hits[:final_k]
+
+        return [h.to_dict() for h in hits]
 
     def format_context(self, results: list[dict]) -> str:
-        """Format retrieval results into a context string for the LLM."""
         if not results:
             return ""
-
         parts = ["=== Retrieved Knowledge ==="]
         for i, r in enumerate(results, 1):
             source = r.get("source", "unknown")
