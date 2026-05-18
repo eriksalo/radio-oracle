@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+"""Re-embed an existing ChromaDB collection with a new embedding model.
+
+Reads chunk text + metadata directly from `chroma.sqlite3` (parallel
+SQL reads — no slow chromadb API pagination), embeds them on the GPU with
+a configurable model (default: nomic-embed-text-v1.5, 768-d Matryoshka),
+and writes to a new collection. Doc IDs are preserved so resume is
+trivial — already-embedded IDs in the target are skipped.
+
+Architecture mirrors `ingest_zim.py`:
+    N producer processes (SQL readers)
+        -> mp.Queue (bounded)
+            -> GPU encode loop (main thread, model on CUDA FP16)
+                -> threading.Queue
+                    -> upsert thread (single chromadb writer)
+
+Why processes for SQL producers? The GIL serializes threads on SQL row
+unpacking; on a 32-core box we want them in their own interpreters.
+
+Usage:
+    python scripts/reembed_collection.py \\
+        --source wikipedia \\
+        --target wikipedia_v2 \\
+        --model nomic-ai/nomic-embed-text-v1.5 \\
+        --db-path data/chroma \\
+        --workers 8 --encode-batch-size 256 --batch-size 1000
+"""
+
+from __future__ import annotations
+
+import argparse
+import multiprocessing as mp
+import os
+import pickle
+import queue
+import sqlite3
+import sys
+import tempfile
+import threading
+import time
+from pathlib import Path
+
+from loguru import logger
+
+
+# --- SQL helpers ------------------------------------------------------------
+
+_DOC_KEY = "chroma:document"
+
+
+def get_source_id_range(db_path: str, collection_name: str) -> tuple[int, int, int]:
+    """Return (min_segment_row_id, max_segment_row_id, total_rows) for the
+    METADATA segment of `collection_name`. We range-partition over the
+    internal `embeddings.id` (autoincrement), not `embedding_id` (md5)."""
+    sqlite_path = Path(db_path) / "chroma.sqlite3"
+    con = sqlite3.connect(str(sqlite_path))
+    try:
+        cur = con.cursor()
+        cur.execute(
+            """
+            SELECT MIN(e.id), MAX(e.id), COUNT(e.id)
+            FROM embeddings e
+            JOIN segments s ON s.id = e.segment_id
+            JOIN collections c ON c.id = s.collection
+            WHERE c.name = ? AND s.scope = 'METADATA'
+            """,
+            (collection_name,),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None:
+            raise RuntimeError(f"Collection {collection_name!r} not found or empty")
+        return int(row[0]), int(row[1]), int(row[2])
+    finally:
+        con.close()
+
+
+def load_target_existing_ids(db_path: str, collection_name: str) -> set[str]:
+    """Embedding IDs already in the target collection (md5 strings)."""
+    sqlite_path = Path(db_path) / "chroma.sqlite3"
+    if not sqlite_path.exists():
+        return set()
+    con = sqlite3.connect(str(sqlite_path))
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT id FROM collections WHERE name = ?", (collection_name,)
+        )
+        row = cur.fetchone()
+        if row is None:
+            return set()
+        cur.execute(
+            """
+            SELECT e.embedding_id
+            FROM embeddings e
+            JOIN segments s ON s.id = e.segment_id
+            WHERE s.collection = ? AND s.scope = 'METADATA'
+            """,
+            (row[0],),
+        )
+        return {r[0] for r in cur.fetchall()}
+    finally:
+        con.close()
+
+
+def _dump_lookup(existing: set[str]) -> str:
+    fd, path = tempfile.mkstemp(prefix="reembed_lookup_", suffix=".pkl")
+    with os.fdopen(fd, "wb") as f:
+        pickle.dump(existing, f, protocol=pickle.HIGHEST_PROTOCOL)
+    return path
+
+
+def _load_lookup(path: str) -> set[str]:
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+# --- Producer (multi-process) ----------------------------------------------
+
+_PRODUCER_DONE = "__PRODUCER_DONE__"
+_STATS_TICK = "__STATS_TICK__"
+
+
+def _producer_worker(
+    worker_id: int,
+    db_path: str,
+    source_collection: str,
+    id_start: int,
+    id_end: int,
+    lookup_path: str,
+    batch_size: int,
+    out_queue: mp.Queue,
+) -> None:
+    """Read rows in [id_start, id_end) from source METADATA segment, skip
+    rows whose embedding_id is already in the target, batch and emit."""
+    import logging
+
+    log = logging.getLogger(f"reembed-prod-{worker_id}")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+    try:
+        existing = _load_lookup(lookup_path)
+    except Exception as e:
+        out_queue.put((_PRODUCER_DONE, worker_id, {"error": repr(e)}))
+        return
+
+    stats = {"scanned": 0, "skipped_existing": 0, "emitted": 0}
+    last_tick = 0
+
+    sqlite_path = Path(db_path) / "chroma.sqlite3"
+    con = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+    cur = con.cursor()
+
+    # One streaming query per worker. We pull text + a few metadata keys via
+    # GROUP_CONCAT/aggregation patterns or LEFT JOINs; simpler: pull text
+    # alongside JSONified metadata by joining embedding_metadata multiple
+    # times for each key we care about. Doc text is the only must-have; the
+    # rest (url, title, chunk_index) ride along for traceability.
+    cur.execute(
+        """
+        SELECT
+            e.id,
+            e.embedding_id,
+            em_doc.string_value,
+            em_url.string_value,
+            em_title.string_value,
+            em_chunk.int_value,
+            em_source.string_value
+        FROM embeddings e
+        JOIN segments s ON s.id = e.segment_id
+        JOIN collections c ON c.id = s.collection
+        LEFT JOIN embedding_metadata em_doc
+            ON em_doc.id = e.id AND em_doc.key = 'chroma:document'
+        LEFT JOIN embedding_metadata em_url
+            ON em_url.id = e.id AND em_url.key = 'url'
+        LEFT JOIN embedding_metadata em_title
+            ON em_title.id = e.id AND em_title.key = 'title'
+        LEFT JOIN embedding_metadata em_chunk
+            ON em_chunk.id = e.id AND em_chunk.key = 'chunk_index'
+        LEFT JOIN embedding_metadata em_source
+            ON em_source.id = e.id AND em_source.key = 'source'
+        WHERE c.name = ?
+          AND s.scope = 'METADATA'
+          AND e.id >= ?
+          AND e.id < ?
+        ORDER BY e.id
+        """,
+        (source_collection, id_start, id_end),
+    )
+
+    batch_ids: list[str] = []
+    batch_texts: list[str] = []
+    batch_metas: list[dict] = []
+    tick_every = 25_000
+
+    def maybe_tick():
+        nonlocal last_tick
+        if stats["scanned"] - last_tick >= tick_every:
+            out_queue.put((_STATS_TICK, worker_id, dict(stats)))
+            last_tick = stats["scanned"]
+
+    try:
+        for row in cur:
+            _row_id, emb_id, doc, url, title, chunk_idx, src = row
+            stats["scanned"] += 1
+            maybe_tick()
+            if doc is None or not doc.strip():
+                continue
+            if emb_id in existing:
+                stats["skipped_existing"] += 1
+                continue
+            batch_ids.append(emb_id)
+            batch_texts.append(doc)
+            batch_metas.append(
+                {
+                    "source": src or source_collection,
+                    "url": url or "",
+                    "title": title or "",
+                    "chunk_index": int(chunk_idx) if chunk_idx is not None else 0,
+                }
+            )
+            stats["emitted"] += 1
+            if len(batch_ids) >= batch_size:
+                out_queue.put((batch_ids, batch_texts, batch_metas))
+                batch_ids, batch_texts, batch_metas = [], [], []
+
+        if batch_ids:
+            out_queue.put((batch_ids, batch_texts, batch_metas))
+    except Exception as e:
+        log.exception(f"producer {worker_id} crashed: {e}")
+        out_queue.put((_PRODUCER_DONE, worker_id, {"error": repr(e), "stats": stats}))
+        return
+    finally:
+        con.close()
+
+    out_queue.put((_PRODUCER_DONE, worker_id, {"stats": stats}))
+
+
+# --- GPU encode ------------------------------------------------------------
+
+
+def build_embedder(
+    model_name: str, device: str = "auto", fp16: bool = True, trust_remote_code: bool = True
+):
+    """Load the new embedding model on GPU FP16. nomic-v1.5 needs
+    `trust_remote_code=True` because its modeling code ships with the repo."""
+    from sentence_transformers import SentenceTransformer
+
+    from oracle.rag.embedder import resolve_device
+
+    resolved = resolve_device(device)
+    logger.info(f"Loading {model_name} (device={resolved}, fp16={fp16}) ...")
+    model = SentenceTransformer(
+        model_name, device=resolved, trust_remote_code=trust_remote_code
+    )
+    if fp16 and str(model.device).startswith("cuda"):
+        model.half()
+        logger.info("Model converted to FP16")
+    logger.info(f"Model loaded on {model.device}")
+    return model
+
+
+def encode_batch(model, texts: list[str], batch_size: int, prefix: str = ""):
+    if prefix:
+        texts = [f"{prefix}{t}" for t in texts]
+    return model.encode(
+        texts,
+        show_progress_bar=False,
+        batch_size=batch_size,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+
+
+# --- Target chromadb writer ------------------------------------------------
+
+
+def get_target_collection(db_path: str, collection_name: str):
+    import chromadb
+
+    client = chromadb.PersistentClient(path=db_path)
+    return client.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "cosine"},
+    )
+
+
+def upsert_batch(collection, ids, texts, embeddings, metadatas) -> None:
+    collection.upsert(
+        ids=ids,
+        documents=texts,
+        embeddings=embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings,
+        metadatas=metadatas,
+    )
+
+
+# --- Driver ----------------------------------------------------------------
+
+
+def reembed(
+    source: str,
+    target: str,
+    db_path: str,
+    model_name: str,
+    workers: int,
+    batch_size: int,
+    encode_batch_size: int,
+    queue_depth: int,
+    device: str,
+    fp16: bool,
+    prefix: str,
+    dry_run: bool,
+) -> None:
+    logger.info(f"=== Re-embedding {source} -> {target} with {model_name} ===")
+    id_min, id_max, source_total = get_source_id_range(db_path, source)
+    logger.info(
+        f"Source has {source_total} chunks (id range {id_min}..{id_max})"
+    )
+
+    target_existing = load_target_existing_ids(db_path, target)
+    logger.info(f"Target {target!r} already has {len(target_existing)} chunks (resume)")
+
+    lookup_path = _dump_lookup(target_existing)
+    size_mb = os.path.getsize(lookup_path) / 1024 / 1024
+    logger.info(f"Wrote lookup pickle ({size_mb:.1f} MB) at {lookup_path}")
+
+    if dry_run:
+        collection = None
+        model = None
+        logger.info("DRY RUN — will count emit candidates only")
+    else:
+        collection = get_target_collection(db_path, target)
+        model = build_embedder(model_name, device=device, fp16=fp16)
+
+    work_queue: mp.Queue = mp.Queue(maxsize=queue_depth)
+    upsert_queue: queue.Queue = queue.Queue(maxsize=queue_depth)
+    upsert_done = threading.Event()
+    upsert_error: dict = {}
+
+    span = id_max - id_min + 1
+    slice_size = (span + workers - 1) // workers
+    procs: list[mp.Process] = []
+    for wid in range(workers):
+        start = id_min + wid * slice_size
+        end = min(start + slice_size, id_max + 1)
+        if start >= end:
+            continue
+        p = mp.Process(
+            target=_producer_worker,
+            args=(wid, db_path, source, start, end, lookup_path, batch_size, work_queue),
+            name=f"reembed-prod-{wid}",
+            daemon=True,
+        )
+        p.start()
+        procs.append(p)
+
+    def _upsert_loop():
+        try:
+            while True:
+                item = upsert_queue.get()
+                if item is None:
+                    break
+                ids, texts, embs, metas = item
+                if not dry_run:
+                    upsert_batch(collection, ids, texts, embs, metas)
+                upsert_queue.task_done()
+        except Exception as e:
+            upsert_error["err"] = repr(e)
+            logger.exception(f"upsert thread crashed: {e}")
+        finally:
+            upsert_done.set()
+
+    upsert_thread = threading.Thread(target=_upsert_loop, name="chroma-upsert", daemon=True)
+    upsert_thread.start()
+
+    new_chunks = 0
+    t0 = time.time()
+    last_log = t0
+    log_interval = 5.0
+    workers_remaining = len(procs)
+    worker_stats: dict[int, dict] = {}
+
+    def recompute():
+        agg = {"scanned": 0, "skipped_existing": 0, "emitted": 0}
+        for s in worker_stats.values():
+            for k in agg:
+                agg[k] += s.get(k, 0)
+        return agg
+
+    try:
+        while workers_remaining > 0:
+            item = work_queue.get()
+
+            if isinstance(item, tuple) and len(item) == 3 and item[0] == _PRODUCER_DONE:
+                _, wid, payload = item
+                workers_remaining -= 1
+                if "error" in payload:
+                    logger.error(f"Worker {wid} errored: {payload['error']}")
+                if "stats" in payload:
+                    worker_stats[wid] = payload["stats"]
+                logger.info(f"Worker {wid} done; {workers_remaining} workers running")
+                continue
+            if isinstance(item, tuple) and len(item) == 3 and item[0] == _STATS_TICK:
+                _, wid, snapshot = item
+                worker_stats[wid] = snapshot
+                continue
+
+            ids, texts, metas = item
+            new_chunks += len(ids)
+
+            if not dry_run:
+                embs = encode_batch(model, texts, encode_batch_size, prefix=prefix)
+                upsert_queue.put((ids, texts, embs, metas))
+
+            now = time.time()
+            if now - last_log >= log_interval:
+                agg = recompute()
+                rate = new_chunks / (now - t0) if (now - t0) > 0 else 0
+                logger.info(
+                    f"  {new_chunks} new (scanned {agg['scanned']}, "
+                    f"skipped {agg['skipped_existing']}) — {rate:.0f} new/sec, "
+                    f"upsert q={upsert_queue.qsize()}"
+                )
+                last_log = now
+    except KeyboardInterrupt:
+        logger.warning("Interrupted; terminating workers")
+        for p in procs:
+            if p.is_alive():
+                p.terminate()
+        raise
+    finally:
+        upsert_queue.put(None)
+        upsert_thread.join(timeout=300)
+        for p in procs:
+            p.join(timeout=30)
+            if p.is_alive():
+                p.terminate()
+        try:
+            os.unlink(lookup_path)
+        except OSError:
+            pass
+
+    if upsert_error:
+        logger.error(f"Upsert error: {upsert_error['err']}")
+    elapsed = time.time() - t0
+    agg = recompute()
+    rate = new_chunks / elapsed if elapsed > 0 else 0
+    logger.info(
+        f"=== Done: {target} ===  new={new_chunks} scanned={agg['scanned']} "
+        f"skipped={agg['skipped_existing']}  {elapsed/60:.1f} min  {rate:.0f}/sec"
+    )
+    if not dry_run:
+        logger.info(f"  Collection total: {collection.count()} chunks")
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Re-embed a ChromaDB collection with a new model")
+    p.add_argument("--source", required=True, help="Source collection name")
+    p.add_argument("--target", required=True, help="Target collection name (must differ)")
+    p.add_argument(
+        "--model", default="nomic-ai/nomic-embed-text-v1.5", help="HF embedding model"
+    )
+    p.add_argument(
+        "--prefix", default="search_document: ",
+        help="Per-text prefix required by some models (default for nomic-v1.5)",
+    )
+    p.add_argument("--db-path", default="data/chroma")
+    p.add_argument("--workers", type=int, default=0, help="0 = min(cpu_count, 12)")
+    p.add_argument("--batch-size", type=int, default=1000, help="Producer emit batch")
+    p.add_argument("--encode-batch-size", type=int, default=256, help="GPU sub-batch")
+    p.add_argument("--queue-depth", type=int, default=8)
+    p.add_argument("--device", default="auto")
+    fp16 = p.add_mutually_exclusive_group()
+    fp16.add_argument("--fp16", dest="fp16", action="store_true", default=True)
+    fp16.add_argument("--no-fp16", dest="fp16", action="store_false")
+    p.add_argument("--dry-run", action="store_true")
+    args = p.parse_args()
+
+    if args.source == args.target:
+        print("--source and --target must differ", file=sys.stderr)
+        sys.exit(2)
+
+    workers = args.workers if args.workers > 0 else min(mp.cpu_count(), 12)
+    reembed(
+        source=args.source,
+        target=args.target,
+        db_path=args.db_path,
+        model_name=args.model,
+        workers=workers,
+        batch_size=args.batch_size,
+        encode_batch_size=args.encode_batch_size,
+        queue_depth=args.queue_depth,
+        device=args.device,
+        fp16=args.fp16,
+        prefix=args.prefix,
+        dry_run=args.dry_run,
+    )
+
+
+if __name__ == "__main__":
+    main()
