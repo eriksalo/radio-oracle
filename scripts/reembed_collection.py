@@ -130,8 +130,14 @@ def _producer_worker(
     batch_size: int,
     out_queue: mp.Queue,
 ) -> None:
-    """Read rows in [id_start, id_end) from source METADATA segment, skip
-    rows whose embedding_id is already in the target, batch and emit."""
+    """Read rows in [id_start, id_end) and emit (ids, texts, metadatas) batches.
+
+    Uses two streaming index range scans merged in Python — one over
+    `embeddings` (id range, PK index) and one over `embedding_metadata`
+    (id range, autoindex on (id, key)). Cross-table joins on a 400 GB
+    sqlite turned out to be ~10x slower because each outer row triggers
+    multiple random-seek index lookups; sequential range scans avoid that.
+    """
     import logging
 
     log = logging.getLogger(f"reembed-prod-{worker_id}")
@@ -148,44 +154,29 @@ def _producer_worker(
 
     sqlite_path = Path(db_path) / "chroma.sqlite3"
     con = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
-    cur = con.cursor()
+    # Bigger cache speeds the streaming index scans on large DBs.
+    con.execute("PRAGMA cache_size = -65536")  # 64 MB per connection
+    con.execute("PRAGMA mmap_size = 268435456")  # 256 MB mmap hint
 
-    # One streaming query per worker. We pull text + a few metadata keys via
-    # GROUP_CONCAT/aggregation patterns or LEFT JOINs; simpler: pull text
-    # alongside JSONified metadata by joining embedding_metadata multiple
-    # times for each key we care about. Doc text is the only must-have; the
-    # rest (url, title, chunk_index) ride along for traceability.
-    cur.execute(
-        """
-        SELECT
-            e.id,
-            e.embedding_id,
-            em_doc.string_value,
-            em_url.string_value,
-            em_title.string_value,
-            em_chunk.int_value,
-            em_source.string_value
-        FROM embeddings e
-        JOIN segments s ON s.id = e.segment_id
-        JOIN collections c ON c.id = s.collection
-        LEFT JOIN embedding_metadata em_doc
-            ON em_doc.id = e.id AND em_doc.key = 'chroma:document'
-        LEFT JOIN embedding_metadata em_url
-            ON em_url.id = e.id AND em_url.key = 'url'
-        LEFT JOIN embedding_metadata em_title
-            ON em_title.id = e.id AND em_title.key = 'title'
-        LEFT JOIN embedding_metadata em_chunk
-            ON em_chunk.id = e.id AND em_chunk.key = 'chunk_index'
-        LEFT JOIN embedding_metadata em_source
-            ON em_source.id = e.id AND em_source.key = 'source'
-        WHERE c.name = ?
-          AND s.scope = 'METADATA'
-          AND e.id >= ?
-          AND e.id < ?
-        ORDER BY e.id
-        """,
-        (source_collection, id_start, id_end),
+    cur_e = con.cursor()
+    cur_m = con.cursor()
+    # `embeddings` is a rowid table; PRIMARY KEY = id. Range scan by id is
+    # an index seek + sequential range read.
+    cur_e.execute(
+        """SELECT id, embedding_id FROM embeddings
+           WHERE id >= ? AND id < ? ORDER BY id""",
+        (id_start, id_end),
     )
+    # `embedding_metadata` has PRIMARY KEY (id, key). Range scan by id reads
+    # all keys for each row in order with no extra seek per key.
+    cur_m.execute(
+        """SELECT id, key, string_value, int_value FROM embedding_metadata
+           WHERE id >= ? AND id < ? ORDER BY id, key""",
+        (id_start, id_end),
+    )
+
+    meta_iter = iter(cur_m)
+    m_row = next(meta_iter, None)
 
     batch_ids: list[str] = []
     batch_texts: list[str] = []
@@ -199,23 +190,49 @@ def _producer_worker(
             last_tick = stats["scanned"]
 
     try:
-        for row in cur:
-            _row_id, emb_id, doc, url, title, chunk_idx, src = row
+        for e_id, emb_id in cur_e:
             stats["scanned"] += 1
             maybe_tick()
-            if doc is None or not doc.strip():
+
+            # Skip any straggling metadata for ids before this embedding's
+            # (would only happen if a row is missing in embeddings, but be
+            # defensive).
+            while m_row is not None and m_row[0] < e_id:
+                m_row = next(meta_iter, None)
+
+            doc = ""
+            url = ""
+            title = ""
+            chunk_idx = 0
+            source = ""
+            while m_row is not None and m_row[0] == e_id:
+                _, key, sval, ival = m_row
+                if key == "chroma:document":
+                    doc = sval or ""
+                elif key == "url":
+                    url = sval or ""
+                elif key == "title":
+                    title = sval or ""
+                elif key == "chunk_index":
+                    chunk_idx = int(ival) if ival is not None else 0
+                elif key == "source":
+                    source = sval or ""
+                m_row = next(meta_iter, None)
+
+            if not doc or not doc.strip():
                 continue
             if emb_id in existing:
                 stats["skipped_existing"] += 1
                 continue
+
             batch_ids.append(emb_id)
             batch_texts.append(doc)
             batch_metas.append(
                 {
-                    "source": src or source_collection,
-                    "url": url or "",
-                    "title": title or "",
-                    "chunk_index": int(chunk_idx) if chunk_idx is not None else 0,
+                    "source": source or source_collection,
+                    "url": url,
+                    "title": title,
+                    "chunk_index": chunk_idx,
                 }
             )
             stats["emitted"] += 1
