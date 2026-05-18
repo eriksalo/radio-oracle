@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import io
+import time
 import wave
+from typing import Callable
 
 import numpy as np
 from loguru import logger
 
 from config.settings import settings
+
+# Type alias for abort callbacks used across recording and playback.
+AbortCheck = Callable[[], bool] | None
 
 
 def record_until_silence(
@@ -16,10 +21,13 @@ def record_until_silence(
     channels: int | None = None,
     energy_threshold: float | None = None,
     silence_duration: float | None = None,
+    should_abort: AbortCheck = None,
 ) -> np.ndarray:
     """Record audio from default mic until silence is detected.
 
-    Returns float32 numpy array of audio samples.
+    Returns float32 numpy array of audio samples.  If *should_abort*
+    returns True mid-recording, returns whatever has been captured so far
+    (may be empty).
     """
     import sounddevice as sd
     from scipy.signal import resample_poly
@@ -49,6 +57,9 @@ def record_until_silence(
     )
     with sd.InputStream(**stream_opts) as stream:
         while True:
+            if should_abort and should_abort():
+                logger.debug("Recording aborted")
+                break
             data, _ = stream.read(block_size)
             energy = np.sqrt(np.mean(data**2))
 
@@ -63,6 +74,9 @@ def record_until_silence(
                     break
             # If not started and below threshold, keep waiting
 
+    if not frames:
+        return np.array([], dtype=np.float32)
+
     audio = np.concatenate(frames, axis=0).flatten()
     if capture_sr != out_sr:
         # Whisper expects 16k mono; downsample from device native rate.
@@ -70,7 +84,6 @@ def record_until_silence(
         g = gcd(capture_sr, out_sr)
         audio = resample_poly(audio, out_sr // g, capture_sr // g).astype(np.float32)
     duration = len(audio) / out_sr
-    sr = out_sr
     # Boost gain so quiet USB mics still produce signal Whisper can transcribe.
     # Target peak ~0.5; cap gain at 50x to avoid blowing up pure noise.
     peak = float(np.max(np.abs(audio)))
@@ -110,7 +123,35 @@ def _apply_volume(audio: np.ndarray) -> np.ndarray:
     return audio
 
 
-def play_audio(audio: np.ndarray, sample_rate: int | None = None) -> None:
+def _wait_or_abort(should_abort: AbortCheck) -> None:
+    """Block until playback finishes, or stop early if abort fires."""
+    import sounddevice as sd
+
+    if should_abort is None:
+        sd.wait()
+        return
+    # Poll: sd.wait() with a short timeout isn't supported, so we sleep-check.
+    while True:
+        if should_abort():
+            sd.stop()
+            logger.debug("Playback aborted")
+            return
+        # sd.wait() blocks; instead check if there's still an active stream.
+        try:
+            stream = sd.get_stream()
+            if not stream.active:
+                return
+        except RuntimeError:
+            # No stream active
+            return
+        time.sleep(0.05)
+
+
+def play_audio(
+    audio: np.ndarray,
+    sample_rate: int | None = None,
+    should_abort: AbortCheck = None,
+) -> None:
     """Play audio through configured output device."""
     import sounddevice as sd
 
@@ -118,10 +159,10 @@ def play_audio(audio: np.ndarray, sample_rate: int | None = None) -> None:
     out, dst_sr = _resample_to_playback(audio, src_sr)
     out = _apply_volume(out)
     sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
-    sd.wait()
+    _wait_or_abort(should_abort)
 
 
-def play_wav_bytes(wav_bytes: bytes) -> None:
+def play_wav_bytes(wav_bytes: bytes, should_abort: AbortCheck = None) -> None:
     """Play WAV data from bytes."""
     import sounddevice as sd
 
@@ -140,7 +181,7 @@ def play_wav_bytes(wav_bytes: bytes) -> None:
         out, dst_sr = _resample_to_playback(audio, src_sr)
         out = _apply_volume(out)
         sd.play(out, samplerate=dst_sr, device=settings.audio_output_device)
-        sd.wait()
+        _wait_or_abort(should_abort)
 
 
 def audio_to_wav_bytes(audio: np.ndarray, sample_rate: int | None = None) -> bytes:

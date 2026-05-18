@@ -151,8 +151,8 @@ async def wake_word_listen(
     def aborted() -> bool:
         return should_abort() if should_abort is not None else False
 
-    audio = record_until_silence()
-    if aborted():
+    audio = record_until_silence(should_abort=should_abort)
+    if aborted() or len(audio) == 0:
         return None
 
     if leds is not None:
@@ -202,8 +202,8 @@ async def voice_turn(
         if leds is not None:
             leds.set_mode("librarian")
         logger.info("Listening...")
-        audio = record_until_silence()
-        if aborted():
+        audio = record_until_silence(should_abort=should_abort)
+        if aborted() or len(audio) == 0:
             return False
 
         # Thinking (transcribe + LLM)
@@ -241,14 +241,14 @@ async def voice_turn(
                 sentence = sentence.strip()
                 if sentence:
                     audio_out = vc.tts.synthesize(sentence)
-                    play_audio(audio_out, vc.tts.sample_rate)
+                    play_audio(audio_out, vc.tts.sample_rate, should_abort=should_abort)
                     if aborted():
                         break
             sentence_buffer = sentences[-1]
 
     if sentence_buffer.strip() and not aborted():
         audio_out = vc.tts.synthesize(sentence_buffer.strip())
-        play_audio(audio_out, vc.tts.sample_rate)
+        play_audio(audio_out, vc.tts.sample_rate, should_abort=should_abort)
 
     response_text = "".join(response_parts)
     logger.info(f"Oracle: {response_text}")
