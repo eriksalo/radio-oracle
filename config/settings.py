@@ -58,6 +58,12 @@ class OracleSettings(BaseSettings):
     max_context_turns: int = 10
     summary_threshold: int = 20
 
+    # Books / e-reader
+    books_path: Path = Path("data/books")
+    books_db_path: Path = Path("data/books.db")
+    reading_paragraph_pause: float = 0.6   # seconds between paragraphs
+    reading_chapter_pause: float = 2.0     # seconds between chapters
+
     # Mode
     mode: Literal["text", "voice", "hardware"] = "text"
     log_level: str = "INFO"
