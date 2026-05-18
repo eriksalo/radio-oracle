@@ -40,7 +40,13 @@ class OracleApp:
         self.power.add_listener(self._state_writer.set_power)
 
     async def run(self) -> None:
-        from oracle.core import VoiceContext, voice_close, voice_init, voice_turn
+        from oracle.core import (
+            VoiceContext,
+            voice_close,
+            voice_init,
+            voice_turn,
+            wake_word_listen,
+        )
 
         self.button.start()
         self.power.start()
@@ -80,9 +86,30 @@ class OracleApp:
                     # honor any pending state change from buttons.
                     if self._state == "librarian":
                         self.leds.set_mode("librarian")
-                else:
-                    # Radio mode: placeholder until music player lands.
-                    await asyncio.sleep(0.1)
+                elif self._state == "radio":
+                    # Listen for wake word; on detection, do one voice turn.
+                    remainder = await wake_word_listen(
+                        voice_ctx,
+                        leds=self.leds,
+                        should_abort=lambda: not self.power.is_on,
+                    )
+                    self._handle_buttons()
+                    if remainder is not None and self._state == "radio":
+                        self.leds.set_mode("librarian")
+                        if remainder:
+                            await voice_turn(
+                                voice_ctx,
+                                leds=self.leds,
+                                pre_text=remainder,
+                                should_abort=lambda: not self.power.is_on,
+                            )
+                        else:
+                            await voice_turn(
+                                voice_ctx,
+                                leds=self.leds,
+                                should_abort=lambda: not self.power.is_on,
+                            )
+                        self.leds.set_mode("radio")
         except KeyboardInterrupt:
             logger.info("Oracle interrupted")
         except Exception as e:  # noqa: BLE001

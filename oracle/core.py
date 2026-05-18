@@ -112,8 +112,7 @@ class VoiceContext:
 
 
 async def voice_init() -> VoiceContext:
-    """Initialize STT, TTS, conversation store, persona, and play greeting."""
-    from oracle.audio import play_audio
+    """Initialize STT, TTS, conversation store, and persona."""
     from oracle.stt import WhisperSTT
     from oracle.tts import PiperTTS
 
@@ -121,12 +120,6 @@ async def voice_init() -> VoiceContext:
     ctx_builder = ContextBuilder(store, session_id)
     stt = WhisperSTT()
     tts = PiperTTS()
-
-    greeting = get_greeting()
-    logger.info(f"Oracle: {greeting}")
-    if settings.voice_play_greeting:
-        greeting_audio = tts.synthesize(greeting)
-        play_audio(greeting_audio, tts.sample_rate)
 
     return VoiceContext(
         stt=stt,
@@ -142,13 +135,57 @@ async def voice_close(vc: VoiceContext) -> None:
     vc.store.close()
 
 
+async def wake_word_listen(
+    vc: VoiceContext,
+    leds: "StatusLEDs | None" = None,
+    should_abort: Callable[[], bool] | None = None,
+) -> str | None:
+    """Listen for the wake word. Returns text after the wake word, or None.
+
+    Blocks until speech is detected, transcribes it, then checks for the
+    wake word. If found, returns the remainder (possibly empty if the user
+    only said the wake word). Returns None if the wake word wasn't spoken.
+    """
+    from oracle.audio import record_until_silence
+
+    def aborted() -> bool:
+        return should_abort() if should_abort is not None else False
+
+    audio = record_until_silence()
+    if aborted():
+        return None
+
+    if leds is not None:
+        leds.set_mode("thinking")
+
+    vc.stt.load()
+    text = vc.stt.transcribe(audio)
+    vc.stt.unload()
+
+    if not text.strip():
+        return None
+
+    wake_word = settings.wake_word.lower()
+    lower = text.lower()
+    if wake_word not in lower:
+        logger.debug(f"No wake word in: {text!r}")
+        return None
+
+    idx = lower.index(wake_word) + len(wake_word)
+    remainder = text[idx:].strip().lstrip(",.!? ")
+    logger.info(f"Wake word detected! Remainder: {remainder!r}")
+    return remainder
+
+
 async def voice_turn(
     vc: VoiceContext,
     leds: "StatusLEDs | None" = None,
     should_abort: Callable[[], bool] | None = None,
+    pre_text: str | None = None,
 ) -> bool:
     """Run one voice conversation turn (record → transcribe → LLM → TTS).
 
+    If *pre_text* is provided, skip recording/transcription and use it directly.
     Returns True if a turn completed, False if aborted or skipped (silence).
     """
     from oracle.audio import play_audio, record_until_silence
@@ -156,20 +193,25 @@ async def voice_turn(
     def aborted() -> bool:
         return should_abort() if should_abort is not None else False
 
-    # Listening
-    if leds is not None:
-        leds.set_mode("librarian")
-    logger.info("Listening...")
-    audio = record_until_silence()
-    if aborted():
-        return False
+    if pre_text is not None:
+        text = pre_text
+        if leds is not None:
+            leds.set_mode("thinking")
+    else:
+        # Listening
+        if leds is not None:
+            leds.set_mode("librarian")
+        logger.info("Listening...")
+        audio = record_until_silence()
+        if aborted():
+            return False
 
-    # Thinking (transcribe + LLM)
-    if leds is not None:
-        leds.set_mode("thinking")
-    vc.stt.load()
-    text = vc.stt.transcribe(audio)
-    vc.stt.unload()
+        # Thinking (transcribe + LLM)
+        if leds is not None:
+            leds.set_mode("thinking")
+        vc.stt.load()
+        text = vc.stt.transcribe(audio)
+        vc.stt.unload()
 
     if not text.strip():
         logger.debug("Empty transcription, skipping")
@@ -216,12 +258,19 @@ async def voice_turn(
 
 
 async def voice_loop() -> None:
-    """Voice mode (no hardware): record → transcribe → LLM → TTS in a loop."""
+    """Voice mode (no hardware): wait for wake word, then converse."""
     vc = await voice_init()
-    logger.info("Voice mode active — speak when ready")
+    logger.info(f"Voice mode active — say '{settings.wake_word}' to begin")
     try:
         while True:
-            await voice_turn(vc)
+            remainder = await wake_word_listen(vc)
+            if remainder is None:
+                continue
+            # Wake word detected — do one turn
+            if remainder:
+                await voice_turn(vc, pre_text=remainder)
+            else:
+                await voice_turn(vc)
     except KeyboardInterrupt:
         logger.info("Oracle signing off.")
     finally:

@@ -59,8 +59,6 @@ class OracleSettings(BaseSettings):
     # Mode
     mode: Literal["text", "voice", "hardware"] = "text"
     log_level: str = "INFO"
-    voice_play_greeting: bool = True
-
     # Hardware
     # NOTE: action_button_pin / power_switch_pin are retained for documentation
     # only — the switches are read via the ADS1115 (channels below), not GPIO,
@@ -71,6 +69,7 @@ class OracleSettings(BaseSettings):
     led_green_pin: int = 18     # BOARD pin 18
     led_blue_pin: int = 22      # BOARD pin 22
     power_switch_pin: int = 17   # (legacy wiring on BCM 17; now unused for reads)
+    wake_word: str = "librarian"       # spoken keyword to activate conversation mode
     long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
     pot_i2c_bus: int = 7                  # /dev/i2c-N for the ADS1115 (header pins 3/5)
     pot_ads1115_addr: int = 0x48          # default ADDR-floating address
