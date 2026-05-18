@@ -58,6 +58,11 @@ class OracleSettings(BaseSettings):
     max_context_turns: int = 10
     summary_threshold: int = 20
 
+    # Music player
+    music_path: Path = Path("music")
+    music_db_path: Path = Path("data/music.db")
+    music_radio_filter: bool = True    # apply AM bandpass to music playback
+
     # Books / e-reader
     books_path: Path = Path("data/books")
     books_db_path: Path = Path("data/books.db")
