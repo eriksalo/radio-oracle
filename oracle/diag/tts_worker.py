@@ -1,9 +1,9 @@
-"""Piper TTS worker — one-shot or persistent.
+"""Kokoro TTS worker — one-shot or persistent.
 
 One-shot mode (default): read UTF-8 text from stdin, write WAV to stdout, exit.
-The Piper ONNX session is reclaimed on process exit.
+The ONNX session is reclaimed on process exit.
 
-Persistent mode (``--persistent``): load Piper once, then service
+Persistent mode (``--persistent``): load Kokoro once, then service
 length-prefixed requests on stdin and write length-prefixed responses on
 stdout until stdin closes. Eliminates the ~2-4 s cold-start the diag server
 otherwise pays on every /api/speak call.
@@ -43,9 +43,9 @@ def _one_shot(radio_filter: bool) -> int:
         return 2
 
     from oracle.audio import apply_radio_filter, audio_to_wav_bytes
-    from oracle.tts import PiperTTS
+    from oracle.tts import KokoroTTS  # noqa: E402
 
-    tts = PiperTTS()
+    tts = KokoroTTS()
     tts.load()
     audio = tts.synthesize(text)
     if radio_filter:
@@ -58,9 +58,9 @@ def _one_shot(radio_filter: bool) -> int:
 
 def _persistent_loop() -> int:
     from oracle.audio import apply_radio_filter, audio_to_wav_bytes
-    from oracle.tts import PiperTTS
+    from oracle.tts import KokoroTTS  # noqa: E402
 
-    tts = PiperTTS()
+    tts = KokoroTTS()
     tts.load()
 
     out = sys.stdout.buffer

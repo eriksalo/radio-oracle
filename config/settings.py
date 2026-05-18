@@ -20,9 +20,11 @@ class OracleSettings(BaseSettings):
     whisper_force_cpu: bool = True
     whisper_language: str = "en"
 
-    # Piper TTS
-    piper_model_path: Path = Path("models/en_US-lessac-medium.onnx")
-    piper_sample_rate: int = 22050
+    # Kokoro TTS
+    tts_model_path: Path = Path("models/kokoro-v1.0.onnx")
+    tts_voices_path: Path = Path("models/voices-v1.0.bin")
+    tts_voice: str = "am_michael"   # American male, natural
+    tts_speed: float = 1.0
 
     # Audio
     audio_sample_rate: int = 16000

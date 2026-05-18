@@ -23,7 +23,7 @@ rag = [
     "sentence-transformers>=3.0",
 ]
 tts = [
-    "piper-tts>=1.2",
+    "kokoro-onnx>=0.4",
 ]
 stt = [
     "pywhispercpp>=1.4",

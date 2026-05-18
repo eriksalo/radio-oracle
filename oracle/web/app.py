@@ -443,9 +443,9 @@ async def test_tts(request: Request):
     if not text:
         return JSONResponse({"error": "text required"}, status_code=400)
     try:
-        from oracle.tts import PiperTTS
+        from oracle.tts import KokoroTTS
 
-        tts = PiperTTS()
+        tts = KokoroTTS()
         audio = tts.synthesize(text)
         # Return as WAV
         import io

@@ -18,7 +18,7 @@ from oracle.persona import build_system_prompt, get_greeting
 if TYPE_CHECKING:
     from oracle.hardware.leds import StatusLEDs
     from oracle.stt import WhisperSTT
-    from oracle.tts import PiperTTS
+    from oracle.tts import KokoroTTS
 
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 
@@ -104,7 +104,7 @@ async def text_repl() -> None:
 class VoiceContext:
     """Bundle of long-lived voice-mode resources."""
     stt: "WhisperSTT"
-    tts: "PiperTTS"
+    tts: "KokoroTTS"
     store: ConversationStore
     ctx_builder: ContextBuilder
     system_prompt: str
@@ -114,12 +114,12 @@ class VoiceContext:
 async def voice_init() -> VoiceContext:
     """Initialize STT, TTS, conversation store, and persona."""
     from oracle.stt import WhisperSTT
-    from oracle.tts import PiperTTS
+    from oracle.tts import KokoroTTS
 
     system_prompt, store, session_id = await _init_common()
     ctx_builder = ContextBuilder(store, session_id)
     stt = WhisperSTT()
-    tts = PiperTTS()
+    tts = KokoroTTS()
 
     return VoiceContext(
         stt=stt,

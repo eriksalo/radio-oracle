@@ -29,21 +29,27 @@ else
     fi
 fi
 
-# Piper TTS model (lessac medium)
-PIPER_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
-PIPER_JSON_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
-PIPER_FILE="$MODELS_DIR/en_US-lessac-medium.onnx"
-PIPER_JSON="$MODELS_DIR/en_US-lessac-medium.onnx.json"
+# Kokoro TTS model + voices
+KOKORO_MODEL_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+KOKORO_VOICES_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+KOKORO_MODEL="$MODELS_DIR/kokoro-v1.0.onnx"
+KOKORO_VOICES="$MODELS_DIR/voices-v1.0.bin"
 
 if [[ "$DRY_RUN" == true ]]; then
-    echo "  Piper TTS: $PIPER_URL -> $PIPER_FILE (~75MB)"
+    echo "  Kokoro TTS model: $KOKORO_MODEL_URL -> $KOKORO_MODEL (~300MB)"
+    echo "  Kokoro voices:    $KOKORO_VOICES_URL -> $KOKORO_VOICES (~50MB)"
 else
-    if [[ ! -f "$PIPER_FILE" ]]; then
-        echo "Downloading Piper TTS model..."
-        wget -q --show-progress -O "$PIPER_FILE" "$PIPER_URL"
-        wget -q --show-progress -O "$PIPER_JSON" "$PIPER_JSON_URL"
+    if [[ ! -f "$KOKORO_MODEL" ]]; then
+        echo "Downloading Kokoro TTS model..."
+        wget -q --show-progress -O "$KOKORO_MODEL" "$KOKORO_MODEL_URL"
     else
-        echo "Piper model already exists: $PIPER_FILE"
+        echo "Kokoro model already exists: $KOKORO_MODEL"
+    fi
+    if [[ ! -f "$KOKORO_VOICES" ]]; then
+        echo "Downloading Kokoro voices..."
+        wget -q --show-progress -O "$KOKORO_VOICES" "$KOKORO_VOICES_URL"
+    else
+        echo "Kokoro voices already exist: $KOKORO_VOICES"
     fi
 fi
 

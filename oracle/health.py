@@ -23,10 +23,13 @@ async def run_health_checks() -> dict[str, bool]:
     if not results["whisper_model"]:
         logger.warning(f"Whisper model not found: {settings.whisper_model_path}")
 
-    # Piper model
-    results["piper_model"] = settings.piper_model_path.exists()
-    if not results["piper_model"]:
-        logger.warning(f"Piper model not found: {settings.piper_model_path}")
+    # TTS model
+    results["tts_model"] = settings.tts_model_path.exists()
+    if not results["tts_model"]:
+        logger.warning(f"TTS model not found: {settings.tts_model_path}")
+    results["tts_voices"] = settings.tts_voices_path.exists()
+    if not results["tts_voices"]:
+        logger.warning(f"TTS voices not found: {settings.tts_voices_path}")
 
     # ChromaDB directory
     results["chroma_db"] = settings.chroma_path.exists()
