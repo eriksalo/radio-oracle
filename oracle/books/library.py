@@ -150,7 +150,7 @@ class Library:
             logger.warning(f"Books directory not found: {d}")
             return 0
 
-        txt_files = sorted(d.glob("*.txt"))
+        txt_files = sorted(d.rglob("*.txt"))
         added = 0
         for f in txt_files:
             if self._already_indexed(str(f)):
