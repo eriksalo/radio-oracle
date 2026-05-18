@@ -26,7 +26,7 @@ make test       # pytest
 - `oracle/hardware/` — GPIO button, RGB LED, power switch, audio routing
 - `oracle/music/` — music library + player (stub)
 - `oracle/books/` — book reader (stub)
-- `oracle/diagnostics/` — local web dashboard (stub)
+- `oracle/web/` — Pip-Boy styled diagnostic web GUI (FastAPI, port 8080)
 - `config/settings.py` — Pydantic BaseSettings, all `ORACLE_` prefixed env vars
 
 ## Key Design Decisions
@@ -51,7 +51,7 @@ and per-workstream "standalone exercise" steps.
 5. **Text-to-voice (TTS + audio I/O)** — `oracle/tts.py`, `oracle/audio.py`
 6. **LLM behavior (chat, persona, memory)** — `oracle/llm.py`, `oracle/persona.py`, `oracle/memory/`
 7. **Intro & working-flow (state machine, STT, deploy)** — `oracle/app.py`, `oracle/core.py`, `oracle/stt.py`, `systemd/`
-8. **Diagnostic web page** — `oracle/diagnostics/`
+8. **Diagnostic web page** — `oracle/web/`
 
 When changing code, prefer to stay inside the workstream that owns the file.
 Cross-workstream calls go through the *Interface contract* documented in each
