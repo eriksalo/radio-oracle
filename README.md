@@ -24,8 +24,8 @@ Powered by a Jetson Orin Nano Super with a 1TB knowledge store spanning Wikipedi
 |-------|--------|
 | LLM | Ollama + Llama 3.2 3B (Q4_K_M) |
 | STT | whisper.cpp (small.en, GPU) |
-| TTS | Piper (lessac-medium, CPU) |
-| RAG | ChromaDB + all-MiniLM-L6-v2 |
+| TTS | Kokoro (am_michael, CPU, ONNX) |
+| RAG | FAISS IVF-PQ + nomic-embed-text-v1.5 (768-d) |
 | Memory | SQLite + conversation summaries |
 | Config | Pydantic BaseSettings (`ORACLE_` env prefix) |
 
@@ -64,22 +64,40 @@ python -m oracle --mode voice
 
 ### Knowledge Base Setup
 
-Run on a workstation with a GPU for faster embedding, then rsync to the Jetson:
+Three-stage pipeline on a workstation with an NVIDIA GPU, then rsync the
+FAISS artifacts to the Jetson. See [`docs/rag-migration-runbook.md`](docs/rag-migration-runbook.md)
+for full command-by-command detail.
 
 ```bash
-# Download knowledge sources (~60GB)
+# 1. Download knowledge sources (~60 GB of ZIMs)
 ./scripts/download_knowledge.sh --dry-run   # preview
 ./scripts/download_knowledge.sh
 
-# Ingest into ChromaDB
+# 2. Stage chunk text in ChromaDB (source of truth for chunk content)
 pip install -e ".[ingest]"
-python scripts/ingest_wikipedia.py data/knowledge/wikipedia_en_all_nopic_latest.zim
-python scripts/ingest_generic_zim.py data/knowledge/ifixit_en_all_latest.zim --collection ifixit
-python scripts/ingest_gutenberg.py data/knowledge/gutenberg/
+python scripts/ingest_zim.py data/knowledge/wikipedia_en_all_nopic_latest.zim
+python scripts/ingest_zim.py data/knowledge/ifixit_en_all_latest.zim --collection ifixit
+# ...one ingest_zim.py call per ZIM source
 
-# Copy to Jetson
-rsync -av data/chroma/ jetson:/opt/radio-oracle/data/chroma/
+# 3. Re-embed each collection with nomic-v1.5 (768-d) to flat .f32 + .sqlite
+python scripts/reembed_collection.py \
+    --source wikipedia --target wikipedia \
+    --model nomic-ai/nomic-embed-text-v1.5 --dim 768 \
+    --db-path data/chroma --out-dir data/embeddings \
+    --workers 12 --batch-size 2000 --encode-batch-size 256
+
+# 4. Build the per-collection FAISS IVF-PQ index
+python scripts/build_faiss_ivfpq.py \
+    --name wikipedia --in-dir data/embeddings --out-dir data/faiss --dim 768
+
+# 5. Copy FAISS artifacts to Jetson (chunk text is embedded in the FAISS sqlite)
+rsync -av data/faiss/ jetson:/opt/radio-oracle/data/faiss/
 ```
+
+ChromaDB stays on the workstation as the read-only source of truth for
+chunk text + the legacy MiniLM-L6 embeddings; only the FAISS layer ships
+to the Jetson. Music has its own pipeline (no ZIM; tags from `mutagen`
+into `data/music.db`, then the same flat-file → FAISS build).
 
 ## Project Structure
 
@@ -94,9 +112,15 @@ oracle/
   persona.py           # System prompt builder
   health.py            # Subsystem health checks
   rag/
-    retriever.py       # ChromaDB semantic search
-    embedder.py        # Sentence-transformer embeddings
+    retriever.py       # Pluggable backend dispatch + tiered modes
+    backends/
+      chroma.py        # ChromaDB backend (legacy collections)
+      faiss_ivfpq.py   # FAISS IVF-PQ backend (production)
+    embedder.py        # Sentence-transformer / nomic embeddings
     chunker.py         # Text chunking for ingestion
+    modes.py           # Snappy vs. deep retrieval params
+    reranker.py        # Cross-encoder rerank for deep mode
+    router.py          # Per-query collection routing
   memory/
     store.py           # SQLite conversation persistence
     context.py         # LLM context window builder
@@ -134,10 +158,10 @@ See [`config/settings.py`](config/settings.py) for all options.
 |-----------|--------|
 | Ollama LLM | ~3 GB |
 | Whisper STT | ~1 GB (load/unload per utterance) |
-| Piper TTS | ~0.3 GB (CPU only) |
-| ChromaDB + embeddings | ~0.5 GB (CPU only) |
+| Kokoro TTS | ~0.3 GB (CPU only) |
+| FAISS indices + nomic embedder | ~1.5 GB (CPU only; ~1.65 GB of indices mmap'd lazily) |
 | Python + OS | ~1.5 GB |
-| **Total** | **~6.3 GB** |
+| **Total** | **~7.3 GB** |
 
 STT and LLM run sequentially — never concurrent — so peak GPU usage stays around 3GB.
 

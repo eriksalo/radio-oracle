@@ -282,21 +282,31 @@ Also downloaded by `download_models.sh`, to `models/en_US-lessac-medium.onnx`:
 - **Why this one:** Natural-sounding American English voice. Runs entirely on CPU so it doesn't compete with the LLM for GPU memory.
 - **Voice alternatives:** Browse voices at [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) — download the `.onnx` + `.onnx.json` pair and set `ORACLE_PIPER_MODEL_PATH`.
 
-#### Embedding Model — all-MiniLM-L6-v2
+#### Embedding Model — nomic-embed-text-v1.5
 
-- **Size:** ~80 MB
-- **What it is:** A sentence-transformer model that converts text into 384-dimensional vectors for semantic search.
-- **Download:** Automatic on first use. The `sentence-transformers` library downloads it from HuggingFace and caches it in `~/.cache/huggingface/`.
+- **Size:** ~550 MB
+- **What it is:** A 768-dim sentence-transformer that converts text into vectors for FAISS semantic search. Matryoshka-truncatable. Replaces the legacy `all-MiniLM-L6-v2` (384-d) used during the ChromaDB era.
+- **Why this one:** Higher recall than MiniLM-L6 on long-form passages; the 768-d vectors pair well with FAISS IVF-PQ at PQ-64 to compress the index 8× while staying within recall budget. Required by the nomic model are the `search_query: ` and `search_document: ` prefixes — already wired into the embedder and the FAISS backend.
+- **Download:** Automatic on first use. `sentence-transformers` fetches it from HuggingFace and caches it in `~/.cache/huggingface/`. Loading requires `trust_remote_code=True` (handled by `oracle/rag/embedder.py`).
 - **To pre-download:**
   ```bash
-  .venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+  .venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True)"
   ```
+
+> **Note on the Jetson:** the embedder runs on CPU there today (~1.2 s/query
+> warm). No cp311 CUDA torch wheel exists for JetPack 6.2. See
+> `docs/rag-migration-runbook.md` §"Known follow-up" for the three viable
+> fix paths if that latency becomes a blocker.
 
 ### 2.2 Knowledge Bases
 
 These are the Oracle's "archives" — the offline knowledge it searches to answer questions.
 
-**Important:** Download and ingest these on a workstation with a GPU. Ingestion involves computing millions of embeddings and takes hours to days on CPU but is much faster on a GPU. Then rsync the finished ChromaDB to the Jetson.
+**Important:** Download and ingest these on a workstation with a GPU. The
+three-stage pipeline (ZIM → ChromaDB → flat .f32+.sqlite → FAISS IVF-PQ)
+computes millions of embeddings and takes hours to days on CPU but is
+much faster on a GPU. Only the final `data/faiss/` directory rsyncs to
+the Jetson.
 
 #### Automated Downloads (ZIM files via Kiwix)
 
@@ -420,7 +430,7 @@ These sources require manual downloading because they don't have simple single-f
 | LLM | Llama 3.2 3B | 2 GB | Ollama internal (`~/.ollama/models/`) |
 | STT | Whisper small.en | 460 MB | `models/whisper-small.en.bin` |
 | TTS | Piper lessac-medium | 75 MB | `models/en_US-lessac-medium.onnx` |
-| Embeddings | all-MiniLM-L6-v2 | 80 MB | `~/.cache/huggingface/` (auto) |
+| Embeddings | nomic-embed-text-v1.5 | 550 MB | `~/.cache/huggingface/` (auto) |
 | Knowledge | Wikipedia EN | 22 GB | `data/knowledge/` |
 | Knowledge | iFixit | 2.5 GB | `data/knowledge/` |
 | Knowledge | Wikibooks | 2 GB | `data/knowledge/` |
@@ -431,7 +441,10 @@ These sources require manual downloading because they don't have simple single-f
 | Knowledge | CrashCourse | <1 GB | `data/knowledge/crashcourse/` |
 | **Total** | | **~62 GB** | |
 
-After ingestion, the ChromaDB vector store will add another ~30-50 GB (embeddings + metadata). Total disk usage: **~120 GB** on a 1TB drive — plenty of room.
+After ingestion, the FAISS layer adds ~85 GB to the Jetson (~83 GB of
+chunk-text sqlite, ~1.65 GB of indices). The workstation also keeps
+~450 GB of ChromaDB as the rebuild source. Total disk on the Jetson:
+**~150 GB** on a 1TB drive — plenty of room.
 
 ---
 
@@ -445,38 +458,57 @@ RAG (Retrieval-Augmented Generation) is how the Oracle finds relevant knowledge 
 User asks: "How do I purify water?"
          │
          ▼
-   ┌─────────────┐
-   │  Embed the   │  Convert question to a 384-dim vector
-   │  question    │  using all-MiniLM-L6-v2
-   └──────┬──────┘
+   ┌──────────────┐
+   │  Embed the   │  Prefix with "search_query: ", encode to a 768-d
+   │  question    │  vector with nomic-embed-text-v1.5
+   └──────┬───────┘
           │
           ▼
-   ┌─────────────┐
-   │  Search      │  Find the 5 closest vectors in ChromaDB
-   │  ChromaDB    │  across all collections
-   └──────┬──────┘
+   ┌──────────────┐
+   │  Route to    │  Intent regex picks the right collection(s)
+   │  collection  │  (oracle/rag/router.py)
+   └──────┬───────┘
           │
           ▼
-   ┌─────────────┐
+   ┌──────────────┐
+   │  Search      │  FAISS IVF-PQ: probe ef_search cells, return top-k
+   │  FAISS index │  candidates with chunk text from the sister sqlite
+   └──────┬───────┘
+          │
+          ▼
+   ┌──────────────┐
+   │  (Deep mode) │  Cross-encoder rerank on a wider candidate pool
+   │  Rerank      │  before returning to the LLM. Snappy mode skips this.
+   └──────┬───────┘
+          │
+          ▼
+   ┌──────────────┐
    │  Build       │  System prompt + retrieved chunks + conversation
    │  LLM prompt  │  history → send to Llama 3.2
-   └──────┬──────┘
+   └──────┬───────┘
           │
           ▼
-   ┌─────────────┐
+   ┌──────────────┐
    │  LLM answers │  Grounded in retrieved knowledge,
    │  in character │  framed as "archive entries"
-   └─────────────┘
+   └──────────────┘
 ```
 
-**Ingestion** is the offline step where we:
-1. Read each knowledge source (ZIM, text, XML)
-2. Strip HTML, extract clean text
-3. Split text into ~512-word chunks with 64-word overlap
-4. Compute an embedding vector for each chunk
-5. Store chunks + vectors in ChromaDB
+**Ingestion** is a three-stage offline pipeline:
+1. **Stage chunk text in ChromaDB.** `scripts/ingest_zim.py` reads each
+   ZIM, strips HTML, splits into ~512-word chunks with 64-word overlap,
+   and writes the text + a legacy MiniLM-L6 embedding into ChromaDB.
+   ChromaDB is the source of truth for chunk content.
+2. **Re-embed with nomic-v1.5 to flat files.** `scripts/reembed_collection.py`
+   reads chunks back out of ChromaDB and writes `<name>.vectors.f32` +
+   `<name>.text.sqlite` to `data/embeddings/`. GPU+FP16, resume-safe.
+3. **Build FAISS IVF-PQ.** `scripts/build_faiss_ivfpq.py` reads the flat
+   files and writes `<name>.index` + `<name>.sqlite` to `data/faiss/`.
 
-This only happens once. The Jetson just reads the finished ChromaDB at runtime.
+Only `data/faiss/` ships to the Jetson. ChromaDB stays on the
+workstation as the rebuild source for future model swaps. See
+[`docs/rag-migration-runbook.md`](rag-migration-runbook.md) for the
+command-by-command runbook.
 
 ### 3.2 Workstation Setup for Ingestion
 
@@ -502,76 +534,90 @@ If you have an NVIDIA GPU on your workstation, sentence-transformers will use it
 .venv/bin/python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
 ```
 
-### 3.3 Ingest Wikipedia
+### 3.3 Stage Chunk Text into ChromaDB
 
-The biggest and most important source. Expect ~20 million chunks.
+This is the first ingestion stage — read raw ZIMs, chunk the text,
+embed with the legacy MiniLM-L6 model, and write to ChromaDB. The
+embedding here is **not** what the Jetson queries; it's just used to
+key chunks in ChromaDB. The nomic-v1.5 re-embed in stage 3.4 is what
+production retrieval uses.
 
 ```bash
-# Dry run first — see what you're dealing with
-.venv/bin/python scripts/ingest_wikipedia.py \
+# Wikipedia (biggest source — ~11.5M chunks after dedup, ~8-12 h on GPU)
+.venv/bin/python scripts/ingest_zim.py \
     data/knowledge/wikipedia_en_all_nopic_latest.zim \
-    --dry-run
+    --collection wikipedia --batch-size 1000
 
-# Full ingestion
-# With GPU: ~8-12 hours
-# CPU only: ~2-3 days
-.venv/bin/python scripts/ingest_wikipedia.py \
-    data/knowledge/wikipedia_en_all_nopic_latest.zim \
-    --batch-size 1000
+# iFixit repair guides
+.venv/bin/python scripts/ingest_zim.py \
+    data/knowledge/ifixit_en_all_latest.zim \
+    --collection ifixit
+
+# Wikibooks
+.venv/bin/python scripts/ingest_zim.py \
+    data/knowledge/wikibooks_en_all_latest.zim \
+    --collection wikibooks
+
+# WikiMed medical
+.venv/bin/python scripts/ingest_zim.py \
+    data/knowledge/wikipedia_en_medicine_nopic_latest.zim \
+    --collection wikimed
 ```
 
-**What happens during ingestion:**
-1. Opens the 22GB ZIM file and iterates every entry
-2. Skips redirects and non-HTML entries
-3. Parses HTML, strips `<script>`, `<style>`, `<table>`, and footnote refs
-4. Extracts clean text (minimum 100 characters)
-5. Chunks text at ~512 words with 64-word overlap, respecting paragraph boundaries
-6. Every 1000 chunks: batch-embeds with all-MiniLM-L6-v2 and stores in ChromaDB
-
-Progress is logged. You can safely Ctrl+C and resume (ChromaDB handles duplicates via document IDs).
+`ingest_zim.py` is resume-safe — Ctrl+C and rerun; chunks already in
+ChromaDB are skipped via a fast SQL preload of existing IDs (no HNSW
+load required).
 
 **Tuning `--batch-size`:**
 - GPU with 8GB+ VRAM: `--batch-size 2000` (faster, uses more VRAM)
 - GPU with 4GB VRAM: `--batch-size 500` (default)
 - CPU only: `--batch-size 100` (avoid OOM)
 
-### 3.4 Ingest Other ZIM Sources
+### 3.4 Re-embed Each Collection with nomic-v1.5
 
-Same process, different collections:
-
-```bash
-# iFixit repair guides
-.venv/bin/python scripts/ingest_generic_zim.py \
-    data/knowledge/ifixit_en_all_latest.zim \
-    --collection ifixit
-
-# Wikibooks
-.venv/bin/python scripts/ingest_generic_zim.py \
-    data/knowledge/wikibooks_en_all_latest.zim \
-    --collection wikibooks
-
-# WikiMed medical
-.venv/bin/python scripts/ingest_generic_zim.py \
-    data/knowledge/wikipedia_en_medicine_nopic_latest.zim \
-    --collection wikimed
-```
-
-Each creates a separate ChromaDB collection. At query time, the Oracle searches all collections and returns the best matches regardless of source.
-
-### 3.5 Ingest Project Gutenberg
+For each collection staged above, run `reembed_collection.py` to produce
+the flat `<name>.vectors.f32` + `<name>.text.sqlite` in `data/embeddings/`.
+The re-embed step is the slow one (~250 chunks/sec end-to-end on an RTX
+4070 SUPER) but it only runs once per model version.
 
 ```bash
-# Expects a directory of .txt files (one per book)
-.venv/bin/python scripts/ingest_gutenberg.py \
-    data/knowledge/gutenberg/ \
-    --dry-run
-
-.venv/bin/python scripts/ingest_gutenberg.py \
-    data/knowledge/gutenberg/ \
-    --batch-size 1000
+.venv/bin/python scripts/reembed_collection.py \
+    --source wikipedia --target wikipedia \
+    --model nomic-ai/nomic-embed-text-v1.5 --dim 768 \
+    --db-path data/chroma --out-dir data/embeddings \
+    --workers 12 --batch-size 2000 --encode-batch-size 256
 ```
 
-### 3.6 Ingest Stack Exchange (Custom)
+Defaults to `max_seq_length=512`, which gives a ~5× throughput win over
+nomic's 8192 default and only affects ~1% of chunks. Resume-safe: rereads
+existing `chunk_id`s from the target text.sqlite on startup and skips them.
+
+### 3.5 Build the FAISS IVF-PQ Index
+
+```bash
+.venv/bin/python scripts/build_faiss_ivfpq.py \
+    --name wikipedia \
+    --in-dir data/embeddings --out-dir data/faiss --dim 768
+```
+
+`--nlist` defaults to auto (`clamp(sqrt(n), 64, 4096)`). Outputs
+`data/faiss/wikipedia.index` (the IVF-PQ index) + `data/faiss/wikipedia.sqlite`
+(`faiss_row` → `chunk_id` / text / source / url / title / chunk_index).
+At PQ-64 the indices are tiny: full Wikipedia fits in ~840 MB.
+
+Once the FAISS pair is verified, you can reclaim the flat-file workspace
+(`rm data/embeddings/wikipedia.*`); the FAISS sqlite has the same text.
+
+### 3.6 Music Collection (different path)
+
+Music has no ZIM source. Use the workstation-only scripts in the
+`Huge Information Stores/` working directory: `_scan_music_metadata.py`
+(builds `data/music.db` from mutagen tags) then `_ingest_music_faiss.py`
+(synthesizes a sentence doc per track, embeds with nomic-v1.5, writes
+the same flat-file pair). Then run `build_faiss_ivfpq.py --name music`
+to build the index. See the workstation `CLAUDE.md` for full detail.
+
+### 3.7 Ingest Stack Exchange (Custom)
 
 Stack Exchange uses XML dumps. You'll need a small custom script. Here's the approach:
 
@@ -602,100 +648,110 @@ for event, elem in ET.iterparse("Posts.xml", events=("end",)):
 
 Filter by score (>5 or >10) to keep only high-quality answers. Otherwise you'll ingest millions of low-quality posts.
 
-### 3.7 Ingest Field Manuals / Plain Text
+### 3.8 Ingest Field Manuals / Plain Text
 
-For any collection of `.txt` files:
+For any collection of `.txt` files, stage them via `ingest_zim.py`'s
+generic text path (or the legacy `ingest_gutenberg.py` for backward
+compatibility — it reads `*.txt`, chunks, and writes to ChromaDB), then
+re-embed and build FAISS exactly as in 3.4-3.5.
 
-```bash
-# Same as Gutenberg, just point at the directory and name the collection
-.venv/bin/python scripts/ingest_gutenberg.py \
-    data/knowledge/manuals/ \
-    --dry-run
+### 3.9 Verify the FAISS Indices
 
-# Or modify the script to use --collection for a different name
-```
-
-You can reuse `ingest_gutenberg.py` for any directory of text files — it just reads `*.txt`, chunks, and embeds.
-
-### 3.8 Verify the Vector Store
-
-After ingestion, check what you've got:
+After all three stages complete, you should have one `.index` + one
+`.sqlite` per collection under `data/faiss/`. Counts and disk usage:
 
 ```bash
 .venv/bin/python -c "
-import chromadb
-client = chromadb.PersistentClient(path='data/chroma')
-for c in client.list_collections():
-    print(f'{c.name}: {c.count()} chunks')
+import sqlite3, os
+from pathlib import Path
+total = 0
+for sqlite_path in sorted(Path('data/faiss').glob('*.sqlite')):
+    name = sqlite_path.stem
+    n = sqlite3.connect(sqlite_path).execute('SELECT COUNT(*) FROM faiss_idmap').fetchone()[0]
+    idx_mb = os.path.getsize(sqlite_path.with_suffix('.index')) / 1024**2
+    sql_mb = os.path.getsize(sqlite_path) / 1024**2
+    print(f'{name:12s} {n:>12,}  index={idx_mb:>8.1f}MB  sqlite={sql_mb:>9.1f}MB')
+    total += n
+print(f'{\"TOTAL\":12s} {total:>12,}')
 "
 ```
 
-Expected output (approximate):
+Expected output (production snapshot, 2026-05-19):
 ```
-wikipedia: 20000000
-ifixit: 500000
-wikibooks: 400000
-wikimed: 200000
-gutenberg: 5000000
+crashcourse        1,654  index=     1.1MB  sqlite=     6.4MB
+gutenberg     10,301,735  index=   717.6MB  sqlite= 40402.0MB
+ifixit           181,502  index=    14.5MB  sqlite=   538.3MB
+music              4,216  index=     1.2MB  sqlite=     0.9MB
+wikibooks        313,401  index=    23.9MB  sqlite=  1057.3MB
+wikimed          258,730  index=    20.0MB  sqlite=   934.3MB
+wikipedia     11,476,000  index=   800.8MB  sqlite= 36664.7MB
+TOTAL         22,537,238
 ```
 
-Test a query:
+Test a query end-to-end (set the env vars first; see Workstream 2):
 ```bash
+ORACLE_COLLECTION_BACKENDS='{"wikipedia":"faiss","gutenberg":"faiss","wikimed":"faiss","wikibooks":"faiss","ifixit":"faiss","crashcourse":"faiss","music":"faiss"}' \
+ORACLE_FAISS_INDEX_DIR=data/faiss \
 .venv/bin/python -c "
 from oracle.rag.retriever import Retriever
+from oracle.rag.modes import detect_mode
 r = Retriever()
-results = r.query('how to purify water')
-for hit in results:
-    print(f'[{hit[\"source\"]}] (dist={hit[\"distance\"]:.3f})')
+results = r.query('how to purify water', mode=detect_mode('how to purify water'))
+for hit in results[:5]:
+    print(f'[{hit[\"source\"]}] (d={hit[\"distance\"]:.3f})')
     print(f'  {hit[\"text\"][:150]}...')
     print()
 "
 ```
 
-You should see relevant chunks from Wikipedia, survival manuals, etc.
+You should see relevant chunks from Wikipedia, WikiMed, survival manuals, etc.
 
-### 3.9 Transfer to Jetson
+### 3.10 Transfer to Jetson
 
-The ChromaDB directory is self-contained. Just rsync it:
+Only the FAISS artifacts ship. ChromaDB stays on the workstation as the
+rebuild source.
 
 ```bash
-# From your workstation:
+# From your workstation (~83 GB total over gigabit ethernet, ~12 min):
 rsync -avz --progress \
-    data/chroma/ \
-    jetson:/opt/radio-oracle/data/chroma/
+    data/faiss/ \
+    jetson:/opt/radio-oracle/data/faiss/
 
-# This transfers ~30-50 GB depending on how many sources you ingested.
-# Over gigabit Ethernet: ~5-10 minutes
-# Over WiFi: hours. Use Ethernet.
-```
-
-Also transfer any models you downloaded on the workstation:
-```bash
+# Also transfer any models you downloaded on the workstation:
 rsync -avz --progress \
     models/ \
     jetson:/opt/radio-oracle/models/
 ```
 
-### 3.10 ChromaDB Internals (What's on Disk)
+The Jetson then needs `faiss-cpu` in its venv and three new env vars in
+`/opt/radio-oracle/.env` (`ORACLE_FAISS_INDEX_DIR`, `ORACLE_COLLECTION_BACKENDS`,
+and the corresponding settings) — see the rsync + Jetson-side patch
+detail in [`docs/rag-migration-runbook.md`](rag-migration-runbook.md) §5.
 
-After ingestion, `data/chroma/` contains:
+### 3.11 FAISS Artifacts on Disk
+
+After build, `data/faiss/` contains one pair of files per collection:
 
 ```
-data/chroma/
-├── chroma.sqlite3          # Metadata, document text, collection info
-├── {uuid}/                 # One directory per collection
-│   ├── data_level0.bin     # HNSW index (the actual vector data)
-│   ├── header.bin          # Index metadata
-│   ├── index_metadata.json
-│   └── length.bin
-└── ...
+data/faiss/
+├── wikipedia.index         # IVF-PQ index (FAISS-native binary)
+├── wikipedia.sqlite        # faiss_row → chunk_id / text / source / url / title / chunk_index
+├── gutenberg.index
+├── gutenberg.sqlite
+├── ifixit.index
+├── ifixit.sqlite
+... (one pair per collection)
 ```
 
-- The `.sqlite3` file stores all document text and metadata
-- The `data_level0.bin` files are the HNSW vector indices — these are what make search fast
-- Everything is memory-mapped at runtime, so the Jetson only loads what it needs
+- The `.index` file is the FAISS IVF-PQ index — small (~PQ-64 compresses
+  8× from raw vectors).
+- The `.sqlite` file holds the full chunk text + metadata keyed by row
+  id. At query time the FAISS backend resolves top-k vector ids and
+  fetches text from this sqlite — no chromadb dependency at runtime.
+- Both files are memory-mapped lazily, so the Jetson only loads index
+  pages it actually probes.
 
-### 3.11 Tuning RAG Quality
+### 3.12 Tuning RAG Quality
 
 After setup, you can tune retrieval via environment variables:
 
@@ -735,13 +791,14 @@ ls -lh /opt/radio-oracle/models/
 # en_US-lessac-medium.onnx  (~75 MB)
 # en_US-lessac-medium.onnx.json
 
-# 3. ChromaDB populated?
+# 3. FAISS indices populated?
 cd /opt/radio-oracle
+ls -lh data/faiss/*.index data/faiss/*.sqlite
 .venv/bin/python -c "
-import chromadb
-client = chromadb.PersistentClient(path='data/chroma')
-for c in client.list_collections():
-    print(f'{c.name}: {c.count()} chunks')
+import sqlite3, glob
+for p in sorted(glob.glob('data/faiss/*.sqlite')):
+    n = sqlite3.connect(p).execute('SELECT COUNT(*) FROM faiss_idmap').fetchone()[0]
+    print(f'{p}: {n:,} chunks')
 "
 
 # 4. Audio working?

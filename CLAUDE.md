@@ -20,7 +20,7 @@ make test       # pytest
 - `oracle/stt.py` — Whisper STT (whisper.cpp, GPU)
 - `oracle/tts.py` — Piper TTS (CPU, ONNX)
 - `oracle/audio.py` — mic capture, speaker playback, VAD, AM-radio filter
-- `oracle/rag/` — ChromaDB retrieval, embeddings, chunking
+- `oracle/rag/` — FAISS IVF-PQ retrieval (nomic-v1.5), pluggable backends, tiered modes, cross-encoder rerank, query router
 - `oracle/memory/` — conversation persistence (SQLite + summarization)
 - `oracle/persona.py` — system prompt builder from persona config
 - `oracle/hardware/` — GPIO button, RGB LED, power switch, audio routing
@@ -34,9 +34,11 @@ make test       # pytest
 - LLM: Ollama + Llama 3.2 3B Q4_K_M (~2.5GB VRAM)
 - STT and LLM are sequential (never concurrent) to fit in 8GB unified memory
 - TTS runs on CPU to avoid GPU contention
-- ChromaDB embeddings (all-MiniLM-L6-v2) auto-detect CUDA on workstation, CPU on Jetson
-- Knowledge ingestion runs on workstation, rsync ChromaDB to Jetson
-- Config via env vars with `ORACLE_` prefix (direnv-compatible)
+- RAG: FAISS IVF-PQ (PQ-64, METRIC_INNER_PRODUCT, score_scale=20.0) per collection, queried with `nomic-embed-text-v1.5` (768-d). Backend is pluggable per collection via `collection_backends` so old ChromaDB collections still work if needed.
+- Tiered retrieval: snappy first-pass (`tier1_top_k`) returns immediately; deep mode adds a cross-encoder rerank on a larger candidate pool (workstation/CPU). See `oracle/rag/modes.py`.
+- Workstation builds FAISS indices from ChromaDB-staged chunks; only `data/faiss/` rsyncs to the Jetson. ChromaDB is workstation-only after the FAISS cutover (2026-05-19).
+- Embedder runs on CPU on the Jetson today (~1.2 s warm). cp311 CUDA torch wheels for JetPack 6.2 don't exist; see `docs/rag-migration-runbook.md` §"Known follow-up" for the three fix paths.
+- Config via env vars with `ORACLE_` prefix (direnv-compatible). The Jetson's `/opt/radio-oracle/.env` sets `ORACLE_COLLECTION_BACKENDS` to route every collection to FAISS.
 
 ## Workstreams
 
