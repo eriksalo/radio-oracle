@@ -23,5 +23,5 @@ models/
 .DS_Store
 Thumbs.db
 
-# Music library
-music/
+# Music library (top-level only, not oracle/music/ package)
+/music/

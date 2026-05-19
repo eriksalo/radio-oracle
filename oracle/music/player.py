@@ -152,40 +152,56 @@ class Player:
             return
 
         import numpy as np
+        import sounddevice as sd
 
-        from oracle.audio import play_audio
+        from oracle.audio import _get_output_device, _resample_to_playback, apply_radio_filter
+        from oracle.hardware.volume import get_volume_control
 
         samples = np.frombuffer(decoded.samples, dtype=np.float32)
         sample_rate = decoded.sample_rate
 
         # Apply AM radio filter if enabled
         if settings.music_radio_filter:
-            from oracle.audio import apply_radio_filter
             samples = apply_radio_filter(samples, sample_rate)
 
-        # Play in chunks so we can check pause/stop
-        chunk_duration = 2.0  # seconds per chunk
-        chunk_size = int(sample_rate * chunk_duration)
+        # Resample once for the output device
+        samples, dst_sr = _resample_to_playback(samples, sample_rate)
+
+        # Stream via a single OutputStream — no gaps between chunks.
+        chunk_duration = 0.5  # seconds per write
+        chunk_size = int(dst_sr * chunk_duration)
         offset = 0
+        volume_ctl = get_volume_control()
 
-        while offset < len(samples):
-            # Check pause
-            while not self._paused.is_set():
-                if self._stop_event.is_set():
-                    return
-                time.sleep(0.1)
+        try:
+            with sd.OutputStream(
+                samplerate=dst_sr,
+                channels=1,
+                dtype="float32",
+                device=_get_output_device(),
+            ) as stream:
+                while offset < len(samples):
+                    # Pause gate
+                    while not self._paused.is_set():
+                        if self._stop_event.is_set():
+                            return
+                        time.sleep(0.1)
 
-            if self._stop_event.is_set():
-                return
+                    if self._stop_event.is_set():
+                        return
 
-            end = min(offset + chunk_size, len(samples))
-            chunk = samples[offset:end]
+                    end = min(offset + chunk_size, len(samples))
+                    chunk = samples[offset:end].copy()
 
-            def should_abort() -> bool:
-                return self._stop_event.is_set()
+                    # Apply volume from hardware knob
+                    gain = volume_ctl.gain
+                    if gain < 1.0:
+                        chunk *= gain
 
-            play_audio(chunk, sample_rate, should_abort=should_abort)
-            offset = end
+                    stream.write(chunk.reshape(-1, 1))
+                    offset = end
+        except (sd.PortAudioError, OSError) as e:
+            logger.warning(f"Audio stream error during playback: {e}")
 
     def close(self) -> None:
         self.stop()
