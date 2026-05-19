@@ -37,7 +37,7 @@ def record_until_silence(
     ch = channels or settings.audio_channels
     threshold = energy_threshold or settings.vad_energy_threshold
     max_silence = silence_duration or settings.vad_silence_duration
-    device = settings.audio_input_device
+    device = _get_input_device()
 
     block_duration = 0.1  # 100ms blocks
     block_size = int(capture_sr * block_duration)
@@ -147,35 +147,45 @@ def _wait_or_abort(should_abort: AbortCheck) -> None:
         time.sleep(0.05)
 
 
-def _resolve_output_device() -> int | None:
-    """Resolve the configured output device to an integer index.
+def _resolve_device(name: str, kind: str) -> int | None:
+    """Resolve a device name to its integer index.
 
     Returns the index if found, or ``None`` to use the system default
-    (which /etc/asound.conf should route to the USB DAC).
+    (which /etc/asound.conf should route to the correct USB device).
+    PortAudio often misses USB devices under systemd, so falling back
+    to None is the expected path on the Jetson.
     """
     import sounddevice as sd
 
-    name = settings.audio_output_device
+    kind_key = f"max_{kind}_channels"
     devices = sd.query_devices()
     for idx, dev in enumerate(devices):
-        if name in dev["name"] and dev["max_output_channels"] > 0:
-            logger.info(f"Output device: {name!r} → index {idx}")
+        if name in dev["name"] and dev[kind_key] > 0:
+            logger.info(f"{kind.title()} device: {name!r} → index {idx}")
             return idx
-    # PortAudio often misses USB devices under systemd; fall back to
-    # system default (routed by /etc/asound.conf).
-    logger.info(f"Output device {name!r} not in PortAudio list; using system default")
+    logger.info(f"{kind.title()} device {name!r} not in PortAudio list; using system default")
     return None
 
 
-# Cache resolved device index (None = system default).
+# Cache resolved device indices (None = system default).
+_input_device_resolved = False
+_input_device_id: int | None = None
 _output_device_resolved = False
 _output_device_id: int | None = None
+
+
+def _get_input_device() -> int | None:
+    global _input_device_resolved, _input_device_id
+    if not _input_device_resolved:
+        _input_device_id = _resolve_device(settings.audio_input_device, "input")
+        _input_device_resolved = True
+    return _input_device_id
 
 
 def _get_output_device() -> int | None:
     global _output_device_resolved, _output_device_id
     if not _output_device_resolved:
-        _output_device_id = _resolve_output_device()
+        _output_device_id = _resolve_device(settings.audio_output_device, "output")
         _output_device_resolved = True
     return _output_device_id
 
