@@ -53,6 +53,28 @@ class OracleSettings(BaseSettings):
     # (e.g. a full Wikipedia embedding) won't fit in RAM, so restrict the set.
     rag_collections: str | None = None
 
+    # Two-tier retrieval (snappy first answer + optional deep cross-encoder rerank)
+    tier1_top_k: int = 5  # results per collection in snappy mode
+    tier2_top_k: int = 20  # results per collection in deep mode (pre-rerank)
+    tier2_rerank_pool: int = 100  # max candidates fed to the cross-encoder
+    tier2_final_top_k: int = 20  # results returned to the LLM after rerank
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_device: str = "cpu"  # keep off the Jetson's shared VRAM
+
+    # Per-collection backends. "chroma" = current ChromaBackend; "faiss" =
+    # FaissIvfPqBackend reading from faiss_index_dir/<collection>.{index,sqlite}.
+    collection_backends: dict[str, str] = {}
+    faiss_index_dir: Path = Path("data/faiss")
+    faiss_collection_config: dict[str, dict] = {
+        "wikipedia":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+        "gutenberg":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+        "wikimed":     {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+        "wikibooks":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+        "ifixit":      {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+        "crashcourse": {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+        "music":       {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+    }
+
     # Memory
     db_path: Path = Path("data/oracle.db")
     max_context_turns: int = 10
