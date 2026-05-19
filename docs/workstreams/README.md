@@ -7,8 +7,8 @@ to develop and exercise it in isolation. Pick one, ignore the others.
 | #   | Workstream                                | Status         | Code lives in                              |
 |-----|-------------------------------------------|----------------|--------------------------------------------|
 | [1](1-electronics.md)  | Electronics & Wiring                | Done (volume + power switch) | `oracle/hardware/`, `docs/wiring/` |
-| [2](2-rag.md)          | Large-data ingest / RAG             | Working E2E (workstation) | `oracle/rag/`, `scripts/ingest_*.py`   |
-| [3](3-music.md)        | Music player                        | Stub            | `oracle/music/`                          |
+| [2](2-rag.md)          | Large-data ingest / RAG             | Production (7 FAISS collections) | `oracle/rag/`, `scripts/ingest_*.py`   |
+| [3](3-music.md)        | Music player                        | Complete (4037 tracks) | `oracle/music/`                          |
 | [4](4-books.md)        | Books & e-reader                    | Working E2E (60k books) | `oracle/books/`, `scripts/index_books.py` |
 | [5](5-tts.md)          | Text-to-voice (TTS + audio I/O)     | Working E2E (Kokoro) | `oracle/tts.py`, `oracle/audio.py`  |
 | [6](6-llm.md)          | LLM behavior (chat, persona, memory)| Working E2E     | `oracle/llm.py`, `oracle/persona.py`, `oracle/memory/` |
