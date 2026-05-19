@@ -219,6 +219,18 @@ for q in [\\\"Who was Augustus Caesar?\\\", \\\"How do I fix a leaky faucet?\\\"
 
 Each query should land the right collection (wikipedia, ifixit respectively). Cold first-query takes ~14 s (model + FAISS load); subsequent queries ~1.2 s warm.
 
+### 5i. Remove legacy ChromaDB data
+
+Done 2026-05-19. All 7 collections now served by FAISS; the 442 GB ChromaDB store is redundant.
+
+```bash
+ssh erik@10.0.0.190 "sudo rm -rf /opt/radio-oracle/data/chroma/"
+# Remove stale env var
+ssh erik@10.0.0.190 "sudo sed -i '/ORACLE_RAG_CHROMA_PATH/d' /opt/radio-oracle/.env"
+```
+
+Disk reclaimed: 635 GB → 195 GB used. The `ChromaBackend` code remains as a fallback for any future collection that doesn't warrant a FAISS build.
+
 ### Known follow-up: torch CUDA on Jetson (deferred)
 
 The Jetson currently runs nomic-v1.5 embedding on CPU at ~1.1 s/query. GPU embedding would drop that to ~200 ms but is **harder than it looks**:

@@ -23,5 +23,5 @@ models/
 .DS_Store
 Thumbs.db
 
-# ChromaDB
-chroma_data/
+# Music library
+music/
