@@ -55,9 +55,9 @@ class OracleSettings(BaseSettings):
 
     # Two-tier retrieval (snappy first answer + optional deep cross-encoder rerank)
     tier1_top_k: int = 5  # results per collection in snappy mode
-    tier2_top_k: int = 20  # results per collection in deep mode (pre-rerank)
-    tier2_rerank_pool: int = 100  # max candidates fed to the cross-encoder
-    tier2_final_top_k: int = 20  # results returned to the LLM after rerank
+    tier2_top_k: int = 10  # results per collection in deep mode (pre-rerank)
+    tier2_rerank_pool: int = 30  # max candidates fed to the cross-encoder
+    tier2_final_top_k: int = 10  # results returned to the LLM after rerank
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_device: str = "cpu"  # keep off the Jetson's shared VRAM
 

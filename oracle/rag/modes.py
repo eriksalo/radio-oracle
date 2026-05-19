@@ -24,6 +24,7 @@ class ModeParams:
     per_collection_top_k: int
     rerank_pool: int  # candidates fed to reranker (0 = no reranker)
     final_top_k: int  # results returned to LLM
+    max_collections: int = 0  # 0 = all available
 
 
 def params_for(mode: RetrievalMode, settings) -> ModeParams:
@@ -39,6 +40,7 @@ def params_for(mode: RetrievalMode, settings) -> ModeParams:
         per_collection_top_k=settings.tier2_top_k,
         rerank_pool=settings.tier2_rerank_pool,
         final_top_k=settings.tier2_final_top_k,
+        max_collections=3,
     )
 
 

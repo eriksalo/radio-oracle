@@ -111,6 +111,8 @@ class Retriever:
                 if routing.matched:
                     logger.debug(f"Router matched: {routing.matched}; order: {routing.order}")
                 collection_names = routing.order
+        if params.max_collections > 0:
+            collection_names = collection_names[:params.max_collections]
         if not collection_names:
             logger.warning("No collections available for RAG query")
             return []
