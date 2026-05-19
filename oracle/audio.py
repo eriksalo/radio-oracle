@@ -147,37 +147,36 @@ def _wait_or_abort(should_abort: AbortCheck) -> None:
         time.sleep(0.05)
 
 
-def _resolve_device(name: str, kind: str) -> int | str:
-    """Resolve a device name to its integer index (once) for reliable reuse.
+def _resolve_output_device() -> int | None:
+    """Resolve the configured output device to an integer index.
 
-    sounddevice's built-in name matching can fail after a stream closes on
-    some ALSA backends, so we search the device list manually and cache the
-    integer index.
+    Returns the index if found, or ``None`` to use the system default
+    (which /etc/asound.conf should route to the USB DAC).
     """
     import sounddevice as sd
 
-    kind_key = f"max_{kind}_channels"
+    name = settings.audio_output_device
     devices = sd.query_devices()
     for idx, dev in enumerate(devices):
-        if name in dev["name"] and dev[kind_key] > 0:
-            logger.info(f"Resolved {kind} device {name!r} → index {idx} ({dev['name']})")
+        if name in dev["name"] and dev["max_output_channels"] > 0:
+            logger.info(f"Output device: {name!r} → index {idx}")
             return idx
-    # Log all devices for debugging
-    logger.warning(f"Could not resolve {kind} device {name!r}. Available devices:")
-    for idx, dev in enumerate(devices):
-        logger.warning(f"  [{idx}] {dev['name']} ({kind_key}={dev[kind_key]})")
-    return name  # fall back to string matching
+    # PortAudio often misses USB devices under systemd; fall back to
+    # system default (routed by /etc/asound.conf).
+    logger.info(f"Output device {name!r} not in PortAudio list; using system default")
+    return None
 
 
-# Cache resolved device indices so we only do the lookup once.
-_output_device_id: int | str | None = None
+# Cache resolved device index (None = system default).
+_output_device_resolved = False
+_output_device_id: int | None = None
 
 
-def _get_output_device() -> int | str:
-    global _output_device_id
-    if _output_device_id is None:
-        _output_device_id = _resolve_device(settings.audio_output_device, "output")
-        logger.debug(f"Resolved output device: {settings.audio_output_device!r} → {_output_device_id}")
+def _get_output_device() -> int | None:
+    global _output_device_resolved, _output_device_id
+    if not _output_device_resolved:
+        _output_device_id = _resolve_output_device()
+        _output_device_resolved = True
     return _output_device_id
 
 

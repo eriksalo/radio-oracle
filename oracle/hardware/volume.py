@@ -16,7 +16,10 @@ class VolumeControl:
     """
 
     def __init__(self, pot: Potentiometer | None = None) -> None:
-        self._pot = pot or Potentiometer()
+        if pot is None:
+            from oracle.hardware.switch_adc import shared_adc
+            pot = Potentiometer(adc=shared_adc())
+        self._pot = pot
         self._last_gain: float = 1.0  # fallback if ADC unavailable
 
     @property

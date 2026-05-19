@@ -115,19 +115,23 @@ class Player:
 
     def _play_thread(self, track: Track) -> None:
         """Background thread: play track, then auto-advance if continuous."""
-        self._play_file(track)
-        # Auto-advance to next random track in continuous mode.
-        while self._continuous and not self._stop_event.is_set():
-            next_track = self._catalog.random_track()
-            if next_track is None:
-                break
-            self._current = next_track
-            logger.info(f"Playing: {next_track.artist} — {next_track.title}")
-            time.sleep(1.0)  # brief pause between tracks
-            if self._stop_event.is_set():
-                break
-            self._play_file(next_track)
-        self._current = None
+        try:
+            self._play_file(track)
+            # Auto-advance to next random track in continuous mode.
+            while self._continuous and not self._stop_event.is_set():
+                next_track = self._catalog.random_track()
+                if next_track is None:
+                    break
+                self._current = next_track
+                logger.info(f"Playing: {next_track.artist} — {next_track.title}")
+                time.sleep(1.0)  # brief pause between tracks
+                if self._stop_event.is_set():
+                    break
+                self._play_file(next_track)
+        except Exception as e:  # noqa: BLE001
+            logger.exception(f"Music thread crashed: {e}")
+        finally:
+            self._current = None
 
     def _play_file(self, track: Track) -> None:
         """Decode and play a music file, respecting pause/stop."""
