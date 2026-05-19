@@ -219,9 +219,21 @@ for q in [\\\"Who was Augustus Caesar?\\\", \\\"How do I fix a leaky faucet?\\\"
 
 Each query should land the right collection (wikipedia, ifixit respectively). Cold first-query takes ~14 s (model + FAISS load); subsequent queries ~1.2 s warm.
 
-### Known follow-up: torch CUDA on Jetson
+### Known follow-up: torch CUDA on Jetson (deferred)
 
-The current Jetson venv has CPU-only torch; nomic-v1.5 inference takes ~1.1 s per query on aarch64 CPU. Installing the Nvidia-provided `torch-*-cp311-cp311-linux_aarch64.whl` for the matching JetPack would drop that to ~200 ms (GPU FP16). Not blocking; deferred.
+The Jetson currently runs nomic-v1.5 embedding on CPU at ~1.1 s/query. GPU embedding would drop that to ~200 ms but is **harder than it looks**:
+
+- The Jetson venv is **Python 3.11** (`/opt/uv-python/cpython-3.11.15-linux-aarch64-gnu/`).
+- The torch in it (`2.12.0+cu130`) is the generic PyPI build for CUDA 13; the Jetson driver is 12.6, so `torch.cuda.is_available()` is False.
+- **No prebuilt cp311 CUDA-enabled torch wheel exists for JetPack 6.2.** Nvidia's `developer.download.nvidia.com/compute/redist/jp/v62/pytorch/` and the Jetson AI Lab community repo (`pypi.jetson-ai-lab.io/jp6/cu126`) both ship cp310 only.
+
+Three real fix paths (in order of decreasing recommendation):
+
+1. **ONNX Runtime swap.** Add an `onnxruntime-gpu` (cp311 aarch64 + CUDA 12.6) embedder backend that consumes a nomic-v1.5 ONNX export. ~half-day of code in `oracle/rag/embedder.py`. Isolated, reversible.
+2. **Build torch from source** for cp311 + CUDA 12.6 on the Jetson. ~4–6 hours of compile, swap tuning required. Authoritative but slow.
+3. **Recreate the venv on Python 3.10** and use the official Nvidia cp310 wheels. Forces reinstall of every dep including hardware-sensitive ones (Jetson.GPIO, ADS1115, sounddevice, miniaudio); high ABI-breakage risk on a live production system. Last resort.
+
+End-to-end latency is dominated by Llama 3.2 3B generation, so the 1.1 s embedder cost is a small fraction of the wall-clock response time. Defer until/unless that math changes.
 
 ## Throughput notes (observed 2026-05-18)
 
