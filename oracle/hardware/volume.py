@@ -6,6 +6,11 @@ from loguru import logger
 
 from oracle.hardware.pot import Potentiometer
 
+# Calibrated voltage range of the physical pot wiper.
+# Measured: 0.00 V at full CCW, ~3.01 V at full CW.
+_V_MIN = 0.0
+_V_MAX = 3.01
+
 
 class VolumeControl:
     """Reads the physical pot and exposes a 0.0–1.0 gain value.
@@ -32,8 +37,8 @@ class VolumeControl:
         reading = self._pot.read()
         if reading is None:
             return self._last_gain
-        # pct is 0–100; map to 0.0–1.0 with quadratic curve
-        linear = reading.pct / 100.0
+        # Map calibrated voltage range to 0.0–1.0, then apply quadratic curve
+        linear = max(0.0, min(1.0, (reading.voltage - _V_MIN) / (_V_MAX - _V_MIN)))
         g = linear * linear
         self._last_gain = g
         return g
