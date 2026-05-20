@@ -29,11 +29,17 @@ _MUX_SINGLE = {              # single-ended on AINx
 _PGA_4_096V = 0x0200         # ±4.096 V — covers a 3.3 V rail with headroom
 _MODE_SINGLE = 0x0100        # one-shot
 _DR_128SPS = 0x0080          # 128 samples/s
+_DR_250SPS = 0x00A0          # 250 samples/s — 4 ms/conversion
 _COMP_DISABLE = 0x0003
 
 _FS_VOLTAGE = 4.096          # full-scale voltage for _PGA_4_096V
 _FS_CODE = 32767             # 16-bit signed; positive range only used here
 _VREF_NOMINAL = 3.3          # the rail across the pot, for percent calc
+
+# Conversion-ready polling
+_OS_READY_MASK = 0x8000      # bit 15 of config reg = 1 when conversion done
+_POLL_INTERVAL_S = 0.001     # 1 ms between OS-bit checks
+_CONV_TIMEOUT_S = 0.025      # give up after 25 ms
 
 
 class ADS1115:
@@ -71,7 +77,16 @@ class ADS1115:
             self._bus = None
 
     def read_raw(self, channel: int) -> int | None:
-        """Return the raw signed conversion value, or None on error/unavailable."""
+        """Return the raw signed conversion value, or None on error/unavailable.
+
+        Polls the config register OS bit to confirm conversion completion
+        instead of a blind sleep.  Always performs two back-to-back conversions
+        and returns the second — the first settles the mux after a channel
+        switch.  With three threads sharing one ADC, the mux channel is
+        unpredictable between calls, so a single conversion is never safe.
+        At 250 SPS each conversion is ~4 ms; the pair costs ~8-10 ms total
+        which still fits the 30 ms polling intervals.
+        """
         if self._bus is None or channel not in _MUX_SINGLE:
             return None
         config = (
@@ -79,15 +94,27 @@ class ADS1115:
             | _MUX_SINGLE[channel]
             | _PGA_4_096V
             | _MODE_SINGLE
-            | _DR_128SPS
+            | _DR_250SPS
             | _COMP_DISABLE
         )
         cfg_bytes = [(config >> 8) & 0xFF, config & 0xFF]
         with self._lock:
             try:
+                # First conversion: settles the mux onto the target channel.
+                # Without this, residual charge from a different channel
+                # contaminates the reading.
                 self._bus.write_i2c_block_data(self._addr, _REG_CONFIG, cfg_bytes)
-                # 128 SPS → ~7.8 ms; small margin for jitter.
-                time.sleep(0.010)
+                if not self._wait_ready():
+                    logger.debug("ADS1115 settling conversion timed out")
+                    return None
+                # Drain the conversion register (discard stale value)
+                self._bus.read_i2c_block_data(self._addr, _REG_CONVERSION, 2)
+
+                # Second conversion: the real reading with settled mux.
+                self._bus.write_i2c_block_data(self._addr, _REG_CONFIG, cfg_bytes)
+                if not self._wait_ready():
+                    logger.debug("ADS1115 conversion timed out")
+                    return None
                 hi, lo = self._bus.read_i2c_block_data(self._addr, _REG_CONVERSION, 2)
             except OSError as e:
                 self._error = repr(e)
@@ -97,6 +124,16 @@ class ADS1115:
         if raw & 0x8000:  # two's-complement
             raw -= 1 << 16
         return raw
+
+    def _wait_ready(self) -> bool:
+        """Poll the OS bit until the conversion is done. Returns False on timeout."""
+        deadline = time.monotonic() + _CONV_TIMEOUT_S
+        while time.monotonic() < deadline:
+            cfg_hi, _ = self._bus.read_i2c_block_data(self._addr, _REG_CONFIG, 2)
+            if cfg_hi & 0x80:  # OS bit (bit 15) is in the high byte
+                return True
+            time.sleep(_POLL_INTERVAL_S)
+        return False
 
     def read_voltage(self, channel: int) -> float | None:
         raw = self.read_raw(channel)

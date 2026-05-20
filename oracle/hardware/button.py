@@ -25,7 +25,7 @@ from oracle.hardware.switch_adc import make_action_button_switch
 
 PressKind = Literal["short", "long"]
 _DEBOUNCE_S = 0.03
-_POLL_S = 0.02      # ADS1115 read is ~10 ms; 50 Hz is plenty for human press timing
+_POLL_S = 0.04      # ADS1115 double-read ~10 ms; 40 ms gap ≈ 20 Hz, fine for press timing
 
 
 @dataclass(frozen=True)
