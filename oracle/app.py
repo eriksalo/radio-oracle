@@ -39,6 +39,7 @@ class OracleApp:
         self._state_writer.set_mode(self._state)
         self._state_writer.set_power(self.power.is_on)
         self.power.add_listener(self._state_writer.set_power)
+        self.power.add_listener(self._on_power_change)
         self._player = None  # lazy init
 
     def _get_player(self):
@@ -190,6 +191,12 @@ class OracleApp:
         elif state == "librarian":
             self._pause_music()
             self.leds.set_mode("librarian")
+
+    def _on_power_change(self, is_on: bool) -> None:
+        """Called from power switch thread — immediately update LED."""
+        if not is_on:
+            self.leds.set_mode("off")
+            logger.info("Power off — LED off (immediate)")
 
     def _drain_events(self) -> list[ButtonEvent]:
         out: list[ButtonEvent] = []

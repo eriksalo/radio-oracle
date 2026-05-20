@@ -164,9 +164,15 @@ async def wake_word_listen(
     if leds is not None:
         leds.set_mode("thinking")
 
+    if aborted():
+        return None
+
     vc.stt.load()
     text = vc.stt.transcribe(audio)
     vc.stt.unload()
+
+    if aborted():
+        return None
 
     if not text.strip():
         return None
@@ -219,9 +225,13 @@ async def voice_turn(
         # Thinking (transcribe + LLM)
         if leds is not None:
             leds.set_mode("thinking")
+        if aborted():
+            return False
         vc.stt.load()
         text = vc.stt.transcribe(audio)
         vc.stt.unload()
+        if aborted():
+            return False
 
     if not text.strip():
         logger.debug("Empty transcription, skipping")
