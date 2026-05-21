@@ -41,6 +41,8 @@ class OracleApp:
         self.power.add_listener(self._state_writer.set_power)
         self.power.add_listener(self._on_power_change)
         self._player = None  # lazy init
+        self._wakeword = None  # lazy init
+        self._wake_event: asyncio.Event | None = None
 
     def _get_player(self):
         """Lazily create the music player (only if catalog has tracks)."""
@@ -61,14 +63,32 @@ class OracleApp:
             self._player = None
         return self._player
 
+    def _start_wakeword(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Start the always-on wake word detector."""
+        from oracle.wakeword import WakeWordDetector
+
+        self._wake_event = asyncio.Event()
+
+        def on_wake() -> None:
+            loop.call_soon_threadsafe(self._wake_event.set)
+
+        self._wakeword = WakeWordDetector(on_wake=on_wake)
+        self._wakeword.start()
+
+    def _stop_wakeword(self) -> None:
+        if self._wakeword is not None:
+            self._wakeword.stop()
+            self._wakeword = None
+
     async def run(self) -> None:
         from oracle.core import (
             VoiceContext,
             voice_close,
             voice_init,
             voice_turn,
-            wake_word_listen,
         )
+
+        loop = asyncio.get_event_loop()
 
         self.button.start()
         self.power.start()
@@ -84,14 +104,19 @@ class OracleApp:
                 await asyncio.sleep(0.1)
 
             voice_ctx = await voice_init()
+            self._start_wakeword(loop)
             self._enter("radio")
 
             while True:
                 if not self.power.is_on:
                     self._enter("standby")
+                    if self._wakeword:
+                        self._wakeword.mute()
                     while not self.power.is_on:
                         self._drain_events()
                         await asyncio.sleep(0.1)
+                    if self._wakeword:
+                        self._wakeword.unmute()
                     self._enter("radio")
                     continue
 
@@ -106,36 +131,9 @@ class OracleApp:
                     if self._state == "librarian":
                         self.leds.set_mode("librarian")
                 elif self._state == "radio":
-                    # Ensure music is playing in radio mode.
                     self._ensure_music()
+                    await self._radio_wait(voice_ctx)
 
-                    # Listen for wake word; on detection, pause music, do one
-                    # voice turn, then resume.
-                    remainder = await wake_word_listen(
-                        voice_ctx,
-                        leds=self.leds,
-                        should_abort=lambda: not self.power.is_on,
-                        player=self._player,
-                    )
-                    self._handle_buttons()
-                    if remainder is not None and self._state == "radio":
-                        self._pause_music()
-                        self.leds.set_mode("librarian")
-                        if remainder:
-                            await voice_turn(
-                                voice_ctx,
-                                leds=self.leds,
-                                pre_text=remainder,
-                                should_abort=lambda: not self.power.is_on,
-                            )
-                        else:
-                            await voice_turn(
-                                voice_ctx,
-                                leds=self.leds,
-                                should_abort=lambda: not self.power.is_on,
-                            )
-                        self.leds.set_mode("radio")
-                        self._resume_music()
         except KeyboardInterrupt:
             logger.info("Oracle interrupted")
         except Exception as e:  # noqa: BLE001
@@ -144,6 +142,49 @@ class OracleApp:
             await asyncio.sleep(2)
         finally:
             await self._shutdown(voice_ctx)
+
+    async def _radio_wait(self, voice_ctx) -> None:
+        """Wait for wake word, button, or power-off in radio mode."""
+        from oracle.core import voice_turn
+
+        if self._wake_event is None:
+            await asyncio.sleep(0.1)
+            return
+
+        # Clear any stale wake event
+        self._wake_event.clear()
+
+        # Poll: check wake event, buttons, and power switch
+        while self._state == "radio" and self.power.is_on:
+            self._handle_buttons()
+            if self._state != "radio":
+                return
+
+            if self._wake_event.is_set():
+                self._wake_event.clear()
+                logger.info("Wake word triggered — starting voice turn")
+
+                # Mute wake detector during our own voice interaction
+                if self._wakeword:
+                    self._wakeword.mute()
+
+                self._pause_music()
+                self.leds.set_mode("librarian")
+
+                await voice_turn(
+                    voice_ctx,
+                    leds=self.leds,
+                    should_abort=lambda: not self.power.is_on,
+                )
+
+                self.leds.set_mode("radio")
+                self._resume_music()
+
+                if self._wakeword:
+                    self._wakeword.unmute()
+                return
+
+            await asyncio.sleep(0.05)
 
     # ---------------------------------------------------------------- music
 
@@ -233,6 +274,7 @@ class OracleApp:
         self._stop_music()
         if self._player:
             self._player.close()
+        self._stop_wakeword()
 
         for op in (self.button.cleanup, self.power.cleanup, self.leds.cleanup, get_volume_control().cleanup):
             try:
