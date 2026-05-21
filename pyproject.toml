@@ -29,7 +29,7 @@ stt = [
     "faster-whisper>=1.0",
 ]
 wakeword = [
-    "openwakeword>=0.6",
+    "faster-whisper>=1.0",
 ]
 stt-legacy = [
     "pywhispercpp>=1.4",

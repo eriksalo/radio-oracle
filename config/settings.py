@@ -108,8 +108,8 @@ class OracleSettings(BaseSettings):
     led_blue_pin: int = 22      # BOARD pin 22
     power_switch_pin: int = 17   # (legacy wiring on BCM 17; now unused for reads)
     wake_word: str = "librarian"       # (legacy) spoken keyword checked in STT transcript
-    wakeword_model: str = "alexa"        # openWakeWord pretrained model name
-    wakeword_threshold: float = 0.5     # detection confidence threshold (0–1)
+    wakeword_model: str = ""              # (unused, kept for compat)
+    wakeword_threshold: float = 0.5     # (unused, kept for compat)
     long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
     pot_i2c_bus: int = 7                  # /dev/i2c-N for the ADS1115 (header pins 3/5)
     pot_ads1115_addr: int = 0x48          # default ADDR-floating address
