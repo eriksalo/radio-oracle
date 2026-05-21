@@ -167,11 +167,39 @@ class Player:
         # Resample once for the output device
         samples, dst_sr = _resample_to_playback(samples, sample_rate)
 
-        # Stream via a single OutputStream — no gaps between chunks.
-        chunk_duration = 0.5  # seconds per write
-        chunk_size = int(dst_sr * chunk_duration)
-        offset = 0
+        # Stream via callback-driven OutputStream for glitch-free playback.
+        # The callback pulls from a shared position; the main thread only
+        # handles pause/stop/volume without touching the audio pipeline.
         volume_ctl = get_volume_control()
+        pos = 0
+        pos_lock = threading.Lock()
+        finished = threading.Event()
+
+        def _callback(outdata: np.ndarray, frames: int, _time, status) -> None:
+            nonlocal pos
+            if status:
+                logger.debug(f"Playback status: {status}")
+
+            # Output silence while paused (don't advance position)
+            if not self._paused.is_set():
+                outdata[:] = 0
+                return
+
+            with pos_lock:
+                end = min(pos + frames, len(samples))
+                n = end - pos
+                if n <= 0:
+                    outdata[:] = 0
+                    finished.set()
+                    return
+                outdata[:n, 0] = samples[pos:end]
+                if n < frames:
+                    outdata[n:] = 0
+                    finished.set()
+                gain = volume_ctl.gain
+                if gain < 1.0:
+                    outdata[:n] *= gain
+                pos = end
 
         try:
             with sd.OutputStream(
@@ -179,29 +207,13 @@ class Player:
                 channels=1,
                 dtype="float32",
                 device=_get_output_device(),
-                blocksize=chunk_size,
                 latency="high",
-            ) as stream:
-                while offset < len(samples):
-                    # Pause gate
-                    while not self._paused.is_set():
-                        if self._stop_event.is_set():
-                            return
-                        time.sleep(0.1)
-
+                callback=_callback,
+            ):
+                while not finished.is_set():
                     if self._stop_event.is_set():
                         return
-
-                    end = min(offset + chunk_size, len(samples))
-                    chunk = samples[offset:end].copy()
-
-                    # Apply volume from hardware knob
-                    gain = volume_ctl.gain
-                    if gain < 1.0:
-                        chunk *= gain
-
-                    stream.write(chunk.reshape(-1, 1))
-                    offset = end
+                    finished.wait(timeout=0.2)
         except (sd.PortAudioError, OSError) as e:
             logger.warning(f"Audio stream error during playback: {e}")
 
