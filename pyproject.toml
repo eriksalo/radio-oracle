@@ -26,6 +26,9 @@ tts = [
     "kokoro-onnx>=0.4",
 ]
 stt = [
+    "faster-whisper>=1.0",
+]
+stt-legacy = [
     "pywhispercpp>=1.4",
 ]
 music = [

@@ -1,9 +1,10 @@
-"""Speech-to-text via a per-call whisper.cpp subprocess.
+"""Speech-to-text via faster-whisper (CTranslate2) or pywhispercpp.
 
-Whisper runs in a fresh Python subprocess for each `transcribe()` call so that
-its CUDA context is torn down on exit and VRAM is fully released before the
-LLM runner needs it. On a Jetson Orin Nano (8 GB unified) this is the only way
-small.en + llama3.2:3b can coexist in one voice-loop turn.
+When running on CPU (the default for faster-whisper int8), the model is kept
+in-process to avoid ~6s subprocess startup overhead on each call.
+
+When running on GPU, a subprocess is used so the CUDA context is torn down
+on exit and VRAM is reclaimed before the LLM needs it.
 """
 
 from __future__ import annotations
@@ -21,28 +22,43 @@ from config.settings import settings
 
 
 class WhisperSTT:
-    """Subprocess-backed wrapper for whisper.cpp inference."""
+    """Whisper STT with in-process (CPU) or subprocess (GPU) execution."""
 
     def __init__(self, model_path: Path | None = None):
         self._model_path = model_path or settings.whisper_model_path
+        self._model = None  # in-process model (CPU mode only)
+        self._use_subprocess = settings.faster_whisper_device != "cpu"
+        logger.info(
+            f"STT backend: {settings.stt_backend} "
+            f"({'subprocess' if self._use_subprocess else 'in-process'})"
+        )
 
     def load(self) -> None:
-        """No-op kept for API compatibility — the worker loads per call."""
-        return
+        """Load the model into memory (in-process CPU mode only)."""
+        if self._use_subprocess or settings.stt_backend != "faster-whisper":
+            return
+        if self._model is not None:
+            return
+        from faster_whisper import WhisperModel
+
+        self._model = WhisperModel(
+            settings.faster_whisper_model,
+            device=settings.faster_whisper_device,
+            compute_type=settings.faster_whisper_compute,
+        )
+        logger.debug("faster-whisper model loaded in-process")
 
     def unload(self) -> None:
-        """No-op kept for API compatibility — the worker exits per call."""
-        return
+        """Release the model from memory."""
+        if self._model is not None:
+            del self._model
+            self._model = None
+            logger.debug("faster-whisper model unloaded")
 
     def transcribe(self, audio: np.ndarray, sample_rate: int | None = None) -> str:
-        """Transcribe float32 audio to text via a one-shot subprocess.
+        """Transcribe float32 audio to text.
 
-        Args:
-            audio: float32 numpy array, mono
-            sample_rate: sample rate of audio (default from settings)
-
-        Returns:
-            Transcribed text string
+        Uses in-process inference for CPU mode, subprocess for GPU mode.
         """
         sr = sample_rate or settings.audio_sample_rate
 
@@ -57,6 +73,26 @@ class WhisperSTT:
         audio = np.ascontiguousarray(audio)
 
         logger.debug(f"Transcribing {len(audio) / 16000:.1f}s of audio")
+
+        if self._use_subprocess or settings.stt_backend != "faster-whisper":
+            return self._transcribe_subprocess(audio)
+        return self._transcribe_inprocess(audio)
+
+    def _transcribe_inprocess(self, audio: np.ndarray) -> str:
+        """Fast path: model stays loaded in-process (CPU only)."""
+        if self._model is None:
+            self.load()
+        segments, _ = self._model.transcribe(
+            audio,
+            beam_size=1,
+            language=settings.whisper_language,
+        )
+        text = " ".join(s.text.strip() for s in segments).strip()
+        logger.info(f"STT result: {text!r}")
+        return text
+
+    def _transcribe_subprocess(self, audio: np.ndarray) -> str:
+        """Subprocess path: tears down CUDA context on exit."""
         payload = struct.pack("<I", audio.shape[0]) + audio.tobytes()
 
         env = os.environ.copy()
@@ -71,7 +107,8 @@ class WhisperSTT:
         )
         if proc.returncode != 0:
             logger.error(
-                f"STT worker failed (rc={proc.returncode}): {proc.stderr.decode(errors='replace')}"
+                f"STT worker failed (rc={proc.returncode}): "
+                f"{proc.stderr.decode(errors='replace')}"
             )
             return ""
 

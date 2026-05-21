@@ -13,10 +13,13 @@ class OracleSettings(BaseSettings):
     ollama_timeout: float = 120.0
 
     # Whisper STT
+    stt_backend: Literal["faster-whisper", "pywhispercpp"] = "faster-whisper"
+    # faster-whisper: HuggingFace model name (downloaded on first use)
+    faster_whisper_model: str = "small.en"
+    faster_whisper_device: str = "cpu"
+    faster_whisper_compute: str = "int8"
+    # pywhispercpp (legacy): path to .bin ggml model
     whisper_model_path: Path = Path("models/whisper-base.en.bin")
-    # pywhispercpp doesn't expose use_gpu; we hide CUDA from the STT subprocess
-    # via CUDA_VISIBLE_DEVICES so whisper.cpp falls back to CPU and the GPU
-    # stays dedicated to ollama. Set to False for GPU mode.
     whisper_force_cpu: bool = True
     whisper_language: str = "en"
 
