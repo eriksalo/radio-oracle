@@ -1,14 +1,16 @@
 [Unit]
 Description=Radio Oracle - Offline Voice Assistant
-After=network.target ollama.service
+After=network.target ollama.service user@999.service
 Wants=ollama.service
+Requires=user@999.service
 
 [Service]
 Type=simple
 User=oracle
 Group=oracle
 WorkingDirectory=/opt/radio-oracle
-ExecStart=/opt/radio-oracle/.venv/bin/python -m oracle --mode voice
+ExecStartPre=/bin/sleep 2
+ExecStart=/opt/radio-oracle/.venv/bin/python -m oracle --mode hardware
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -17,7 +19,11 @@ StandardError=journal
 # Environment
 EnvironmentFile=-/opt/radio-oracle/.env
 Environment=ORACLE_LOG_LEVEL=INFO
-Environment=ORACLE_MODE=voice
+Environment=ORACLE_MODE=hardware
+
+# PulseAudio — connect to oracle's per-user pulse (AEC stack)
+Environment=XDG_RUNTIME_DIR=/run/user/999
+Environment=PULSE_SERVER=unix:/run/user/999/pulse/native
 
 # Resource limits
 MemoryMax=7G
