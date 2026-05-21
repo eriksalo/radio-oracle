@@ -179,6 +179,8 @@ class Player:
                 channels=1,
                 dtype="float32",
                 device=_get_output_device(),
+                blocksize=chunk_size,
+                latency="high",
             ) as stream:
                 while offset < len(samples):
                     # Pause gate
