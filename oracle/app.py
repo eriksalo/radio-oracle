@@ -115,6 +115,7 @@ class OracleApp:
                         voice_ctx,
                         leds=self.leds,
                         should_abort=lambda: not self.power.is_on,
+                        player=self._player,
                     )
                     self._handle_buttons()
                     if remainder is not None and self._state == "radio":

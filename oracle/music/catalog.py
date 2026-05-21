@@ -15,13 +15,32 @@ _MUSIC_EXTS = {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".wav", ".aac", ".wma"}
 
 @dataclass
 class Track:
-    id: int
+    id: str
     title: str
     artist: str
     album: str
     genre: str
     duration: float  # seconds
     path: str
+
+
+# On-disk schema column names differ from Track fields; alias them here.
+_TRACK_SELECT = (
+    "SELECT track_id AS id, "
+    "COALESCE(title, filename) AS title, "
+    "COALESCE(artist, '') AS artist, "
+    "COALESCE(album, '') AS album, "
+    "COALESCE(genre, '') AS genre, "
+    "COALESCE(duration_sec, 0) AS duration, "
+    "filepath_rel AS path "
+    "FROM tracks"
+)
+
+
+def _row_to_track(row: sqlite3.Row) -> Track:
+    d = dict(row)
+    d["path"] = str(Path(d["path"]).resolve())
+    return Track(**d)
 
 
 class Catalog:
@@ -54,31 +73,31 @@ class Catalog:
 
     def list_tracks(self) -> list[Track]:
         rows = self._conn.execute(
-            "SELECT * FROM tracks ORDER BY artist, album, title"
+            f"{_TRACK_SELECT} ORDER BY artist, album, title"
         ).fetchall()
-        return [Track(**dict(r)) for r in rows]
+        return [_row_to_track(r) for r in rows]
 
-    def get_track(self, track_id: int) -> Track | None:
+    def get_track(self, track_id: str) -> Track | None:
         row = self._conn.execute(
-            "SELECT * FROM tracks WHERE id = ?", (track_id,)
+            f"{_TRACK_SELECT} WHERE track_id = ?", (track_id,)
         ).fetchone()
-        return Track(**dict(row)) if row else None
+        return _row_to_track(row) if row else None
 
     def search(self, query: str) -> list[Track]:
         """Case-insensitive search across title, artist, album, genre."""
         pattern = f"%{query}%"
         rows = self._conn.execute(
-            "SELECT * FROM tracks WHERE title LIKE ? OR artist LIKE ? "
+            f"{_TRACK_SELECT} WHERE title LIKE ? OR artist LIKE ? "
             "OR album LIKE ? OR genre LIKE ? ORDER BY artist, title",
             (pattern, pattern, pattern, pattern),
         ).fetchall()
-        return [Track(**dict(r)) for r in rows]
+        return [_row_to_track(r) for r in rows]
 
     def random_track(self) -> Track | None:
         row = self._conn.execute(
-            "SELECT * FROM tracks ORDER BY RANDOM() LIMIT 1"
+            f"{_TRACK_SELECT} ORDER BY RANDOM() LIMIT 1"
         ).fetchone()
-        return Track(**dict(row)) if row else None
+        return _row_to_track(row) if row else None
 
     def count(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) as cnt FROM tracks").fetchone()

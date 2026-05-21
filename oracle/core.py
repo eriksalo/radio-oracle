@@ -18,6 +18,7 @@ from oracle.persona import build_system_prompt, get_greeting
 
 if TYPE_CHECKING:
     from oracle.hardware.leds import StatusLEDs
+    from oracle.music.player import Player
     from oracle.stt import WhisperSTT
     from oracle.tts import KokoroTTS
 
@@ -140,6 +141,7 @@ async def wake_word_listen(
     vc: VoiceContext,
     leds: "StatusLEDs | None" = None,
     should_abort: Callable[[], bool] | None = None,
+    player: "Player | None" = None,
 ) -> str | None:
     """Listen for the wake word. Returns text after the wake word, or None.
 
@@ -168,7 +170,17 @@ async def wake_word_listen(
         return None
 
     vc.stt.load()
-    text = vc.stt.transcribe(audio)
+    # Pause music while STT runs so playback doesn't stutter under
+    # GPU/CPU contention. The mic capture is already done; transcription
+    # only needs `audio` in memory.
+    was_playing = bool(player and player.is_playing and not player.is_paused)
+    if was_playing:
+        player.pause()
+    try:
+        text = vc.stt.transcribe(audio)
+    finally:
+        if was_playing:
+            player.resume()
     vc.stt.unload()
 
     if aborted():
