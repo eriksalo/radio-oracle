@@ -24,8 +24,8 @@ _BLOCK_MS = 100
 _BLOCK_SAMPLES = int(_SAMPLE_RATE * _BLOCK_MS / 1000)  # 1600
 _MAX_WAKE_SECONDS = 3.0  # max buffered speech before forced transcription
 _SILENCE_BLOCKS = 6  # 600 ms of silence ends the utterance
-_MIN_SPEECH_BLOCKS = 3  # need ≥300 ms of speech to bother transcribing
-_ENERGY_THRESHOLD = 0.015  # RMS — above AEC music residual, below close speech
+_MIN_SPEECH_BLOCKS = 4  # need ≥400 ms of speech to bother transcribing
+_ENERGY_THRESHOLD = 0.10  # RMS — above AEC music residual (~0.06), below close speech (~0.3)
 _COOLDOWN_S = 1.5  # min gap between transcription attempts
 
 
