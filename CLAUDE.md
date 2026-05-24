@@ -38,7 +38,7 @@ make test       # pytest
 - Tiered retrieval: snappy first-pass (`tier1_top_k`) returns immediately; deep mode adds a cross-encoder rerank on a larger candidate pool (workstation/CPU). See `oracle/rag/modes.py`.
 - Workstation builds FAISS indices from ChromaDB-staged chunks; only `data/faiss/` rsyncs to the Jetson. ChromaDB is workstation-only after the FAISS cutover (2026-05-19).
 - Embedder runs on CPU on the Jetson today (~1.2 s warm). cp311 CUDA torch wheels for JetPack 6.2 don't exist; see `docs/rag-migration-runbook.md` §"Known follow-up" for the three fix paths.
-- Mic (ReSpeaker Lite, XMOS XU316, USB firmware v2.0.7) does AEC/IC/NS/AGC/VNR on-chip before audio reaches the Jetson. Do NOT add software AEC or noise suppression in `oracle/audio.py` — it would fight the on-board DSP. The host pipeline gets a single processed mono channel. Firmware bin + DFU procedure in `firmware/`.
+- Mic (ReSpeaker Lite, XMOS XU316, USB firmware v2.0.7) runs IC/NS/AGC/VNR on-chip — these are useful and free. **On-chip AEC does NOT apply** because playback goes to a separate USB speaker (UACDemoV1.0) the XU316 has no reference signal for. Software AEC via PulseAudio's `module-echo-cancel` (set up in commit `0cc245e`, configured in `~oracle/.config/pulse/default.pa`) is doing the real echo cancellation — without it, Whisper hallucinates from music vocals (verified 2026-05-23). Firmware bin + DFU procedure in `firmware/`.
 - Config via env vars with `ORACLE_` prefix (direnv-compatible). The Jetson's `/opt/radio-oracle/.env` sets `ORACLE_COLLECTION_BACKENDS` to route every collection to FAISS.
 
 ## Workstreams
