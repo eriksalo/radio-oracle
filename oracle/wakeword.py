@@ -1,17 +1,17 @@
-"""Always-on wake word detection via energy VAD + lightweight STT.
+"""Always-on wake word detection via openWakeWord.
 
-Runs continuously on the AEC-cleaned mic source.  When speech energy
-exceeds the threshold, buffers audio until silence returns, then runs
-a tiny Whisper model to check for the configured wake word.
+Runs continuously on the AEC-cleaned mic source, processing 80ms audio
+chunks through a lightweight ONNX model (~7ms/chunk on Jetson CPU).
+Fires a callback when the wake word score exceeds the threshold.
 
-CPU cost: ~200 ms per short utterance (tiny.en int8 on Jetson CPU).
-Memory: ~39 MB for the tiny.en model — separate from the main STT model.
+Supports both pretrained models (by name) and custom-trained models
+(by .onnx file path).
 """
 
 from __future__ import annotations
 
 import threading
-import time
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -19,46 +19,61 @@ from loguru import logger
 
 from config.settings import settings
 
+# openWakeWord expects 16 kHz mono int16 or float32, in 1280-sample chunks (80ms)
+_CHUNK_SAMPLES = 1280
 _SAMPLE_RATE = 16000
-_BLOCK_MS = 100
-_BLOCK_SAMPLES = int(_SAMPLE_RATE * _BLOCK_MS / 1000)  # 1600
-_MAX_WAKE_SECONDS = 3.0  # max buffered speech before forced transcription
-_SILENCE_BLOCKS = 6  # 600 ms of silence ends the utterance
-_MIN_SPEECH_BLOCKS = 4  # need ≥400 ms of speech to bother transcribing
-_ENERGY_THRESHOLD = 0.10  # RMS — above AEC music residual (~0.06), below close speech (~0.3)
-_COOLDOWN_S = 1.5  # min gap between transcription attempts
 
 
 class WakeWordDetector:
-    """Listens for a keyword via VAD + STT on the default input device.
+    """Continuously listens for a wake word on the default input device.
 
-    Call :meth:`start` to begin background detection.  When the keyword
-    is detected, ``on_wake`` is called from the detector thread.
+    Call :meth:`start` to begin background detection.  When the wake word is
+    detected, ``on_wake`` is called from the detector thread.
     """
 
     def __init__(
         self,
-        wake_word: str | None = None,
+        model_path: str | Path | None = None,
+        threshold: float | None = None,
         on_wake: Callable[[], None] | None = None,
-        *,
-        model_name: str | None = None,   # ignored, kept for compat
-        threshold: float | None = None,   # ignored, kept for compat
     ) -> None:
-        self._wake_word = (wake_word or settings.wake_word).lower()
+        self._model_path = str(model_path) if model_path else settings.wakeword_model
+        self._threshold = threshold or settings.wakeword_threshold
         self.on_wake = on_wake
-        self._stt = None
+        self._model = None
+        self._model_key: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._muted = threading.Event()
         self._muted.set()  # not muted by default (set = listening)
 
-    def _load_stt(self) -> None:
-        from faster_whisper import WhisperModel
+    def _load_model(self) -> None:
+        from openwakeword.model import Model
 
-        self._stt = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+        path = self._model_path
+
+        # If it looks like a file path, load custom model
+        if path.endswith(".onnx") or "/" in path:
+            p = Path(path)
+            if not p.exists():
+                raise FileNotFoundError(f"Wake word model not found: {p}")
+            self._model = Model(
+                wakeword_models=[str(p)],
+                inference_framework="onnx",
+            )
+            # The prediction key is the model filename stem
+            self._model_key = p.stem
+        else:
+            # Pretrained model by name
+            self._model = Model(
+                wakeword_models=[path],
+                inference_framework="onnx",
+            )
+            self._model_key = path
+
         logger.info(
-            f"Wake word detector: keyword={self._wake_word!r} "
-            f"(tiny.en int8, VAD+STT)"
+            f"Wake word detector: model={self._model_key!r} "
+            f"(threshold={self._threshold}, onnx)"
         )
 
     def start(self) -> None:
@@ -75,9 +90,9 @@ class WakeWordDetector:
         """Stop detection and release resources."""
         self._stop.set()
         if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=3.0)
+            self._thread.join(timeout=2.0)
         self._thread = None
-        self._stt = None
+        self._model = None
 
     def mute(self) -> None:
         """Temporarily suspend detection (e.g. during own TTS playback)."""
@@ -85,19 +100,18 @@ class WakeWordDetector:
 
     def unmute(self) -> None:
         """Resume detection after mute."""
+        if self._model is not None:
+            self._model.reset()
         self._muted.set()
 
     def _loop(self) -> None:
         import sounddevice as sd
 
         try:
-            self._load_stt()
+            self._load_model()
         except Exception as e:
-            logger.error(f"Wake word STT load failed: {e}")
+            logger.error(f"Wake word model load failed: {e}")
             return
-
-        max_buf_blocks = int(_MAX_WAKE_SECONDS / (_BLOCK_MS / 1000))
-        last_transcribe = 0.0
 
         logger.debug("Wake word listener started")
         try:
@@ -105,82 +119,31 @@ class WakeWordDetector:
                 samplerate=_SAMPLE_RATE,
                 channels=1,
                 dtype="float32",
-                blocksize=_BLOCK_SAMPLES,
+                blocksize=_CHUNK_SAMPLES,
             ) as stream:
                 while not self._stop.is_set():
                     # If muted, drain audio but don't process
                     if not self._muted.is_set():
-                        stream.read(_BLOCK_SAMPLES)
+                        stream.read(_CHUNK_SAMPLES)
                         self._stop.wait(0.01)
                         continue
 
-                    data, _ = stream.read(_BLOCK_SAMPLES)
+                    data, _ = stream.read(_CHUNK_SAMPLES)
                     chunk = data.flatten()
-                    rms = float(np.sqrt(np.mean(chunk * chunk)))
 
-                    if rms < _ENERGY_THRESHOLD:
-                        continue
+                    predictions = self._model.predict(chunk)
+                    score = predictions.get(self._model_key, 0.0)
 
-                    # Speech onset — buffer until silence
-                    frames = [chunk]
-                    speech_blocks = 1
-                    silence_count = 0
-
-                    while not self._stop.is_set() and len(frames) < max_buf_blocks:
-                        data, _ = stream.read(_BLOCK_SAMPLES)
-                        chunk = data.flatten()
-                        frames.append(chunk)
-                        rms = float(np.sqrt(np.mean(chunk * chunk)))
-
-                        if rms < _ENERGY_THRESHOLD:
-                            silence_count += 1
-                            if silence_count >= _SILENCE_BLOCKS:
-                                break
-                        else:
-                            silence_count = 0
-                            speech_blocks += 1
-
-                    # Skip if muted during buffering, too short, or in cooldown
-                    if not self._muted.is_set():
-                        continue
-                    if speech_blocks < _MIN_SPEECH_BLOCKS:
-                        continue
-                    now = time.monotonic()
-                    if now - last_transcribe < _COOLDOWN_S:
-                        continue
-
-                    audio = np.concatenate(frames)
-                    duration = len(audio) / _SAMPLE_RATE
-                    last_transcribe = now
-
-                    # Transcribe with tiny model
-                    segments, _ = self._stt.transcribe(
-                        audio, beam_size=1, language="en",
-                    )
-                    text = " ".join(s.text.strip() for s in segments).strip().lower()
-
-                    if self._wake_word in text:
+                    if score >= self._threshold:
                         logger.info(
-                            f"Wake word detected: {text!r} ({duration:.1f}s)"
+                            f"Wake word detected: {self._model_key} "
+                            f"(score={score:.3f})"
                         )
+                        self._model.reset()
                         if self.on_wake is not None:
                             self.on_wake()
-                    elif text and not _is_hallucination(text):
-                        logger.debug(
-                            f"Speech (no wake word): {text!r} ({duration:.1f}s)"
-                        )
-
         except Exception as e:
             if not self._stop.is_set():
                 logger.error(f"Wake word loop error: {e}")
         finally:
             logger.debug("Wake word listener stopped")
-
-
-def _is_hallucination(text: str) -> bool:
-    """Filter common Whisper hallucinations on silence/noise."""
-    hallucinations = {
-        "you", "thank you", "thanks for watching",
-        "subscribe", "bye", "the end",
-    }
-    return text.strip(".!?, ").lower() in hallucinations
