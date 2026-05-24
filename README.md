@@ -12,8 +12,8 @@ Powered by a Jetson Orin Nano Super with a 1TB knowledge store spanning Wikipedi
 |-----------|------|
 | Jetson Orin Nano Super 8GB | Brain (40 TOPS, CUDA 12.2) |
 | 1TB NVMe SSD | Knowledge storage |
-| USB microphone array | Voice input |
-| USB DAC + speaker | Voice output through vintage radio enclosure |
+| Seeed reSpeaker Lite (XMOS XU316) | Voice input — see [`firmware/`](firmware/) for on-chip DSP notes |
+| USB DAC + speaker (UACDemoV1.0) | Voice output through vintage radio enclosure. Echo cancelled in software via PulseAudio (`module-echo-cancel`); see [`docs/SETUP.md`](docs/SETUP.md#16-echo-cancellation-pulseaudio-aec-stack). |
 | PTT button (GPIO) | Push-to-talk |
 | Status LEDs (GPIO) | Idle / listening / thinking / speaking |
 | Enclosure | Vintage radio ([zionbrock.com/radio](https://zionbrock.com/radio)) |

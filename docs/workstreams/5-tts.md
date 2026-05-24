@@ -48,11 +48,16 @@ ORACLE_AUDIO_SAMPLE_RATE=16000                 # rate Whisper sees (after resamp
 ORACLE_AUDIO_CHANNELS=1
 ORACLE_VAD_ENERGY_THRESHOLD=0.004
 ORACLE_VAD_SILENCE_DURATION=1.5
-# PortAudio can't address ALSA `plughw`/`asym` PCMs, so devices are pinned
-# by name and opened at their native rates. Capture is resampled in software
-# down to ORACLE_AUDIO_SAMPLE_RATE before STT.
-ORACLE_AUDIO_INPUT_DEVICE=ReSpeaker
-ORACLE_AUDIO_OUTPUT_DEVICE=UACDemoV1.0
+# On the Jetson, audio I/O routes through oracle's per-user PulseAudio,
+# which loads module-echo-cancel to provide AEC for the music-during-wake-word
+# case. See docs/SETUP.md §1.6 for the AEC stack rationale and config.
+# ORACLE_AUDIO_*_DEVICE=pulse resolves to PulseAudio's default source/sink,
+# which are the AEC'd virtual devices (aec_source / aec_sink).
+ORACLE_AUDIO_INPUT_DEVICE=pulse
+ORACLE_AUDIO_OUTPUT_DEVICE=pulse
+# On dev machines without the PulseAudio AEC stack, pin devices directly:
+# ORACLE_AUDIO_INPUT_DEVICE=ReSpeaker
+# ORACLE_AUDIO_OUTPUT_DEVICE=UACDemoV1.0
 ORACLE_AUDIO_CAPTURE_SAMPLE_RATE=16000
 ORACLE_AUDIO_PLAYBACK_SAMPLE_RATE=48000
 ```

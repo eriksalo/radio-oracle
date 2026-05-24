@@ -18,7 +18,7 @@ There are three major sections:
 |------|-------|
 | Jetson Orin Nano Super Developer Kit (8GB) | The "Super" variant has 40 TOPS and faster clocks |
 | 1TB M.2 2280 NVMe SSD | Samsung 980 Pro, WD SN770, or similar. The built-in SD card slot is too slow. |
-| USB microphone | ReSpeaker USB Mic Array v2.0 recommended (has onboard VAD/AEC). Any USB mic works. |
+| USB microphone | **Seeed reSpeaker Lite** (XMOS XU316, 2-mic) — this is what we ship with. On-chip IC/NS/AGC/VNR help with noise; on-chip AEC only works if playback also routes through the same chip (we don't — see "Echo cancellation" below). Any USB mic works in principle. |
 | USB DAC + speaker | A cheap USB sound card + any speaker. Or a USB-powered speaker with built-in DAC. |
 | MicroSD card (32GB+) | Only needed for initial JetPack flash — the NVMe takes over after. |
 | USB keyboard + HDMI monitor | For initial setup only. The Oracle runs headless after. |
@@ -121,31 +121,93 @@ arecord -l
 aplay -l
 ```
 
-You'll see output like:
+You'll see output like (current shipping hardware):
 ```
-card 1: Device [USB Audio Device], device 0: USB Audio [USB Audio]
-card 2: ArrayUAC10 [ReSpeaker 4 Mic Array (UAC1.0)], device 0: ...
+card 0: UACDemoV10 [UACDemoV1.0], device 0: ...    # USB speaker (Jieli)
+card 1: Lite [ReSpeaker Lite], device 0: ...       # USB mic (XMOS XU316)
 ```
 
-Note the card numbers. Create `/etc/asound.conf`:
+In production, oracle does **not** route through `/etc/asound.conf` — it uses
+PulseAudio with software echo cancellation (see "Echo cancellation" below).
+The `.env` pins `ORACLE_AUDIO_INPUT_DEVICE=pulse` and `ORACLE_AUDIO_OUTPUT_DEVICE=pulse`,
+which resolve to PulseAudio's default source/sink (the AEC'd virtual ones).
+
+### 1.6 Echo cancellation (PulseAudio AEC stack)
+
+The Oracle plays music while listening for the wake word, so the mic
+hears the speaker — without echo cancellation, music vocals trigger VAD
+constantly and Whisper hallucinates phrases. We cancel echo in **software**
+via `module-echo-cancel` (WebRTC backend) in oracle's per-user PulseAudio.
+
+Why not the XU316's on-chip AEC: it needs a reference signal of what the
+speaker is playing. Our mic and speaker are separate USB devices (Lite
+and UACDemoV1.0); the XU316 sees no reference, so its AEC is a no-op for
+the echo path. The XU316's IC/NS/AGC/VNR still work since those operate
+on the mic input alone.
+
+Setup (run once on the Jetson):
 
 ```bash
-sudo nano /etc/asound.conf
+# Enable lingering so oracle's PulseAudio runs without a login session
+sudo loginctl enable-linger oracle
+
+# Configure the AEC stack
+sudo -u oracle mkdir -p /home/oracle/.config/pulse
+sudo -u oracle tee /home/oracle/.config/pulse/default.pa > /dev/null <<'EOF'
+#!/usr/bin/pulseaudio -nF
+
+.include /etc/pulse/default.pa
+
+# AEC (WebRTC). AGC off so the hardware volume knob stays in control;
+# NS on (helps Whisper); extended_filter + HPF for stability.
+load-module module-echo-cancel \
+  source_master=alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo \
+  sink_master=alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo \
+  aec_method=webrtc \
+  aec_args="analog_gain_control=0 digital_gain_control=0 noise_suppression=1 extended_filter=1 high_pass_filter=1" \
+  source_name=aec_source sink_name=aec_sink use_master_format=true
+
+set-default-source aec_source
+set-default-sink aec_sink
+EOF
+
+# Restart oracle's PulseAudio so it picks up the config
+sudo -u oracle XDG_RUNTIME_DIR=/run/user/999 pulseaudio -k
 ```
 
+The systemd unit (`systemd/radio-oracle.service`) is already wired to
+oracle's user PulseAudio via `XDG_RUNTIME_DIR=/run/user/999` and
+`PULSE_SERVER=unix:/run/user/999/pulse/native`.
+
+Verify the AEC stack is up:
+
+```bash
+sudo -u oracle XDG_RUNTIME_DIR=/run/user/999 pactl info | grep Default
+# Default Sink: aec_sink
+# Default Source: aec_source
 ```
-# Adjust card numbers to match your hardware
-# Playback = USB DAC, Capture = USB mic
-pcm.!default {
-    type asym
-    playback.pcm "plughw:1,0"   # <-- your DAC card number
-    capture.pcm "plughw:2,0"    # <-- your mic card number
-}
-ctl.!default {
-    type hw
-    card 1
-}
+
+### 1.7 Mic firmware (ReSpeaker Lite)
+
+The XU316 firmware is field-upgradable over USB DFU. Current shipping
+firmware is **v2.0.7** (binary in `firmware/`). To check the installed
+version:
+
+```bash
+sudo lsusb -v -d 2886:0019 | grep bcdDevice
+# bcdDevice            2.07
 ```
+
+To flash (will not brick — alt 0 FACTORY is recovery):
+
+```bash
+sudo apt install -y dfu-util
+sudo systemctl stop radio-oracle
+sudo dfu-util -R -a 1 -D firmware/respeaker_lite_usb_dfu_firmware_v2.0.7.bin
+sudo systemctl start radio-oracle
+```
+
+### 1.8 Audio test
 
 Test:
 ```bash
