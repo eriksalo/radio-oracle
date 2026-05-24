@@ -128,22 +128,37 @@ card 1: Lite [ReSpeaker Lite], device 0: ...       # USB mic (XMOS XU316)
 ```
 
 In production, oracle does **not** route through `/etc/asound.conf` — it uses
-PulseAudio with software echo cancellation (see "Echo cancellation" below).
-The `.env` pins `ORACLE_AUDIO_INPUT_DEVICE=pulse` and `ORACLE_AUDIO_OUTPUT_DEVICE=pulse`,
-which resolve to PulseAudio's default source/sink (the AEC'd virtual ones).
+oracle's per-user PulseAudio. Music plays directly to the speaker sink at
+its native 48 kHz; the mic captures through an AEC source. See "Audio
+routing" below for the full picture.
 
-### 1.6 Echo cancellation (PulseAudio AEC stack)
+### 1.6 Audio routing (PulseAudio: AEC mic, direct-speaker music)
 
-The Oracle plays music while listening for the wake word, so the mic
-hears the speaker — without echo cancellation, music vocals trigger VAD
-constantly and Whisper hallucinates phrases. We cancel echo in **software**
-via `module-echo-cancel` (WebRTC backend) in oracle's per-user PulseAudio.
+Two audio paths, deliberately asymmetric:
+
+| Path | Routing | Why |
+|---|---|---|
+| **Mic capture** (wake-word, STT) | mic → `module-echo-cancel` → `aec_source` | NS/AGC are useful; the WebRTC backend also tries to AEC, but with no music going through `aec_sink` it has no reference signal — see notes below. |
+| **Music + TTS output** | client → real USB speaker sink directly | Music decoded by `mpg123` at 44.1 kHz, Pulse does one C-side resample to the speaker's 48 kHz, no AEC processing. ~1 % CPU, zero underruns. |
+
+The earlier architecture pushed music through `aec_sink` to get an AEC
+reference. The WebRTC AEC backend in this Pulse build only accepts default
+settings (32 kHz mono), which murdered music quality — and the in-process
+Python audio pipeline that fed it pegged 100 % CPU. We dropped both: the
+music player is now an `mpg123` subprocess (see `oracle/music/player.py`)
+and `aec_sink` is unused for output.
+
+Trade-off: wake-word reliability degrades while music plays, because AEC
+no longer subtracts speaker-from-mic. The action button is the reliable
+fallback wake mechanism during music. If you want AEC-during-music back,
+the proper fix is `module-combine-sink` fanning music to both the speaker
+and `aec_sink` (left as a follow-up).
 
 Why not the XU316's on-chip AEC: it needs a reference signal of what the
-speaker is playing. Our mic and speaker are separate USB devices (Lite
-and UACDemoV1.0); the XU316 sees no reference, so its AEC is a no-op for
-the echo path. The XU316's IC/NS/AGC/VNR still work since those operate
-on the mic input alone.
+speaker is playing. Mic and speaker are separate USB devices (Lite and
+UACDemoV1.0); the XU316 sees no reference, so its on-chip AEC is a no-op
+for the echo path. The XU316's IC/NS/AGC/VNR still work since those
+operate on the mic input alone.
 
 Setup (run once on the Jetson):
 
@@ -151,40 +166,31 @@ Setup (run once on the Jetson):
 # Enable lingering so oracle's PulseAudio runs without a login session
 sudo loginctl enable-linger oracle
 
-# Configure the AEC stack
+# Drop the canonical pulse config into oracle's home
 sudo -u oracle mkdir -p /home/oracle/.config/pulse
-sudo -u oracle tee /home/oracle/.config/pulse/default.pa > /dev/null <<'EOF'
-#!/usr/bin/pulseaudio -nF
-
-.include /etc/pulse/default.pa
-
-# AEC (WebRTC). AGC off so the hardware volume knob stays in control;
-# NS on (helps Whisper); extended_filter + HPF for stability.
-load-module module-echo-cancel \
-  source_master=alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo \
-  sink_master=alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo \
-  aec_method=webrtc \
-  aec_args="analog_gain_control=0 digital_gain_control=0 noise_suppression=1 extended_filter=1 high_pass_filter=1" \
-  source_name=aec_source sink_name=aec_sink use_master_format=true
-
-set-default-source aec_source
-set-default-sink aec_sink
-EOF
+sudo cp systemd/pulse-default.pa /home/oracle/.config/pulse/default.pa
+sudo chown oracle:oracle /home/oracle/.config/pulse/default.pa
 
 # Restart oracle's PulseAudio so it picks up the config
 sudo -u oracle XDG_RUNTIME_DIR=/run/user/999 pulseaudio -k
 ```
 
-The systemd unit (`systemd/radio-oracle.service`) is already wired to
-oracle's user PulseAudio via `XDG_RUNTIME_DIR=/run/user/999` and
+The exact config lives in `systemd/pulse-default.pa` (tracked in this
+repo). The systemd unit (`systemd/radio-oracle.service`) is already wired
+to oracle's user PulseAudio via `XDG_RUNTIME_DIR=/run/user/999` and
 `PULSE_SERVER=unix:/run/user/999/pulse/native`.
 
-Verify the AEC stack is up:
+The `.env` keeps `ORACLE_AUDIO_INPUT_DEVICE=pulse` and
+`ORACLE_AUDIO_OUTPUT_DEVICE=pulse`. With our `default.pa`, those resolve
+to `aec_source` (AEC'd mic) and the real speaker sink (direct), giving
+the asymmetric routing described above.
+
+Verify:
 
 ```bash
 sudo -u oracle XDG_RUNTIME_DIR=/run/user/999 pactl info | grep Default
-# Default Sink: aec_sink
 # Default Source: aec_source
+# Default Sink: alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo
 ```
 
 ### 1.7 Mic firmware (ReSpeaker Lite)

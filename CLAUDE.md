@@ -24,7 +24,7 @@ make test       # pytest
 - `oracle/memory/` — conversation persistence (SQLite + summarization)
 - `oracle/persona.py` — system prompt builder from persona config
 - `oracle/hardware/` — GPIO button, RGB LED, power switch, audio routing
-- `oracle/music/` — music library + player (stub)
+- `oracle/music/` — music library + player (`mpg123` subprocess → PulseAudio speaker sink)
 - `oracle/books/` — book reader (stub)
 - `oracle/web/` — Pip-Boy styled diagnostic web GUI (FastAPI, port 8080)
 - `config/settings.py` — Pydantic BaseSettings, all `ORACLE_` prefixed env vars
@@ -38,7 +38,7 @@ make test       # pytest
 - Tiered retrieval: snappy first-pass (`tier1_top_k`) returns immediately; deep mode adds a cross-encoder rerank on a larger candidate pool (workstation/CPU). See `oracle/rag/modes.py`.
 - Workstation builds FAISS indices from ChromaDB-staged chunks; only `data/faiss/` rsyncs to the Jetson. ChromaDB is workstation-only after the FAISS cutover (2026-05-19).
 - Embedder runs on CPU on the Jetson today (~1.2 s warm). cp311 CUDA torch wheels for JetPack 6.2 don't exist; see `docs/rag-migration-runbook.md` §"Known follow-up" for the three fix paths.
-- Mic (ReSpeaker Lite, XMOS XU316, USB firmware v2.0.7) runs IC/NS/AGC/VNR on-chip — these are useful and free. **On-chip AEC does NOT apply** because playback goes to a separate USB speaker (UACDemoV1.0) the XU316 has no reference signal for. Software AEC via PulseAudio's `module-echo-cancel` (set up in commit `0cc245e`, configured in `~oracle/.config/pulse/default.pa`) is doing the real echo cancellation — without it, Whisper hallucinates from music vocals (verified 2026-05-23). Firmware bin + DFU procedure in `firmware/`.
+- Audio architecture (see `docs/SETUP.md` §1.6): **asymmetric routing.** Mic capture goes through PulseAudio's `module-echo-cancel` (`aec_source`) for NS/AGC; music + TTS go *direct* to the real USB speaker sink at 48 kHz, bypassing AEC. Music is decoded by an `mpg123` subprocess at ~1 % CPU (the prior in-process miniaudio+scipy+sounddevice pipeline pegged 100 %+ and underran constantly). Trade-off: wake-word reliability degrades during music since AEC has no music reference; the action button is the reliable wake during playback. On-chip AEC on the XU316 doesn't apply either — separate USB devices, no shared reference. IC/NS/AGC/VNR on the XU316 still help (mic-input-only DSP). Pulse config tracked at `systemd/pulse-default.pa`; firmware bin + DFU procedure in `firmware/`.
 - Config via env vars with `ORACLE_` prefix (direnv-compatible). The Jetson's `/opt/radio-oracle/.env` sets `ORACLE_COLLECTION_BACKENDS` to route every collection to FAISS.
 
 ## Workstreams
