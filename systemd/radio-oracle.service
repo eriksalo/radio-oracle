@@ -20,6 +20,11 @@ StandardError=journal
 EnvironmentFile=-/opt/radio-oracle/.env
 Environment=ORACLE_LOG_LEVEL=INFO
 Environment=ORACLE_MODE=hardware
+# Unbuffered stdio so loguru entries flow to journald in real time. When
+# redirected to systemd, Python defaults to block buffering — logs sit
+# in a 4 KB buffer until something forces a flush, which is invisible
+# during steady-state operation.
+Environment=PYTHONUNBUFFERED=1
 
 # PulseAudio — connect to oracle's per-user pulse (AEC stack)
 Environment=XDG_RUNTIME_DIR=/run/user/999
