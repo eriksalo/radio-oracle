@@ -39,7 +39,7 @@ from oracle.music.catalog import Catalog, Track
 _SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.stereo-fallback"
 
 # AM radio tuning sound — played on first start and between albums.
-_INTRO_WAV = Path(__file__).resolve().parent.parent.parent / "AMradioSound.wav"
+_INTRO_MP3 = Path(__file__).resolve().parent.parent.parent / "AMradioSound.mp3"
 
 # Polling period for the pot→PA-volume bridge. 100 ms is well below
 # human perception of knob lag and trivial for pactl.
@@ -279,13 +279,14 @@ class Player:
             self._current = None
 
     def _play_intro(self) -> None:
-        """Play the AM radio tuning sound through PulseAudio."""
-        if not _INTRO_WAV.exists():
-            logger.debug(f"AM radio intro not found: {_INTRO_WAV}")
+        """Play the AM radio tuning sound through mpg123 → PulseAudio."""
+        if not _INTRO_MP3.exists():
+            logger.debug(f"AM radio intro not found: {_INTRO_MP3}")
             return
         try:
             proc = subprocess.Popen(
-                ["paplay", f"--device={_SPEAKER_SINK}", str(_INTRO_WAV)],
+                ["mpg123", "-q", "-o", "pulse", str(_INTRO_MP3)],
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
