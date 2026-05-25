@@ -1,4 +1,4 @@
-"""Music player — background playback with pause/resume/skip.
+"""Music player — album-based background playback with pause/resume/skip.
 
 Plays MP3s via an mpg123 subprocess writing to PulseAudio. Decoding +
 resampling + audio I/O all happen in native C in a separate process, so
@@ -13,6 +13,11 @@ Volume: the physical pot drives the speaker sink's PulseAudio volume
 via a background daemon that polls VolumeControl and shells out to
 ``pactl set-sink-volume`` when the gain changes. mpg123 itself plays at
 unity; per-stream volume is handled by Pulse.
+
+Album mode: tracks are grouped by album and played in order. An AM
+radio tuning sound plays when the radio first starts and between
+albums. Skipping a single track (short press) does *not* replay the
+intro; skipping to a new album does.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import signal
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 from loguru import logger
@@ -31,6 +37,9 @@ from oracle.music.catalog import Catalog, Track
 # Speaker sink name. This is the real USB DAC, not aec_sink — music
 # bypasses AEC entirely (see docs/SETUP.md §1.6).
 _SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo"
+
+# AM radio tuning sound — played on first start and between albums.
+_INTRO_WAV = Path(__file__).resolve().parent.parent.parent / "AMradioSound.wav"
 
 # Polling period for the pot→PA-volume bridge. 100 ms is well below
 # human perception of knob lag and trivial for pactl.
@@ -57,6 +66,9 @@ class Player:
     Runs the playback loop in a background thread; mpg123 itself runs in
     a child process. Pause/resume use SIGSTOP/SIGCONT on the mpg123
     process — instant, no audio thread to babysit.
+
+    Tracks are played album-by-album. An AM radio tuning sound plays on
+    first start and between albums for that authentic dial-surfing feel.
     """
 
     def __init__(self, catalog: Catalog | None = None) -> None:
@@ -71,6 +83,11 @@ class Player:
         self._proc_lock = threading.Lock()
         self._volume_thread: threading.Thread | None = None
         self._volume_stop = threading.Event()
+        # Album skip: set to break out of current album in the play thread.
+        self._skip_album = threading.Event()
+        # Suppress intro: set by next() so a track skip at an album
+        # boundary doesn't replay the AM tuning sound.
+        self._suppress_intro = False
 
     @property
     def now_playing(self) -> Track | None:
@@ -85,33 +102,31 @@ class Player:
         return not self._paused.is_set()
 
     def play(self, track: Track | None = None, continuous: bool = True) -> Track | None:
-        """Start playing a track. If None, pick a random one.
+        """Start playing. Picks a random album if no track given.
 
         With *continuous=True* (default), automatically advances to the
-        next random track when the current one ends — true radio behaviour.
+        next random album when the current one ends — true radio behaviour.
         """
         self.stop()
-        if track is None:
-            track = self._catalog.random_track()
-        if track is None:
-            logger.warning("No tracks in catalog")
-            return None
-
-        self._current = track
         self._stop_event.clear()
         self._paused.set()
         self._continuous = continuous
+        self._suppress_intro = False
+        self._skip_album.clear()
         self._start_volume_bridge()
         self._thread = threading.Thread(
-            target=self._play_thread, args=(track,), name="music-player", daemon=True
+            target=self._play_thread,
+            kwargs={"first_track": track, "play_intro": True},
+            name="music-player",
+            daemon=True,
         )
         self._thread.start()
-        logger.info(f"Playing: {track.artist} — {track.title}")
         return track
 
     def stop(self) -> None:
         """Stop playback."""
         self._stop_event.set()
+        self._skip_album.set()
         self._paused.set()  # unblock if paused
         self._kill_proc()
         if self._thread is not None and self._thread.is_alive():
@@ -144,67 +159,158 @@ class Player:
                     pass
         logger.debug("Music resumed")
 
-    def next(self) -> Track | None:
-        """Skip to a random track."""
-        return self.play()
+    def next(self) -> None:
+        """Skip to the next track in the current album (no AM intro)."""
+        self._suppress_intro = True
+        self._kill_proc()
+
+    def next_album(self) -> None:
+        """Skip to a new random album (plays AM intro)."""
+        self._suppress_intro = False
+        self._skip_album.set()
+        self._kill_proc()
 
     def play_continuous(
         self,
         should_stop: Callable[[], bool] | None = None,
     ) -> None:
-        """Play random tracks in a loop until stopped (blocks)."""
+        """Play random albums in a loop until stopped (blocks)."""
         self._start_volume_bridge()
         try:
+            first = True
             while True:
                 if should_stop and should_stop():
                     break
-                track = self._catalog.random_track()
-                if track is None:
+                tracks = self._catalog.random_album_tracks()
+                if not tracks:
                     logger.warning("No tracks in catalog for continuous play")
                     break
-                self._current = track
-                self._stop_event.clear()
-                logger.info(f"Playing: {track.artist} — {track.title}")
-                self._play_file(track)
+                if first:
+                    self._play_intro()
+                    first = False
+                else:
+                    self._play_intro()
+                for track in tracks:
+                    if should_stop and should_stop():
+                        break
+                    if self._stop_event.is_set():
+                        break
+                    self._current = track
+                    logger.info(f"Playing: {track.artist} — {track.title}")
+                    self._play_file(track)
                 if self._stop_event.is_set():
                     break
-                time.sleep(1.0)
+                time.sleep(0.3)
         finally:
             self._current = None
             self._stop_volume_bridge()
 
-    def _play_thread(self, track: Track) -> None:
-        """Background thread: play track, then auto-advance if continuous."""
+    # --------------------------------------------------------------- playback
+
+    def _play_thread(
+        self,
+        *,
+        first_track: Track | None,
+        play_intro: bool,
+    ) -> None:
+        """Background thread: play albums continuously."""
         try:
-            self._play_file(track)
-            while self._continuous and not self._stop_event.is_set():
-                next_track = self._catalog.random_track()
-                if next_track is None:
+            is_first_album = True
+            while not self._stop_event.is_set():
+                # --- pick the next album ---
+                if is_first_album and first_track and first_track.album:
+                    tracks = self._catalog.random_album_tracks()
+                    # If a specific first track was given, try to honour it
+                    if first_track:
+                        for i, t in enumerate(tracks):
+                            if t.path == first_track.path:
+                                tracks = tracks[i:]
+                                break
+                        else:
+                            tracks = self._catalog.random_album_tracks()
+                else:
+                    tracks = self._catalog.random_album_tracks()
+
+                if not tracks:
+                    logger.warning("No tracks in catalog")
                     break
-                self._current = next_track
-                logger.info(f"Playing: {next_track.artist} — {next_track.title}")
-                # Small gap between tracks; long enough that PA sees the
-                # stream close cleanly, short enough not to feel laggy.
-                time.sleep(0.3)
+
+                album_label = tracks[0].album or tracks[0].artist or "unknown"
+
+                # --- play AM intro if appropriate ---
                 if self._stop_event.is_set():
                     break
-                self._play_file(next_track)
+                if self._suppress_intro:
+                    self._suppress_intro = False
+                elif play_intro or not is_first_album:
+                    logger.info(f"Tuning to: {album_label}")
+                    self._play_intro()
+
+                is_first_album = False
+                play_intro = True  # always intro after the first album
+                self._skip_album.clear()
+
+                # --- play tracks in album ---
+                for track in tracks:
+                    if self._stop_event.is_set():
+                        return
+                    if self._skip_album.is_set():
+                        self._skip_album.clear()
+                        break
+                    self._current = track
+                    logger.info(f"Playing: {track.artist} — {track.title}")
+                    self._play_file(track)
+                    if self._stop_event.is_set():
+                        return
+                    if self._skip_album.is_set():
+                        self._skip_album.clear()
+                        break
+                    # Small gap between tracks in the same album.
+                    time.sleep(0.3)
+
+                if not self._continuous:
+                    break
+                # Brief pause between albums before the next intro.
+                time.sleep(0.3)
+
         except Exception as e:  # noqa: BLE001
             logger.exception(f"Music thread crashed: {e}")
         finally:
             self._current = None
 
+    def _play_intro(self) -> None:
+        """Play the AM radio tuning sound through PulseAudio."""
+        if not _INTRO_WAV.exists():
+            logger.debug(f"AM radio intro not found: {_INTRO_WAV}")
+            return
+        try:
+            proc = subprocess.Popen(
+                ["paplay", f"--device={_SPEAKER_SINK}", str(_INTRO_WAV)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, FileNotFoundError) as e:
+            logger.warning(f"Failed to play AM intro: {e}")
+            return
+        # Wait for the sound to finish, but bail if stop requested.
+        while proc.poll() is None:
+            if self._stop_event.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                return
+            time.sleep(0.05)
+
     def _play_file(self, track: Track) -> None:
         """Play a single file via mpg123 → PulseAudio. Blocks until done."""
-        # -q: no banner spam on stdout/stderr
-        # -o pulse: route to PulseAudio (uses default sink = real speaker)
         try:
             proc = subprocess.Popen(
                 ["mpg123", "-q", "-o", "pulse", track.path],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                # New process group so SIGSTOP/SIGCONT don't bleed.
                 preexec_fn=os.setsid,
             )
         except FileNotFoundError:
@@ -217,8 +323,6 @@ class Player:
         with self._proc_lock:
             self._proc = proc
 
-        # Wait for playback to finish, polling for stop. Pause/resume are
-        # handled signal-driven in pause()/resume() — no extra work here.
         try:
             while True:
                 if self._stop_event.is_set():
@@ -240,8 +344,6 @@ class Player:
         with self._proc_lock:
             if self._proc and self._proc.poll() is None:
                 try:
-                    # Make sure we're not stuck in SIGSTOP — resume so
-                    # SIGTERM can actually be delivered.
                     self._proc.send_signal(signal.SIGCONT)
                     self._proc.terminate()
                 except OSError:

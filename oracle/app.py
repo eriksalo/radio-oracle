@@ -209,9 +209,12 @@ class OracleApp:
     def _next_track(self) -> None:
         player = self._get_player()
         if player:
-            track = player.next()
-            if track:
-                logger.info(f"Next track: {track.artist} — {track.title}")
+            player.next()
+
+    def _next_album(self) -> None:
+        player = self._get_player()
+        if player:
+            player.next_album()
 
     # ---------------------------------------------------------------- state
 

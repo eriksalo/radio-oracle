@@ -99,6 +99,23 @@ class Catalog:
         ).fetchone()
         return _row_to_track(row) if row else None
 
+    def random_album_tracks(self) -> list[Track]:
+        """Pick a random album and return all its tracks in order."""
+        row = self._conn.execute(
+            "SELECT DISTINCT COALESCE(album, '') AS album FROM tracks "
+            "WHERE album IS NOT NULL AND album != '' "
+            "ORDER BY RANDOM() LIMIT 1"
+        ).fetchone()
+        if row is None:
+            track = self.random_track()
+            return [track] if track else []
+        album_name = row["album"]
+        rows = self._conn.execute(
+            f"{_TRACK_SELECT} WHERE album = ? ORDER BY title",
+            (album_name,),
+        ).fetchall()
+        return [_row_to_track(r) for r in rows]
+
     def count(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) as cnt FROM tracks").fetchone()
         return row["cnt"]
