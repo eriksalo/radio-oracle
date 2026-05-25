@@ -10,12 +10,14 @@ Transitions:
   power-off         : *        -> STANDBY (music stops, all I/O halted)
   long-press button : RADIO   <-> LIBRARIAN (music pauses/resumes)
   short-press button: RADIO    -> next track; no-op in LIBRARIAN
+  double-press button: RADIO   -> next album (with AM intro); no-op in LIBRARIAN
   wake word detected: RADIO    -> pause music, one voice turn, resume music
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from queue import Empty
 from typing import Literal
 
@@ -43,6 +45,10 @@ class OracleApp:
         self._player = None  # lazy init
         self._wakeword = None  # lazy init
         self._wake_event: asyncio.Event | None = None
+        # Double-press detection: buffer the first short press and wait
+        # up to _DOUBLE_PRESS_S to see if a second one arrives.
+        self._pending_short_press: float | None = None
+        self._double_press_window = 0.4  # seconds
 
     def _get_player(self):
         """Lazily create the music player (only if catalog has tracks)."""
@@ -252,16 +258,37 @@ class OracleApp:
                 return out
 
     def _handle_buttons(self) -> None:
+        now = time.monotonic()
         for evt in self._drain_events():
             self._state_writer.record_button(evt.kind, evt.duration)
             if evt.kind == "long":
+                # Long press cancels any pending short press.
+                self._pending_short_press = None
                 if self._state == "radio":
                     self._enter("librarian")
                 elif self._state == "librarian":
                     self._enter("radio")
-            elif evt.kind == "short":
-                if self._state == "radio":
-                    self._next_track()
+            elif evt.kind == "short" and self._state == "radio":
+                if (
+                    self._pending_short_press is not None
+                    and now - self._pending_short_press < self._double_press_window
+                ):
+                    # Second short press within window → next album.
+                    self._pending_short_press = None
+                    self._next_album()
+                    logger.debug("Double press → next album")
+                else:
+                    # Buffer this press; fire next_track if no second press comes.
+                    self._pending_short_press = now
+
+        # Flush an expired pending short press as a single next-track.
+        if (
+            self._pending_short_press is not None
+            and now - self._pending_short_press >= self._double_press_window
+        ):
+            self._pending_short_press = None
+            if self._state == "radio":
+                self._next_track()
 
     def _should_exit_librarian(self) -> bool:
         if not self.power.is_on:
