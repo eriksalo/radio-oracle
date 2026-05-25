@@ -17,11 +17,17 @@ Transitions:
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import time
+from pathlib import Path
 from queue import Empty
 from typing import Literal
 
 from loguru import logger
+
+# Chime played when the wake word fires, before the voice turn starts.
+_WAKE_CHIME = Path(__file__).resolve().parent.parent / "chime-clean-short.mp3"
+_SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo"
 
 from oracle.hardware import ActionButton, ButtonEvent, PowerSwitch, StatusLEDs
 from oracle.state import StateWriter
@@ -175,6 +181,7 @@ class OracleApp:
                     self._wakeword.mute()
 
                 self._pause_music()
+                self._play_wake_chime()
                 self.leds.set_mode("librarian")
 
                 await voice_turn(
@@ -211,6 +218,21 @@ class OracleApp:
     def _stop_music(self) -> None:
         if self._player:
             self._player.stop()
+
+    def _play_wake_chime(self) -> None:
+        """Play the librarian chime through PulseAudio (blocks until done)."""
+        if not _WAKE_CHIME.exists():
+            logger.debug(f"Wake chime not found: {_WAKE_CHIME}")
+            return
+        try:
+            subprocess.run(
+                ["mpg123", "-q", "-o", "pulse", str(_WAKE_CHIME)],
+                timeout=5,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            logger.warning(f"Failed to play wake chime: {e}")
 
     def _next_track(self) -> None:
         player = self._get_player()
