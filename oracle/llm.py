@@ -14,10 +14,15 @@ async def stream_chat(
 ) -> AsyncIterator[str]:
     """Stream chat completions from Ollama, yielding token strings."""
     model = model or settings.ollama_model
+    # keep_alive=-1 pins the model in VRAM. On 8GB unified memory, allowing
+    # Ollama's default 5-min unload causes cudaMalloc OOM on reload because
+    # the 588MB compute buffer needs a contiguous block that fragments after
+    # other allocators (STT, etc.) churn memory.
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
+        "keep_alive": -1,
     }
 
     async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
@@ -46,6 +51,7 @@ async def chat(
         "model": model,
         "messages": messages,
         "stream": False,
+        "keep_alive": -1,
     }
 
     async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
