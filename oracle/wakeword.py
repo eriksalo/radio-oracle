@@ -105,6 +105,7 @@ class WakeWordDetector:
         self._muted.set()
 
     def _loop(self) -> None:
+        import os
         import sounddevice as sd
 
         try:
@@ -113,14 +114,31 @@ class WakeWordDetector:
             logger.error(f"Wake word model load failed: {e}")
             return
 
+        # Bypass pulse module-echo-cancel for wakeword: AEC has no reference
+        # signal (aec_sink is suspended because music routes direct) and its
+        # processing mangles custom-trained models' spectral features. Set
+        # PULSE_SOURCE around stream open so this stream alone gets the raw
+        # ReSpeaker; STT recordings opened later still use the pulse default.
+        raw_src = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
+        prev_src = os.environ.get("PULSE_SOURCE")
+        os.environ["PULSE_SOURCE"] = raw_src
+
         logger.debug("Wake word listener started")
         try:
+            # openWakeWord expects int16-range samples (not normalized float).
+            # Read as int16 directly so model.predict() gets the scale it expects.
             with sd.InputStream(
                 samplerate=_SAMPLE_RATE,
                 channels=1,
-                dtype="float32",
+                dtype="int16",
                 blocksize=_CHUNK_SAMPLES,
             ) as stream:
+                # Restore env immediately after stream connects so other
+                # threads opening pulse streams aren't affected.
+                if prev_src is None:
+                    os.environ.pop("PULSE_SOURCE", None)
+                else:
+                    os.environ["PULSE_SOURCE"] = prev_src
                 while not self._stop.is_set():
                     # If muted, drain audio but don't process
                     if not self._muted.is_set():
