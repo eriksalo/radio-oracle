@@ -27,7 +27,7 @@ from loguru import logger
 
 # Chime played when the wake word fires, before the voice turn starts.
 _WAKE_CHIME = Path(__file__).resolve().parent.parent / "chime-clean-short.mp3"
-_SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo"
+_SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.stereo-fallback"
 
 from oracle.hardware import ActionButton, ButtonEvent, PowerSwitch, StatusLEDs
 from oracle.state import StateWriter

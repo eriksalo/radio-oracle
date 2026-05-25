@@ -36,7 +36,7 @@ from oracle.music.catalog import Catalog, Track
 
 # Speaker sink name. This is the real USB DAC, not aec_sink — music
 # bypasses AEC entirely (see docs/SETUP.md §1.6).
-_SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo"
+_SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.stereo-fallback"
 
 # AM radio tuning sound — played on first start and between albums.
 _INTRO_WAV = Path(__file__).resolve().parent.parent.parent / "AMradioSound.wav"
