@@ -1,0 +1,54 @@
+# Custom openWakeWord model config for "librarian"
+
+model_name: "librarian"
+
+target_phrase:
+  - "librarian"
+
+# Extra negative phrases that sound similar
+custom_negative_phrases:
+  - "library"
+  - "libertarian"
+  - "liberation"
+  - "liberal"
+  - "liberian"
+
+# High-quality: 20K+ samples
+n_samples: 2000
+n_samples_val: 500
+
+tts_batch_size: 50
+augmentation_batch_size: 16
+
+piper_sample_generator_path: "./piper-sample-generator"
+output_dir: "./librarian_model"
+
+rir_paths:
+  - "./mit_rirs"
+
+background_paths:
+  - "./audioset_16k"
+  - "./fma"
+
+background_paths_duplication_rate:
+  - 1
+  - 1
+
+false_positive_validation_data_path: "./validation_set_features.npy"
+
+augmentation_rounds: 3
+
+feature_data_files:
+  "ACAV100M_sample": "./openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+
+model_type: "dnn"
+layer_size: 32
+
+steps: 50000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2
