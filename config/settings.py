@@ -16,10 +16,13 @@ class OracleSettings(BaseSettings):
     stt_backend: Literal["faster-whisper", "pywhispercpp"] = "faster-whisper"
     # faster-whisper: HuggingFace model name (downloaded on first use)
     faster_whisper_model: str = "small.en"
-    # Radio-dispatcher path uses a smaller model: vocab is a handful of
-    # keywords, accuracy needs are low, and ~3x faster inference matters
-    # more than transcript quality. Librarian still uses the larger model.
-    faster_whisper_radio_model: str = "tiny.en"
+    # Radio-dispatcher path uses a smaller model — vocab is a handful of
+    # keywords, so transcript quality doesn't need to match the librarian
+    # turn. tiny.en proved too lossy (mis-hearing "next song" as "Okay"
+    # cascaded into an LLM-hallucinated 20 s TTS error), so settled on
+    # base.en: ~140 MB, ~2x faster than small.en, accurate enough for
+    # the keyword set.
+    faster_whisper_radio_model: str = "base.en"
     faster_whisper_device: str = "cpu"
     faster_whisper_compute: str = "int8"
     # pywhispercpp (legacy): path to .bin ggml model
