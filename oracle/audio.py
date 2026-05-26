@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-import time
+import threading
 import wave
 from typing import Callable
 
@@ -113,38 +113,63 @@ def _resample_to_playback(audio: np.ndarray, src_sr: int) -> tuple[np.ndarray, i
     return out, dst_sr
 
 
-def _apply_volume(audio: np.ndarray) -> np.ndarray:
-    """Scale audio by the hardware volume knob (pot) gain."""
+def _stream_play(
+    audio: np.ndarray,
+    sample_rate: int,
+    should_abort: AbortCheck,
+) -> None:
+    """Play *audio* via an OutputStream callback that re-reads the pot
+    every block, so turning the volume knob is audible immediately
+    (e.g. mid-paragraph while the librarian is reading).
+
+    The previous implementation pre-scaled the whole buffer once and
+    handed it to sd.play(), which baked the volume in at playback start.
+    """
+    import sounddevice as sd
     from oracle.hardware.volume import get_volume_control
 
-    gain = get_volume_control().gain
-    if gain < 1.0:
-        return (audio * gain).astype(np.float32)
-    return audio
+    audio = np.ascontiguousarray(audio, dtype=np.float32)
+    if audio.ndim == 1:
+        channels = 1
+    else:
+        channels = audio.shape[1]
 
+    vc = get_volume_control()
+    cursor = 0
+    total = len(audio)
+    finished = threading.Event()
 
-def _wait_or_abort(should_abort: AbortCheck) -> None:
-    """Block until playback finishes, or stop early if abort fires."""
-    import sounddevice as sd
+    def callback(outdata, frames, _time_info, status) -> None:
+        nonlocal cursor
+        if status:
+            logger.debug(f"playback status: {status}")
+        take = min(frames, total - cursor)
+        gain = vc.gain
+        if take > 0:
+            chunk = audio[cursor:cursor + take]
+            if channels == 1:
+                outdata[:take, 0] = chunk * gain
+            else:
+                outdata[:take] = chunk * gain
+            cursor += take
+        if take < frames:
+            outdata[take:] = 0
+            raise sd.CallbackStop()
 
-    if should_abort is None:
-        sd.wait()
-        return
-    # Poll: sd.wait() with a short timeout isn't supported, so we sleep-check.
-    while True:
-        if should_abort():
-            sd.stop()
-            logger.debug("Playback aborted")
-            return
-        # sd.wait() blocks; instead check if there's still an active stream.
-        try:
-            stream = sd.get_stream()
-            if not stream.active:
+    stream = sd.OutputStream(
+        samplerate=sample_rate,
+        channels=channels,
+        dtype="float32",
+        device=_get_output_device(),
+        callback=callback,
+        finished_callback=finished.set,
+    )
+    with stream:
+        while not finished.is_set():
+            if should_abort and should_abort():
+                logger.debug("Playback aborted")
                 return
-        except RuntimeError:
-            # No stream active
-            return
-        time.sleep(0.05)
+            finished.wait(timeout=0.05)
 
 
 def _resolve_device(name: str, kind: str) -> int | None:
@@ -196,19 +221,13 @@ def play_audio(
     should_abort: AbortCheck = None,
 ) -> None:
     """Play audio through configured output device."""
-    import sounddevice as sd
-
     src_sr = sample_rate or settings.audio_sample_rate
     out, dst_sr = _resample_to_playback(audio, src_sr)
-    out = _apply_volume(out)
-    sd.play(out, samplerate=dst_sr, device=_get_output_device())
-    _wait_or_abort(should_abort)
+    _stream_play(out, dst_sr, should_abort)
 
 
 def play_wav_bytes(wav_bytes: bytes, should_abort: AbortCheck = None) -> None:
     """Play WAV data from bytes."""
-    import sounddevice as sd
-
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
         src_sr = wf.getframerate()
         channels = wf.getnchannels()
@@ -222,9 +241,7 @@ def play_wav_bytes(wav_bytes: bytes, should_abort: AbortCheck = None) -> None:
         if channels > 1:
             audio = audio.reshape(-1, channels)
         out, dst_sr = _resample_to_playback(audio, src_sr)
-        out = _apply_volume(out)
-        sd.play(out, samplerate=dst_sr, device=_get_output_device())
-        _wait_or_abort(should_abort)
+        _stream_play(out, dst_sr, should_abort)
 
 
 def audio_to_wav_bytes(audio: np.ndarray, sample_rate: int | None = None) -> bytes:
