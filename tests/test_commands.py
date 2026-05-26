@@ -171,22 +171,43 @@ def silent_speak(monkeypatch):
 def test_do_action_next(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("next", None, player, None, _FakeVC(), None)
-    assert out == "radio"
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
     assert player.calls == [("next",)]
 
 
 def test_do_action_next_album(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("next_album", None, player, None, _FakeVC(), None)
-    assert out == "radio"
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
     assert player.calls == [("next_album",)]
 
 
-def test_do_action_pause_resume_stop(silent_speak):
+def test_do_action_pause_does_not_resume(silent_speak):
+    # Pause: wake handler already paused; dispatcher must signal "stay paused".
     player = _FakePlayer()
-    for a in ("pause", "resume", "stop"):
-        commands._do_action(a, None, player, None, _FakeVC(), None)
-    assert player.calls == [("pause",), ("resume",), ("stop",)]
+    out = commands._do_action("pause", None, player, None, _FakeVC(), None)
+    assert out.next_mode == "radio"
+    assert out.resume_music is False
+    # Dispatcher shouldn't re-pause an already-paused player.
+    assert player.calls == []
+
+
+def test_do_action_resume_signals_resume(silent_speak):
+    player = _FakePlayer()
+    out = commands._do_action("resume", None, player, None, _FakeVC(), None)
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
+    assert player.calls == [("resume",)]
+
+
+def test_do_action_stop_does_not_resume(silent_speak):
+    player = _FakePlayer()
+    out = commands._do_action("stop", None, player, None, _FakeVC(), None)
+    assert out.next_mode == "radio"
+    assert out.resume_music is False
+    assert player.calls == [("stop",)]
 
 
 def test_do_action_play_hits_search_and_plays_first(silent_speak):
@@ -194,7 +215,8 @@ def test_do_action_play_hits_search_and_plays_first(silent_speak):
     track = _FakeTrack()
     catalog = _FakeCatalog(results=[track])
     out = commands._do_action("play", "Pink Floyd", player, catalog, _FakeVC(), None)
-    assert out == "radio"
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
     assert catalog.queries == ["Pink Floyd"]
     # stop() called first (to clear current album), then play(track=track)
     assert player.calls == [("stop",), ("play", track)]
@@ -205,7 +227,8 @@ def test_do_action_play_no_results_acks_and_stays(silent_speak):
     player = _FakePlayer()
     catalog = _FakeCatalog(results=[])
     out = commands._do_action("play", "nonexistent", player, catalog, _FakeVC(), None)
-    assert out == "radio"
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
     assert player.calls == []
     assert silent_speak == ["<played>"]
 
@@ -213,15 +236,22 @@ def test_do_action_play_no_results_acks_and_stays(silent_speak):
 def test_do_action_play_without_query_asks_back(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("play", None, player, _FakeCatalog([]), _FakeVC(), None)
-    assert out == "radio"
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
     assert player.calls == []
     assert silent_speak == ["<played>"]
 
 
 def test_do_action_mode_transitions_return_correct_state(silent_speak):
     player = _FakePlayer()
-    assert commands._do_action("mode_librarian", None, player, None, _FakeVC(), None) == "librarian"
-    assert commands._do_action("mode_reader", None, player, None, _FakeVC(), None) == "reader"
+    lib = commands._do_action("mode_librarian", None, player, None, _FakeVC(), None)
+    assert lib.next_mode == "librarian"
+    assert lib.resume_music is False  # mode switch: leave music paused
+
+    rdr = commands._do_action("mode_reader", None, player, None, _FakeVC(), None)
+    assert rdr.next_mode == "reader"
+    assert rdr.resume_music is False
+
     # No player actions for mode transitions.
     assert player.calls == []
 
@@ -229,12 +259,14 @@ def test_do_action_mode_transitions_return_correct_state(silent_speak):
 def test_do_action_none_is_silent_noop(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("none", None, player, None, _FakeVC(), None)
-    assert out == "radio"
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
     assert player.calls == []
     assert silent_speak == []
 
 
 def test_do_action_no_player_speaks_unavailable(silent_speak):
     out = commands._do_action("next", None, None, None, _FakeVC(), None)
-    assert out == "radio"
+    assert out.next_mode == "radio"
+    assert out.resume_music is True
     assert silent_speak == ["<played>"]

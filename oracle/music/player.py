@@ -34,9 +34,14 @@ from loguru import logger
 
 from oracle.music.catalog import Catalog, Track
 
-# Speaker sink name. This is the real USB DAC, not aec_sink — music
-# bypasses AEC entirely (see docs/SETUP.md §1.6).
-_SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.stereo-fallback"
+# Speaker sink. We target Pulse's *default* sink rather than hardcoding
+# the USB DAC's full name — the Jieli DAC's profile suffix flips between
+# `.stereo-fallback` and `.analog-stereo` depending on whether PortAudio
+# has opened it for capture/playback yet, so any hardcoded suffix breaks
+# the volume knob the first time STT/TTS runs. The default sink is the
+# USB DAC in our setup (music bypasses aec_sink — see docs/SETUP.md §1.6),
+# and `@DEFAULT_SINK@` follows it through profile changes.
+_SPEAKER_SINK = "@DEFAULT_SINK@"
 
 # AM radio tuning sound — played on first start and between albums.
 _INTRO_MP3 = Path(__file__).resolve().parent.parent.parent / "AMradioSound.mp3"
@@ -52,12 +57,18 @@ _VOLUME_DELTA = 0.01
 def _set_pa_sink_volume(gain: float) -> None:
     """Set the speaker sink volume in Pulse. gain is 0.0–1.0."""
     pct = max(0, min(100, int(round(gain * 100))))
-    subprocess.run(
+    proc = subprocess.run(
         ["pactl", "set-sink-volume", _SPEAKER_SINK, f"{pct}%"],
         check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
+    if proc.returncode != 0:
+        # Most common cause: the sink name changed (profile flip, USB
+        # reconnect). Log enough to diagnose without spamming on every
+        # poll: the volume_loop only calls us when gain *changed*.
+        err = proc.stderr.decode("utf-8", errors="replace").strip()
+        logger.warning(f"pactl set-sink-volume rc={proc.returncode}: {err[:160]}")
 
 
 class Player:
@@ -380,6 +391,7 @@ class Player:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Volume bridge unavailable: {e}")
             return
+        logger.debug(f"Music volume bridge started (initial gain={ctl.gain:.2f})")
         last_applied = -1.0
         while not self._volume_stop.is_set():
             gain = ctl.gain
@@ -387,6 +399,7 @@ class Player:
                 _set_pa_sink_volume(gain)
                 last_applied = gain
             self._volume_stop.wait(_VOLUME_POLL_S)
+        logger.debug("Music volume bridge stopped")
 
     def close(self) -> None:
         self.stop()

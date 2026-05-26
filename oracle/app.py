@@ -170,7 +170,7 @@ class OracleApp:
 
     async def _radio_wait(self, voice_ctx) -> None:
         """Wait for wake word, button, or power-off in radio mode."""
-        from oracle.commands import dispatch_radio_command
+        from oracle.commands import DispatchResult, dispatch_radio_command
 
         if self._wake_event is None:
             await asyncio.sleep(0.1)
@@ -200,22 +200,31 @@ class OracleApp:
 
                 player = self._get_player()
                 catalog = player._catalog if player is not None else None
-                next_mode = await dispatch_radio_command(
-                    player=player,
-                    catalog=catalog,
-                    vc=voice_ctx,
-                    leds=self.leds,
-                    should_abort=lambda: not self.power.is_on,
-                )
+                # If dispatch raises (mic, STT, LLM, TTS), we still must
+                # unmute the wake detector — otherwise the next wake never
+                # fires. Catch locally so a transient failure doesn't tear
+                # the whole event loop down.
+                try:
+                    result = await dispatch_radio_command(
+                        player=player,
+                        catalog=catalog,
+                        vc=voice_ctx,
+                        leds=self.leds,
+                        should_abort=lambda: not self.power.is_on,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("dispatch_radio_command failed; recovering to radio")
+                    result = DispatchResult(next_mode="radio", resume_music=True)
+                finally:
+                    if self._wakeword:
+                        self._wakeword.unmute()
 
-                if self._wakeword:
-                    self._wakeword.unmute()
-
-                if next_mode == "radio":
+                if result.next_mode == "radio":
                     self.leds.set_mode("radio")
-                    self._resume_music()
+                    if result.resume_music:
+                        self._resume_music()
                 else:
-                    self._enter(next_mode)
+                    self._enter(result.next_mode)
                 return
 
             await asyncio.sleep(0.05)

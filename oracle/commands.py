@@ -32,6 +32,18 @@ NextMode = Literal["radio", "librarian", "reader"]
 AbortCheck = Callable[[], bool] | None
 
 
+@dataclass(frozen=True)
+class DispatchResult:
+    """What the radio-mode dispatcher decided.
+
+    ``resume_music`` is the hint the wake handler reads to decide whether
+    to SIGCONT the previously-paused music. False when the user asked
+    for silence ('pause'/'stop' commands) or for a mode change.
+    """
+    next_mode: NextMode
+    resume_music: bool = True
+
+
 _LLM_SYSTEM_PROMPT = """You are a strict voice-command parser for a radio. \
 Output ONE JSON object on a single line, no prose, no code fences.
 
@@ -155,14 +167,14 @@ async def dispatch_radio_command(
     vc: "VoiceContext",
     leds: "StatusLEDs | None" = None,
     should_abort: AbortCheck = None,
-) -> NextMode:
+) -> DispatchResult:
     """One radio-mode voice turn. Returns the next state intent.
 
     Steps:
       1. record + STT (LED blue → blink)
       2. keyword match; else LLM JSON intent
       3. perform the action and optionally TTS-ack
-      4. return the next state ('radio' to stay, 'librarian'/'reader' to switch)
+      4. return next_mode + whether the wake handler should resume music
     """
     def aborted() -> bool:
         return bool(should_abort and should_abort())
@@ -174,24 +186,31 @@ async def dispatch_radio_command(
         audio = record_until_silence(should_abort=should_abort)
     except (ValueError, OSError) as e:
         logger.warning(f"Mic unavailable: {e}")
-        return "radio"
+        return DispatchResult("radio", resume_music=True)
     if aborted() or len(audio) == 0:
-        return "radio"
+        return DispatchResult("radio", resume_music=True)
 
-    # 2. STT — blink blue while we think.
+    # 2. STT — blink blue while we think. Keep the model loaded across
+    # keyword-matched commands ("next song" etc.) so the second and
+    # subsequent radio commands don't pay the ~15s model reload on
+    # Jetson CPU. We only unload when we're about to hand the LLM the
+    # mic (the 8 GB unified-memory constraint requires STT and LLM to
+    # be sequential, not concurrent — see CLAUDE.md).
     if leds is not None:
         leds.set_mode("thinking")
     vc.stt.load()
     text = vc.stt.transcribe(audio)
-    vc.stt.unload()
     if aborted() or not text.strip():
-        return "radio"
+        vc.stt.unload()
+        return DispatchResult("radio", resume_music=True)
     logger.info(f"Radio command: {text!r}")
 
     # 3. Classify.
     action = _keyword_match(text)
     query: str | None = None
     if action is None:
+        # Falling through to the LLM — free STT RAM first.
+        vc.stt.unload()
         action, query = await _llm_intent(text)
         logger.info(f"LLM intent: action={action} query={query!r}")
     else:
@@ -210,31 +229,34 @@ def _do_action(
     catalog: "Catalog | None",
     vc: "VoiceContext",
     should_abort: AbortCheck,
-) -> NextMode:
+) -> DispatchResult:
     if action == "mode_librarian":
         _speak(vc, "Yes? What's your question?", should_abort)
-        return "librarian"
+        return DispatchResult("librarian", resume_music=False)
     if action == "mode_reader":
         _speak(vc, "Book reader mode.", should_abort)
-        return "reader"
+        return DispatchResult("reader", resume_music=False)
     if player is None:
         _speak(vc, "Music player isn't available.", should_abort)
-        return "radio"
+        return DispatchResult("radio", resume_music=True)
 
     if action == "next":
         player.next()
     elif action == "next_album":
         player.next_album()
     elif action == "pause":
-        player.pause()
+        # Wake handler already paused music for STT; leave it paused
+        # rather than letting the handler SIGCONT it on the way out.
+        return DispatchResult("radio", resume_music=False)
     elif action == "resume":
         player.resume()
     elif action == "stop":
         player.stop()
+        return DispatchResult("radio", resume_music=False)
     elif action == "play":
         if not query or catalog is None:
             _speak(vc, "What would you like to hear?", should_abort)
-            return "radio"
+            return DispatchResult("radio", resume_music=True)
         label = _play_query(player, catalog, query)
         if label is None:
             _speak(vc, f"I couldn't find anything for {query}.", should_abort)
@@ -243,4 +265,4 @@ def _do_action(
     else:
         # "none" or unknown — quietly drop back to music.
         logger.debug(f"No-op action {action!r}")
-    return "radio"
+    return DispatchResult("radio", resume_music=True)
