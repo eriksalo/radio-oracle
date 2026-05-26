@@ -17,7 +17,7 @@ from loguru import logger
 
 from config.settings import settings
 
-Mode = Literal["off", "radio", "librarian", "thinking", "speaking", "error"]
+Mode = Literal["off", "radio", "librarian", "reader", "thinking", "speaking", "error"]
 
 
 @dataclass(frozen=True)
@@ -32,13 +32,19 @@ class Color:
 MODE_COLORS: dict[str, Color] = {
     "off":       Color(False, False, False),
     "radio":     Color(False, True,  False),  # green
-    "librarian": Color(False, False, True),   # blue
-    "thinking":  Color(True,  True,  False),  # amber (R+G)
-    "speaking":  Color(False, True,  True),   # cyan (G+B)
+    "librarian": Color(False, False, True),   # blue — wake-heard / listening
+    "reader":    Color(True,  False, True),   # purple (R+B)
+    "thinking":  Color(False, False, True),   # blue — blinks
+    "speaking":  Color(False, False, True),   # blue — solid
     "error":     Color(True,  False, False),  # red — blinks
 }
 
-_BLINK_PERIOD_S = 0.6
+# Blink full period (seconds) per mode; absent = solid. Thinking blinks
+# at 2 Hz to read as "actively working" without strobing the room.
+_BLINK_PERIOD_S: dict[str, float] = {
+    "error":    0.6,
+    "thinking": 0.5,
+}
 
 
 class StatusLEDs:
@@ -90,7 +96,7 @@ class StatusLEDs:
         self._blink_stop = None
         self._blink_thread = None
 
-    def _start_blink(self, color: Color, period: float = _BLINK_PERIOD_S) -> None:
+    def _start_blink(self, color: Color, period: float) -> None:
         stop = threading.Event()
 
         def _loop() -> None:
@@ -114,8 +120,9 @@ class StatusLEDs:
             logger.debug(f"LED: {self._mode} -> {mode}")
             self._stop_blink()
             color = MODE_COLORS.get(mode, MODE_COLORS["off"])
-            if mode == "error":
-                self._start_blink(color)
+            blink_period = _BLINK_PERIOD_S.get(mode)
+            if blink_period is not None:
+                self._start_blink(color, blink_period)
             else:
                 self._write(color)
             self._mode = mode

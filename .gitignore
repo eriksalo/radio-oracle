@@ -8,7 +8,13 @@ build/
 # Environment
 .venv/
 .env
+.env.bak*
 .envrc
+
+# Test/tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # Data & models (large, not tracked)
 data/
@@ -25,3 +31,14 @@ Thumbs.db
 
 # Music library (top-level only, not oracle/music/ package)
 /music/
+
+# Training datasets, features, and trained model checkpoints.
+# Configs (*.yaml) are tracked; everything else under training/ is large
+# data that lives on the Jetson but not in git.
+/training/*
+!/training/*.yaml
+!/training/.gitkeep
+
+# Stale rsync artifact from an early deploy — keep out of the commit
+# graph until investigated and either reconciled or removed by hand.
+/oracle/oracle/

@@ -2,16 +2,20 @@
 
 States:
   STANDBY   — power switch open. LED off, no audio, button ignored.
-  RADIO     — power on, default. Music plays; wake word triggers one voice turn.
-  LIBRARIAN — long-press toggles into here. Voice conversation loop; music paused.
+  RADIO     — power on, default. Music plays; wake word triggers a command turn
+              (next song / play artist / "I have a question" / etc.).
+  LIBRARIAN — long-press button or wake-phrase "I have a question". Voice
+              conversation loop with clarifying questions; music paused.
+  READER    — wake-phrase "I'd like to read a book". Book TTS playback; music
+              paused. (Stub for now — returns to RADIO immediately.)
 
 Transitions:
-  power-on          : STANDBY  -> RADIO  (music starts)
-  power-off         : *        -> STANDBY (music stops, all I/O halted)
-  long-press button : RADIO   <-> LIBRARIAN (music pauses/resumes)
-  short-press button: RADIO    -> next track; no-op in LIBRARIAN
-  double-press button: RADIO   -> next album (with AM intro); no-op in LIBRARIAN
-  wake word detected: RADIO    -> pause music, one voice turn, resume music
+  power-on               : STANDBY -> RADIO (music starts)
+  power-off              : *       -> STANDBY (music stops, all I/O halted)
+  long-press button      : RADIO  <-> LIBRARIAN; READER -> RADIO
+  short-press button     : RADIO   -> next track; no-op elsewhere
+  double-press button    : RADIO   -> next album (with AM intro); no-op elsewhere
+  wake word + voice cmd  : RADIO   -> player action OR transition to LIBRARIAN/READER
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ _SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-0
 from oracle.hardware import ActionButton, ButtonEvent, PowerSwitch, StatusLEDs
 from oracle.state import StateWriter
 
-State = Literal["standby", "radio", "librarian"]
+State = Literal["standby", "radio", "librarian", "reader"]
 
 
 class OracleApp:
@@ -82,6 +86,11 @@ class OracleApp:
         self._wake_event = asyncio.Event()
 
         def on_wake() -> None:
+            # Flip LED from the detector thread for zero perceived delay.
+            # StatusLEDs.set_mode is lock-guarded; GPIO writes are sub-ms.
+            # Doing this in the asyncio path queues behind the chime + pause.
+            if self._state == "radio":
+                self.leds.set_mode("librarian")
             loop.call_soon_threadsafe(self._wake_event.set)
 
         self._wakeword = WakeWordDetector(on_wake=on_wake)
@@ -142,6 +151,10 @@ class OracleApp:
                     )
                     if self._state == "librarian":
                         self.leds.set_mode("librarian")
+                elif self._state == "reader":
+                    # Stub: book-reading loop not wired up yet.
+                    logger.info("Reader mode: not yet implemented; returning to radio")
+                    self._enter("radio")
                 elif self._state == "radio":
                     self._ensure_music()
                     await self._radio_wait(voice_ctx)
@@ -157,7 +170,7 @@ class OracleApp:
 
     async def _radio_wait(self, voice_ctx) -> None:
         """Wait for wake word, button, or power-off in radio mode."""
-        from oracle.core import voice_turn
+        from oracle.commands import dispatch_radio_command
 
         if self._wake_event is None:
             await asyncio.sleep(0.1)
@@ -174,7 +187,9 @@ class OracleApp:
 
             if self._wake_event.is_set():
                 self._wake_event.clear()
-                logger.info("Wake word triggered — starting voice turn")
+                logger.info("Wake word triggered — radio command turn")
+
+                # LED was already flipped to blue in the on_wake callback.
 
                 # Mute wake detector during our own voice interaction
                 if self._wakeword:
@@ -182,19 +197,25 @@ class OracleApp:
 
                 self._pause_music()
                 self._play_wake_chime()
-                self.leds.set_mode("librarian")
 
-                await voice_turn(
-                    voice_ctx,
+                player = self._get_player()
+                catalog = player._catalog if player is not None else None
+                next_mode = await dispatch_radio_command(
+                    player=player,
+                    catalog=catalog,
+                    vc=voice_ctx,
                     leds=self.leds,
                     should_abort=lambda: not self.power.is_on,
                 )
 
-                self.leds.set_mode("radio")
-                self._resume_music()
-
                 if self._wakeword:
                     self._wakeword.unmute()
+
+                if next_mode == "radio":
+                    self.leds.set_mode("radio")
+                    self._resume_music()
+                else:
+                    self._enter(next_mode)
                 return
 
             await asyncio.sleep(0.05)
@@ -259,11 +280,14 @@ class OracleApp:
             self.leds.set_mode("off")
         elif state == "radio":
             self.leds.set_mode("radio")
-            if old == "librarian":
+            if old in ("librarian", "reader"):
                 self._resume_music()
         elif state == "librarian":
             self._pause_music()
             self.leds.set_mode("librarian")
+        elif state == "reader":
+            self._pause_music()
+            self.leds.set_mode("reader")
 
     def _on_power_change(self, is_on: bool) -> None:
         """Called from power switch thread — immediately update LED."""
@@ -288,7 +312,7 @@ class OracleApp:
                 self._pending_short_press = None
                 if self._state == "radio":
                     self._enter("librarian")
-                elif self._state == "librarian":
+                elif self._state in ("librarian", "reader"):
                     self._enter("radio")
             elif evt.kind == "short" and self._state == "radio":
                 if (
