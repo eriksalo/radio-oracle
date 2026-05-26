@@ -24,12 +24,18 @@ from config.settings import settings
 class WhisperSTT:
     """Whisper STT with in-process (CPU) or subprocess (GPU) execution."""
 
-    def __init__(self, model_path: Path | None = None):
+    def __init__(
+        self,
+        model_path: Path | None = None,
+        model_name: str | None = None,
+    ):
         self._model_path = model_path or settings.whisper_model_path
+        # If caller didn't override, fall back to the global setting.
+        self._model_name = model_name or settings.faster_whisper_model
         self._model = None  # in-process model (CPU mode only)
         self._use_subprocess = settings.faster_whisper_device != "cpu"
         logger.info(
-            f"STT backend: {settings.stt_backend} "
+            f"STT backend: {settings.stt_backend} model={self._model_name} "
             f"({'subprocess' if self._use_subprocess else 'in-process'})"
         )
 
@@ -42,11 +48,11 @@ class WhisperSTT:
         from faster_whisper import WhisperModel
 
         self._model = WhisperModel(
-            settings.faster_whisper_model,
+            self._model_name,
             device=settings.faster_whisper_device,
             compute_type=settings.faster_whisper_compute,
         )
-        logger.debug("faster-whisper model loaded in-process")
+        logger.debug(f"faster-whisper model {self._model_name!r} loaded in-process")
 
     def unload(self) -> None:
         """Release the model from memory."""

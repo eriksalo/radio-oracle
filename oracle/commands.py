@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 from loguru import logger
 
+from config.settings import settings
 from oracle.audio import play_audio, record_until_silence
 from oracle.llm import chat
 
@@ -179,29 +180,32 @@ async def dispatch_radio_command(
     def aborted() -> bool:
         return bool(should_abort and should_abort())
 
-    # 1. Capture user utterance.
+    # 1. Capture user utterance. Use a short trailing-silence window —
+    # radio commands ("next song", "pause music") have no internal
+    # pauses, so 0.6 s is plenty and shaves ~1 s off the perceived turn.
     if leds is not None:
         leds.set_mode("librarian")  # solid blue while listening
     try:
-        audio = record_until_silence(should_abort=should_abort)
+        audio = record_until_silence(
+            silence_duration=settings.vad_silence_duration_radio,
+            should_abort=should_abort,
+        )
     except (ValueError, OSError) as e:
         logger.warning(f"Mic unavailable: {e}")
         return DispatchResult("radio", resume_music=True)
     if aborted() or len(audio) == 0:
         return DispatchResult("radio", resume_music=True)
 
-    # 2. STT — blink blue while we think. Keep the model loaded across
-    # keyword-matched commands ("next song" etc.) so the second and
-    # subsequent radio commands don't pay the ~15s model reload on
-    # Jetson CPU. We only unload when we're about to hand the LLM the
-    # mic (the 8 GB unified-memory constraint requires STT and LLM to
-    # be sequential, not concurrent — see CLAUDE.md).
+    # 2. STT — blink blue while we think. ``stt_fast`` is preloaded in
+    # voice_init() with tiny.en; we keep it resident across calls so the
+    # second-and-subsequent commands don't pay a model reload, and only
+    # unload when falling through to the LLM (the 8 GB unified-memory
+    # rule requires STT and LLM to stay sequential — see CLAUDE.md).
     if leds is not None:
         leds.set_mode("thinking")
-    vc.stt.load()
-    text = vc.stt.transcribe(audio)
+    vc.stt_fast.load()
+    text = vc.stt_fast.transcribe(audio)
     if aborted() or not text.strip():
-        vc.stt.unload()
         return DispatchResult("radio", resume_music=True)
     logger.info(f"Radio command: {text!r}")
 
@@ -210,9 +214,12 @@ async def dispatch_radio_command(
     query: str | None = None
     if action is None:
         # Falling through to the LLM — free STT RAM first.
-        vc.stt.unload()
+        vc.stt_fast.unload()
         action, query = await _llm_intent(text)
         logger.info(f"LLM intent: action={action} query={query!r}")
+        # Reload eagerly so the *next* command (almost always keyword-
+        # matched) doesn't pay the reload itself.
+        vc.stt_fast.load()
     else:
         logger.info(f"Keyword intent: action={action}")
 

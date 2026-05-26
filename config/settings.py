@@ -16,6 +16,10 @@ class OracleSettings(BaseSettings):
     stt_backend: Literal["faster-whisper", "pywhispercpp"] = "faster-whisper"
     # faster-whisper: HuggingFace model name (downloaded on first use)
     faster_whisper_model: str = "small.en"
+    # Radio-dispatcher path uses a smaller model: vocab is a handful of
+    # keywords, accuracy needs are low, and ~3x faster inference matters
+    # more than transcript quality. Librarian still uses the larger model.
+    faster_whisper_radio_model: str = "tiny.en"
     faster_whisper_device: str = "cpu"
     faster_whisper_compute: str = "int8"
     # pywhispercpp (legacy): path to .bin ggml model
@@ -34,6 +38,10 @@ class OracleSettings(BaseSettings):
     audio_channels: int = 1
     vad_energy_threshold: float = 0.004
     vad_silence_duration: float = 1.5
+    # Radio commands ("next song", "pause music") are short with no
+    # internal pauses, so a shorter trailing-silence window cuts ~1s
+    # off the perceived wake-to-action latency.
+    vad_silence_duration_radio: float = 0.6
     # PortAudio can't address ALSA `plughw`/`asym` PCMs, so we pin both
     # devices by name and open them at their native rates. Capture is
     # resampled to `audio_sample_rate` for Whisper.

@@ -250,19 +250,25 @@ class OracleApp:
             self._player.stop()
 
     def _play_wake_chime(self) -> None:
-        """Play the librarian chime through PulseAudio (blocks until done)."""
+        """Fire-and-forget chime through PulseAudio.
+
+        The mp3 is ~3.4 s; blocking on it used to delay recording so the
+        user's "next song" got eaten by the chime. We Popen and move on
+        — recording starts immediately, and PulseAudio's AEC suppresses
+        the chime from the mic input (see [[project-radio-oracle-audio]]
+        for the empirical AEC behaviour).
+        """
         if not _WAKE_CHIME.exists():
             logger.debug(f"Wake chime not found: {_WAKE_CHIME}")
             return
         try:
-            subprocess.run(
+            subprocess.Popen(
                 ["mpg123", "-q", "-o", "pulse", str(_WAKE_CHIME)],
-                timeout=5,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except (subprocess.SubprocessError, FileNotFoundError) as e:
-            logger.warning(f"Failed to play wake chime: {e}")
+        except (OSError, FileNotFoundError) as e:
+            logger.warning(f"Failed to spawn wake chime: {e}")
 
     def _next_track(self) -> None:
         player = self._get_player()

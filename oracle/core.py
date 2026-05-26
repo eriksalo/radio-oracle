@@ -104,8 +104,17 @@ async def text_repl() -> None:
 
 @dataclass
 class VoiceContext:
-    """Bundle of long-lived voice-mode resources."""
+    """Bundle of long-lived voice-mode resources.
+
+    Two STT models, by design:
+      - ``stt`` runs the larger model (small.en) for the librarian turn,
+        where transcript quality feeds the LLM.
+      - ``stt_fast`` runs a tiny model (tiny.en) for the radio dispatcher,
+        which only keyword-matches the result. Kept loaded across calls so
+        ``librarian, next song`` doesn't pay a per-command model reload.
+    """
     stt: "WhisperSTT"
+    stt_fast: "WhisperSTT"
     tts: "KokoroTTS"
     store: ConversationStore
     ctx_builder: ContextBuilder
@@ -121,10 +130,16 @@ async def voice_init() -> VoiceContext:
     system_prompt, store, session_id = await _init_common()
     ctx_builder = ContextBuilder(store, session_id)
     stt = WhisperSTT()
+    stt_fast = WhisperSTT(model_name=settings.faster_whisper_radio_model)
+    # Preload the radio model so the first wake command isn't blocked
+    # behind a cold ~3s tiny.en load. Cheap (~80 MB, ~3s) and radio is
+    # the default mode the user lands in.
+    stt_fast.load()
     tts = KokoroTTS()
 
     return VoiceContext(
         stt=stt,
+        stt_fast=stt_fast,
         tts=tts,
         store=store,
         ctx_builder=ctx_builder,
