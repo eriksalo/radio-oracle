@@ -74,6 +74,24 @@ Rollback at any point: `ORACLE_OLLAMA_MODEL=llama3.2:3b` in
    (target <3s) and (b) a librarian question (target <5s first
    sentence). Record below.
 
+## 2b. Parakeet STT (opt-in, after the Qwen3 swap is verified)
+
+```bash
+# On the Jetson: install the k2-fsa CUDA (JetPack 6.2 / CUDA 12.6) wheel per
+# https://k2-fsa.github.io/sherpa/onnx/install/linux.html , then:
+./scripts/download_models.sh          # fetches the parakeet bundle (~700MB)
+# /opt/radio-oracle/.env:
+#   ORACLE_STT_BACKEND=parakeet
+#   ORACLE_PARAKEET_PROVIDER=cuda
+sudo systemctl restart radio-oracle
+```
+
+Verify: radio commands and librarian questions both transcribe correctly
+(one model now serves both — journal should show no whisper load/unload
+churn); measure RTF on a ~5s utterance vs faster-whisper base/small
+(expect a large win); check RAM: ~700MB resident alongside the LLM.
+Rollback: ORACLE_STT_BACKEND=faster-whisper.
+
 ## 3. Recorded results
 
 | Check | Date | Result |
@@ -84,3 +102,4 @@ Rollback at any point: `ORACLE_OLLAMA_MODEL=llama3.2:3b` in
 | Rerank cost (deep mode) | | |
 | nprobe 128 retrieval latency | | |
 | Peak RAM during librarian turn | | |
+| Parakeet RTF vs whisper | | |

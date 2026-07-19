@@ -208,13 +208,18 @@ class VoiceContext:
 
 async def voice_init() -> VoiceContext:
     """Initialize STT, TTS, conversation store, and persona."""
-    from oracle.stt import WhisperSTT
+    from oracle.stt import create_stt
     from oracle.tts import KokoroTTS
 
     system_prompt, store, session_id = await _init_common()
     ctx_builder = ContextBuilder(store, session_id)
-    stt = WhisperSTT()
-    stt_fast = WhisperSTT(model_name=settings.faster_whisper_radio_model)
+    stt = create_stt()
+    if settings.stt_backend == "parakeet":
+        # One Parakeet model serves both roles — share the instance so it
+        # loads (and stays resident) exactly once.
+        stt_fast = stt
+    else:
+        stt_fast = create_stt(model_name=settings.faster_whisper_radio_model)
     tts = KokoroTTS()
     # Preload everything the first interaction needs, off the event loop:
     # the radio STT model (radio is the mode the user lands in), Kokoro

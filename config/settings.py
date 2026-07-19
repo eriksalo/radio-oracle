@@ -22,8 +22,14 @@ class OracleSettings(BaseSettings):
     ollama_temperature: float = 0.6
     ollama_top_p: float = 0.9
 
-    # Whisper STT
-    stt_backend: Literal["faster-whisper", "pywhispercpp"] = "faster-whisper"
+    # STT
+    # "parakeet" (NVIDIA Parakeet-TDT-0.6B via sherpa-onnx) replaces both
+    # whisper models with one better/faster recognizer; whisper backends
+    # remain the fallback. See oracle/stt_parakeet.py.
+    stt_backend: Literal["faster-whisper", "pywhispercpp", "parakeet"] = "faster-whisper"
+    parakeet_model_dir: Path = Path("models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8")
+    parakeet_provider: str = "cpu"  # "cuda" on the Jetson (JetPack 6.2 build)
+    parakeet_num_threads: int = 4
     # faster-whisper: HuggingFace model name (downloaded on first use)
     faster_whisper_model: str = "small.en"
     # Radio-dispatcher path uses a smaller model — vocab is a handful of

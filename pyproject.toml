@@ -28,6 +28,11 @@ tts = [
 stt = [
     "faster-whisper>=1.0",
 ]
+# NVIDIA Parakeet-TDT via sherpa-onnx (PyPI wheel is CPU; on the Jetson
+# install the k2-fsa CUDA/JetPack build instead — see docs).
+parakeet = [
+    "sherpa-onnx>=1.10",
+]
 wakeword = [
     "faster-whisper>=1.0",
 ]

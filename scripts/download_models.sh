@@ -53,6 +53,25 @@ else
     fi
 fi
 
+# Parakeet-TDT-0.6B v2 int8 (sherpa-onnx bundle) — used when
+# ORACLE_STT_BACKEND=parakeet
+PARAKEET_NAME="sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+PARAKEET_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$PARAKEET_NAME.tar.bz2"
+PARAKEET_DIR="$MODELS_DIR/$PARAKEET_NAME"
+
+if [[ "$DRY_RUN" == true ]]; then
+    echo "  Parakeet STT: $PARAKEET_URL -> $PARAKEET_DIR (~700MB)"
+else
+    if [[ ! -d "$PARAKEET_DIR" ]]; then
+        echo "Downloading Parakeet-TDT-0.6B v2 int8..."
+        wget -q --show-progress -O "$MODELS_DIR/$PARAKEET_NAME.tar.bz2" "$PARAKEET_URL"
+        tar -xjf "$MODELS_DIR/$PARAKEET_NAME.tar.bz2" -C "$MODELS_DIR"
+        rm "$MODELS_DIR/$PARAKEET_NAME.tar.bz2"
+    else
+        echo "Parakeet model already exists: $PARAKEET_DIR"
+    fi
+fi
+
 # Embedding model is downloaded by sentence-transformers on first use
 echo ""
 echo "Note: The embedding model (all-MiniLM-L6-v2, ~80MB) will be downloaded"

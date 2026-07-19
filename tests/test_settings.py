@@ -15,3 +15,18 @@ def test_env_override(monkeypatch):
     s = OracleSettings()
     assert s.ollama_model == "phi3:mini"
     assert s.mode == "voice"
+
+
+def test_create_stt_backend_switch(monkeypatch):
+    from config.settings import settings
+    from oracle.stt import WhisperSTT, create_stt
+
+    assert isinstance(create_stt(), WhisperSTT)
+
+    monkeypatch.setattr(settings, "stt_backend", "parakeet")
+    stt = create_stt()
+    from oracle.stt_parakeet import ParakeetSTT
+
+    assert isinstance(stt, ParakeetSTT)
+    # unload must be a no-op — the single shared model stays resident.
+    stt.unload()

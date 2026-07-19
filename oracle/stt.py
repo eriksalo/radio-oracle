@@ -21,6 +21,21 @@ from loguru import logger
 from config.settings import settings
 
 
+def create_stt(model_name: str | None = None):
+    """Build the configured STT backend.
+
+    Whisper backends take a per-role model name (base.en radio /
+    small.en librarian); parakeet has a single model and ignores it —
+    callers wanting one shared instance should reuse the first object
+    they create (see oracle.core.voice_init).
+    """
+    if settings.stt_backend == "parakeet":
+        from oracle.stt_parakeet import ParakeetSTT
+
+        return ParakeetSTT(model_name=model_name)
+    return WhisperSTT(model_name=model_name)
+
+
 class WhisperSTT:
     """Whisper STT with in-process (CPU) or subprocess (GPU) execution."""
 

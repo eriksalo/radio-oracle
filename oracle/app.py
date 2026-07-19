@@ -444,6 +444,8 @@ class OracleApp:
         vc = getattr(self, "_voice_ctx", None)
         if vc is None:
             return
+        if vc.stt_fast is vc.stt:
+            return  # single shared model (parakeet) — never evict it
         import threading
 
         op = vc.stt_fast.load if loaded else vc.stt_fast.unload
