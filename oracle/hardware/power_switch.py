@@ -11,7 +11,7 @@ JP 6.2.x.
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from loguru import logger
 

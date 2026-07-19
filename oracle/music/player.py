@@ -28,7 +28,6 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Callable
 
 from loguru import logger
 
@@ -60,8 +59,7 @@ def _set_pa_sink_volume(gain: float) -> None:
     proc = subprocess.run(
         ["pactl", "set-sink-volume", _SPEAKER_SINK, f"{pct}%"],
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     if proc.returncode != 0:
         # Most common cause: the sink name changed (profile flip, USB
@@ -180,41 +178,6 @@ class Player:
         self._suppress_intro = False
         self._skip_album.set()
         self._kill_proc()
-
-    def play_continuous(
-        self,
-        should_stop: Callable[[], bool] | None = None,
-    ) -> None:
-        """Play random albums in a loop until stopped (blocks)."""
-        self._start_volume_bridge()
-        try:
-            first = True
-            while True:
-                if should_stop and should_stop():
-                    break
-                tracks = self._catalog.random_album_tracks()
-                if not tracks:
-                    logger.warning("No tracks in catalog for continuous play")
-                    break
-                if first:
-                    self._play_intro()
-                    first = False
-                else:
-                    self._play_intro()
-                for track in tracks:
-                    if should_stop and should_stop():
-                        break
-                    if self._stop_event.is_set():
-                        break
-                    self._current = track
-                    logger.info(f"Playing: {track.artist} — {track.title}")
-                    self._play_file(track)
-                if self._stop_event.is_set():
-                    break
-                time.sleep(0.3)
-        finally:
-            self._current = None
-            self._stop_volume_bridge()
 
     # --------------------------------------------------------------- playback
 
@@ -345,7 +308,9 @@ class Player:
                 except subprocess.TimeoutExpired:
                     continue
                 if rc != 0 and rc != -signal.SIGTERM and not self._stop_event.is_set():
-                    err = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
+                    err = ""
+                    if proc.stderr:
+                        err = proc.stderr.read().decode("utf-8", errors="replace").strip()
                     logger.warning(f"mpg123 exit {rc} on {track.path}: {err[:200]}")
                 break
         finally:

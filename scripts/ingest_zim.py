@@ -35,7 +35,6 @@ from pathlib import Path
 from loguru import logger
 from selectolax.parser import HTMLParser
 
-
 # ---------------------------------------------------------------------------
 # ZIM reading
 # ---------------------------------------------------------------------------

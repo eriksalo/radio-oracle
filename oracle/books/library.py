@@ -158,7 +158,8 @@ class Library:
         if not row:
             return None
         text_rows = self._conn.execute(
-            "SELECT text FROM paragraphs WHERE book_id = ? AND chapter_idx = ? ORDER BY para_idx",
+            "SELECT text FROM paragraphs "
+            "WHERE book_id = ? AND chapter_idx = ? ORDER BY para_idx",
             (book_id, chapter_idx),
         ).fetchall()
         full_text = "\n\n".join(r["text"] for r in text_rows)
@@ -171,7 +172,8 @@ class Library:
 
     def get_paragraph(self, book_id: int, chapter_idx: int, para_idx: int) -> str | None:
         row = self._conn.execute(
-            "SELECT text FROM paragraphs WHERE book_id = ? AND chapter_idx = ? AND para_idx = ?",
+            "SELECT text FROM paragraphs "
+            "WHERE book_id = ? AND chapter_idx = ? AND para_idx = ?",
             (book_id, chapter_idx, para_idx),
         ).fetchone()
         return row["text"] if row else None
@@ -222,7 +224,8 @@ class Library:
 
         # Insert book
         cur = self._conn.execute(
-            "INSERT INTO books (title, author, path, total_chapters, total_paragraphs) VALUES (?, ?, ?, 0, 0)",
+            "INSERT INTO books (title, author, path, total_chapters, total_paragraphs) "
+            "VALUES (?, ?, ?, 0, 0)",
             (title, author, str(path)),
         )
         book_id = cur.lastrowid
@@ -236,7 +239,8 @@ class Library:
             paras = _split_paragraphs(ch_text)
             for p_idx, para in enumerate(paras):
                 self._conn.execute(
-                    "INSERT INTO paragraphs (book_id, chapter_idx, para_idx, text) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO paragraphs (book_id, chapter_idx, para_idx, text) "
+                    "VALUES (?, ?, ?, ?)",
                     (book_id, ch_idx, p_idx, para),
                 )
             total_paras += len(paras)

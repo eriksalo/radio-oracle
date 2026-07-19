@@ -36,7 +36,6 @@ stt-legacy = [
 ]
 music = [
     "mutagen>=1.47",
-    "miniaudio>=1.59",
 ]
 dev = [
     "ruff>=0.4",
@@ -76,6 +75,16 @@ extend-exclude = ["*.ps1"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Inline single-page UI (HTML/JS strings) — long lines are the content.
+"oracle/diag/server.py" = ["E501"]
+# Aligned per-collection config table reads better unwrapped.
+"config/settings.py" = ["E501"]
+# One-off ingest/build scripts; log/help strings run long.
+"scripts/*.py" = ["E501"]
+# importorskip("faiss") must run before the faiss-dependent import.
+"tests/test_rag_faiss_backend.py" = ["E402"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -167,7 +167,7 @@ class Potentiometer:
         addr: int | None = None,
         channel: int | None = None,
         adc: ADS1115 | None = None,
-        poller: "object | None" = None,
+        poller: object | None = None,
     ) -> None:
         self._adc = adc if adc is not None else ADS1115(bus=bus, addr=addr)
         self._channel = channel if channel is not None else settings.pot_ads1115_channel

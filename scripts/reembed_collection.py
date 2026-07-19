@@ -34,14 +34,12 @@ import os
 import pickle
 import queue
 import sqlite3
-import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
 
 from loguru import logger
-
 
 # --- SQL helpers ------------------------------------------------------------
 
@@ -152,7 +150,7 @@ class FlatVectorStore:
 
     def append(
         self,
-        vectors: "np.ndarray",  # noqa: F821 — numpy imported in caller
+        vectors: np.ndarray,  # noqa: F821 — numpy imported in caller
         chunk_ids: list[str],
         texts: list[str],
         metas: list[dict],
@@ -427,7 +425,6 @@ def reembed(
     max_seq_length: int | None,
     dry_run: bool,
 ) -> None:
-    import numpy as np
 
     logger.info(f"=== Re-embedding {source} -> {target} with {model_name} ===")
     source_segment_id, id_min, id_max, source_total = get_source_id_range(db_path, source)

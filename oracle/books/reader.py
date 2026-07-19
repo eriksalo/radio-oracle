@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -37,7 +38,7 @@ class Reader:
         self,
         library: Library | None = None,
         bookmarks: BookmarkStore | None = None,
-        tts: "KokoroTTS | None" = None,
+        tts: KokoroTTS | None = None,
     ) -> None:
         self._library = library or Library()
         self._bookmarks = bookmarks or BookmarkStore()
@@ -61,14 +62,16 @@ class Reader:
     def is_paused(self) -> bool:
         return not self._paused.is_set()
 
-    def _get_tts(self) -> "KokoroTTS":
+    def _get_tts(self) -> KokoroTTS:
         if self._tts is None:
             from oracle.tts import KokoroTTS
             self._tts = KokoroTTS()
         return self._tts
 
-    def start(self, book_id: int, chapter_idx: int = 0, para_idx: int = 0) -> ReadingPosition | None:
-        """Begin reading a book from a given position. Resumes from bookmark if no position given."""
+    def start(
+        self, book_id: int, chapter_idx: int = 0, para_idx: int = 0
+    ) -> ReadingPosition | None:
+        """Begin reading from a position; resumes from bookmark if none given."""
         book = self._library.get_book(book_id)
         if not book:
             logger.error(f"Book {book_id} not found")
@@ -80,7 +83,9 @@ class Reader:
             if bm:
                 chapter_idx = bm.chapter_idx
                 para_idx = bm.para_idx
-                logger.info(f"Resuming '{book.title}' from chapter {chapter_idx}, paragraph {para_idx}")
+                logger.info(
+                    f"Resuming '{book.title}' from ch {chapter_idx}, para {para_idx}"
+                )
 
         self._position = ReadingPosition(
             book_id=book_id,

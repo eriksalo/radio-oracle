@@ -25,17 +25,26 @@ echo "=== Radio Oracle Jetson Setup ==="
 echo ""
 
 # 1. System dependencies
+# mpg123 is the music decoder (Player spawns it per track); pulseaudio +
+# pulseaudio-utils carry the AEC mic path and pactl volume bridge.
 echo "1. Installing system dependencies..."
 run_cmd apt-get update -qq
 run_cmd apt-get install -y -qq python3-venv python3-dev portaudio19-dev \
-    alsa-utils libasound2-dev wget curl git
+    alsa-utils libasound2-dev wget curl git mpg123 pulseaudio pulseaudio-utils
 
 # 2. Create oracle user
+# uid is pinned to 999: radio-oracle.service hard-depends on
+# user@999.service and points PULSE_SERVER at /run/user/999.
 echo "2. Creating oracle user..."
 if ! id -u oracle &>/dev/null; then
-    run_cmd useradd -r -m -s /bin/bash -G gpio,audio,video oracle
+    run_cmd useradd -r -m -s /bin/bash -u 999 -G gpio,audio,video,i2c oracle
 else
-    echo "  User 'oracle' already exists"
+    echo "  User 'oracle' already exists (uid $(id -u oracle))"
+    if [[ "$(id -u oracle)" != "999" ]]; then
+        echo "  WARNING: radio-oracle.service assumes uid 999 (user@999.service," \
+             "/run/user/999). Fix the unit or the uid."
+    fi
+    run_cmd usermod -aG gpio,audio,video,i2c oracle
 fi
 
 # 3. Clone/update repo
@@ -94,33 +103,25 @@ run_cmd ollama pull llama3.2:3b
 echo "7. Downloading voice models..."
 run_cmd bash "$INSTALL_DIR/scripts/download_models.sh"
 
-# 8. Configure ALSA
-echo "8. Configuring ALSA for USB audio..."
-if [[ "$DRY_RUN" == true ]]; then
-    echo "  Would configure /etc/asound.conf for USB audio"
-else
-    if [[ ! -f /etc/asound.conf ]]; then
-        cat > /etc/asound.conf << 'ASOUND'
-# Radio Oracle USB audio config
-pcm.!default {
-    type asym
-    playback.pcm "plughw:1,0"
-    capture.pcm "plughw:2,0"
-}
-ctl.!default {
-    type hw
-    card 1
-}
-ASOUND
-        echo "  Created /etc/asound.conf (adjust card numbers for your hardware)"
-    else
-        echo "  /etc/asound.conf already exists"
-    fi
+# 8. Configure PulseAudio (asymmetric AEC routing — see docs/SETUP.md §1.6)
+# NOTE: the app talks to PulseAudio, NOT raw ALSA. An /etc/asound.conf that
+# redefines pcm.!default (an earlier version of this script wrote one)
+# conflicts with Pulse's device handling — remove it if present.
+echo "8. Configuring PulseAudio for the oracle user..."
+if [[ -f /etc/asound.conf ]] && grep -q "Radio Oracle USB audio config" /etc/asound.conf; then
+    run_cmd rm /etc/asound.conf
+    echo "  Removed stale /etc/asound.conf (superseded by PulseAudio routing)"
 fi
+run_cmd mkdir -p /home/oracle/.config/pulse
+run_cmd cp "$INSTALL_DIR/systemd/pulse-default.pa" /home/oracle/.config/pulse/default.pa
+run_cmd chown -R oracle:oracle /home/oracle/.config/pulse
+# The service needs the oracle user's Pulse daemon at /run/user/999.
+run_cmd loginctl enable-linger oracle
 
-# 9. Install systemd service
-echo "9. Installing systemd service..."
+# 9. Install systemd services (main app + diagnostics page)
+echo "9. Installing systemd services..."
 run_cmd cp "$INSTALL_DIR/systemd/radio-oracle.service" /etc/systemd/system/
+run_cmd cp "$INSTALL_DIR/systemd/radio-oracle-diag.service" /etc/systemd/system/
 run_cmd systemctl daemon-reload
 run_cmd systemctl enable radio-oracle
 
@@ -142,7 +143,9 @@ echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Next steps:"
-echo "  1. Adjust /etc/asound.conf for your USB audio devices (arecord -l / aplay -l)"
-echo "  2. rsync ChromaDB data from workstation: rsync -av workstation:radio-oracle/data/chroma/ $INSTALL_DIR/data/chroma/"
-echo "  3. Test: sudo systemctl start radio-oracle && journalctl -fu radio-oracle"
-echo "  4. Reboot and verify auto-start"
+echo "  1. Check device names in systemd/pulse-default.pa match yours (pactl list short sinks/sources)"
+echo "  2. rsync FAISS indices from workstation: rsync -av workstation:radio-oracle/data/faiss/ $INSTALL_DIR/data/faiss/"
+echo "     (ChromaDB stays on the workstation — FAISS cutover 2026-05-19)"
+echo "  3. Index music + books: .venv/bin/python scripts/index_music.py <dir>; scripts/index_books.py <dir>"
+echo "  4. Test: sudo systemctl start radio-oracle && journalctl -fu radio-oracle"
+echo "  5. Reboot and verify auto-start"

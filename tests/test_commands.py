@@ -6,7 +6,6 @@ import pytest
 
 from oracle import commands
 
-
 # ---------------------------------------------------------------- keywords
 
 @pytest.mark.parametrize(

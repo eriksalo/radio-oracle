@@ -17,22 +17,25 @@ make test       # pytest
 - `oracle/app.py` — hardware-driven state machine (Standby/Radio/Librarian)
 - `oracle/core.py` — text REPL + per-turn voice helper (`voice_init`/`voice_turn`/`voice_close`)
 - `oracle/llm.py` — async Ollama streaming client
-- `oracle/stt.py` — Whisper STT (whisper.cpp, GPU)
-- `oracle/tts.py` — Piper TTS (CPU, ONNX)
+- `oracle/stt.py` — Whisper STT (faster-whisper, CPU int8)
+- `oracle/tts.py` — Kokoro TTS (CPU, ONNX)
 - `oracle/audio.py` — mic capture, speaker playback, VAD, AM-radio filter
 - `oracle/rag/` — FAISS IVF-PQ retrieval (nomic-v1.5), pluggable backends, tiered modes, cross-encoder rerank, query router
 - `oracle/memory/` — conversation persistence (SQLite + summarization)
 - `oracle/persona.py` — system prompt builder from persona config
 - `oracle/hardware/` — GPIO button, RGB LED, power switch, audio routing
 - `oracle/music/` — music library + player (`mpg123` subprocess → PulseAudio speaker sink)
-- `oracle/books/` — book reader (stub)
-- `oracle/web/` — Pip-Boy styled diagnostic web GUI (FastAPI, port 8080)
+- `oracle/books/` — book library + reader (FTS5 search, bookmarks, voice-wired)
+- `oracle/diag/` — Pip-Boy styled diagnostic web GUI (FastAPI, port 8000)
 - `config/settings.py` — Pydantic BaseSettings, all `ORACLE_` prefixed env vars
 
 ## Key Design Decisions
 
 - LLM: Ollama + Llama 3.2 3B Q4_K_M (~2.5GB VRAM)
 - STT and LLM are sequential (never concurrent) to fit in 8GB unified memory
+- LLM calls always set num_ctx (8192) — Ollama's 2048 default silently truncates
+- Memory: sessions are summarized at close (or caught up at next boot) and folded
+  into a rolling profile row; both are injected into every turn's context
 - TTS runs on CPU to avoid GPU contention
 - RAG: FAISS IVF-PQ (PQ-64, METRIC_INNER_PRODUCT, score_scale=20.0) per collection, queried with `nomic-embed-text-v1.5` (768-d). Backend is pluggable per collection via `collection_backends` so old ChromaDB collections still work if needed.
 - Tiered retrieval: snappy first-pass (`tier1_top_k`) returns immediately; deep mode adds a cross-encoder rerank on a larger candidate pool (workstation/CPU). See `oracle/rag/modes.py`.

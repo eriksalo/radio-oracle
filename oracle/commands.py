@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
@@ -153,12 +154,12 @@ async def _llm_intent(text: str) -> tuple[str, str | None]:
     return (action, query)
 
 
-def _speak(vc: "VoiceContext", text: str, should_abort: AbortCheck = None) -> None:
+def _speak(vc: VoiceContext, text: str, should_abort: AbortCheck = None) -> None:
     audio = vc.tts.synthesize(text)
     play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
 
 
-def _play_query(player: "Player", catalog: "Catalog", query: str) -> "str | None":
+def _play_query(player: Player, catalog: Catalog, query: str) -> str | None:
     """Search and start playback. Returns a short human label on success."""
     hits = catalog.search(query)
     if not hits:
@@ -171,10 +172,10 @@ def _play_query(player: "Player", catalog: "Catalog", query: str) -> "str | None
 
 
 async def dispatch_radio_command(
-    player: "Player | None",
-    catalog: "Catalog | None",
-    vc: "VoiceContext",
-    leds: "StatusLEDs | None" = None,
+    player: Player | None,
+    catalog: Catalog | None,
+    vc: VoiceContext,
+    leds: StatusLEDs | None = None,
     should_abort: AbortCheck = None,
 ) -> DispatchResult:
     """One radio-mode voice turn. Returns the next state intent.
@@ -240,9 +241,9 @@ async def dispatch_radio_command(
 def _do_action(
     action: str,
     query: str | None,
-    player: "Player | None",
-    catalog: "Catalog | None",
-    vc: "VoiceContext",
+    player: Player | None,
+    catalog: Catalog | None,
+    vc: VoiceContext,
     should_abort: AbortCheck,
 ) -> DispatchResult:
     if action == "mode_librarian":

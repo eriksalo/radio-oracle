@@ -2,7 +2,7 @@
 
 import time
 
-from oracle.hardware.leds import MODE_COLORS, Color, StatusLEDs, _BLINK_PERIOD_S
+from oracle.hardware.leds import _BLINK_PERIOD_S, MODE_COLORS, Color, StatusLEDs
 
 
 def test_mode_colors_cover_all_modes():

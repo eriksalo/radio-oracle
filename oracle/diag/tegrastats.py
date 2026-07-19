@@ -129,7 +129,7 @@ async def _run() -> None:
         proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=2)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
         raise
     finally:

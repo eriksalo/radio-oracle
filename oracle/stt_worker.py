@@ -39,8 +39,9 @@ def _transcribe_faster_whisper(audio: np.ndarray) -> str:
 
 
 def _transcribe_pywhispercpp(audio: np.ndarray) -> str:
-    from pywhispercpp.model import Model  # type: ignore[import-not-found]
     from pathlib import Path
+
+    from pywhispercpp.model import Model  # type: ignore[import-not-found]
 
     model_path = settings.whisper_model_path
     if not model_path.is_absolute():

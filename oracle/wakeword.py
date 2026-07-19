@@ -11,10 +11,9 @@ Supports both pretrained models (by name) and custom-trained models
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-import numpy as np
 from loguru import logger
 
 from config.settings import settings
@@ -106,6 +105,7 @@ class WakeWordDetector:
 
     def _loop(self) -> None:
         import os
+
         import sounddevice as sd
 
         try:

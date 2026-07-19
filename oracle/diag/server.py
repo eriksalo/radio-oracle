@@ -26,7 +26,7 @@ from oracle.state import read_state
 
 # Lazy hardware singletons used only by the diag I/O card. Imported here so
 # the ``HardwareInputs`` / LED state lives for the lifetime of the process.
-_hw_inputs: "_HardwareInputs | None" = None
+_hw_inputs: _HardwareInputs | None = None
 _hw_leds = None  # type: ignore[var-annotated]
 _hw_pot = None   # type: ignore[var-annotated]
 
@@ -100,10 +100,10 @@ async def record(req: RecordRequest) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# /api/speak — synthesize via persistent Piper worker, play on Jetson speaker
+# /api/speak — synthesize via persistent Kokoro worker, play on Jetson speaker
 # ---------------------------------------------------------------------------
 
-# Serializes synthesis + playback. Piper's ONNX session lives in a long-lived
+# Serializes synthesis + playback. Kokoro's ONNX session lives in a long-lived
 # worker subprocess so we pay the ~2-4 s model load only once, not per request.
 # Playback is exclusive anyway (single speaker), so we use one shared lock for
 # both the worker request/response framing and the audio output.
@@ -142,7 +142,7 @@ class _PersistentTTSWorker:
             if proc.stdin is not None and not proc.stdin.is_closing():
                 proc.stdin.close()
             await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except (asyncio.TimeoutError, ProcessLookupError):
+        except (TimeoutError, ProcessLookupError):
             proc.kill()
             await proc.wait()
 
@@ -200,7 +200,7 @@ _tts_worker = _PersistentTTSWorker()
 
 
 async def _synth_via_worker(text: str, radio_filter: bool) -> bytes:
-    """Synthesize WAV bytes using the persistent Piper worker."""
+    """Synthesize WAV bytes using the persistent Kokoro worker."""
     return await _tts_worker.synth(text, radio_filter)
 
 
@@ -584,6 +584,36 @@ def app_state() -> dict:
         except (TypeError, ValueError):
             running = False
     return {"ok": True, "running": running, **snap}
+
+
+# ---------------------------------------------------------------------------
+# /api/conversations — recent sessions with summaries (ported from the
+# retired oracle/web app)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/conversations")
+def recent_conversations() -> dict:
+    try:
+        from oracle.memory.store import ConversationStore
+
+        store = ConversationStore()
+        sessions = store.get_recent_sessions(limit=10)
+        result = []
+        for s in sessions:
+            msgs = store.get_messages(s["session_id"], limit=4)
+            result.append(
+                {
+                    "session_id": s["session_id"][:8],
+                    "started": s["started_at"],
+                    "summary": s.get("summary", ""),
+                    "message_count": store.count_messages(s["session_id"]),
+                    "preview": msgs[:2] if msgs else [],
+                }
+            )
+        store.close()
+        return {"sessions": result}
+    except Exception as e:  # noqa: BLE001
+        return {"sessions": [], "error": str(e)}
 
 
 # ---------------------------------------------------------------------------

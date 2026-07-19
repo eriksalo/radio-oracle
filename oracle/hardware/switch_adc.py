@@ -54,7 +54,7 @@ class DigitalSwitch:
         thresh_low: float = _THRESH_LOW,
         thresh_high: float = _THRESH_HIGH,
         active_low: bool = True,
-        poller: "SharedAdcPoller | None" = None,
+        poller: SharedAdcPoller | None = None,
     ) -> None:
         self._adc = adc if adc is not None else ADS1115()
         self._channel = channel

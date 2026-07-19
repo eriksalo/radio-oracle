@@ -10,10 +10,7 @@ Defaults to ORACLE_BOOKS_PATH (data/books/) if no directory given.
 """
 
 import argparse
-import sys
 from pathlib import Path
-
-from loguru import logger
 
 
 def main() -> None:

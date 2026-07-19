@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from oracle.rag.router import route
 
-
 AVAILABLE = ["crashcourse", "wikipedia", "wikimed", "wikibooks", "gutenberg", "ifixit"]
 
 

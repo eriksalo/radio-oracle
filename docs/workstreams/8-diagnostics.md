@@ -2,8 +2,14 @@
 
 A FastAPI-based diagnostic web UI showing live system + app health,
 designed for tuning, debugging, and the "is it actually doing anything?"
-check. Bound by default to `0.0.0.0:8080` (LAN-accessible) and runnable
-either standalone or under its own systemd unit.
+check. Bound by default to `0.0.0.0:8000` (LAN-accessible) and runnable
+either standalone or under its own systemd unit
+(`radio-oracle-diag.service`, which Conflicts= the main app unit).
+
+> History: an earlier, separate dashboard lived in `oracle/web/` on port
+> 8080 with its own `oracle-web.service`. It was removed 2026-07 — the
+> `oracle/diag` app on port 8000 is the only diagnostics stack; its one
+> unique endpoint (`/api/conversations`) was ported over.
 
 ## Status
 
@@ -31,52 +37,43 @@ log tail. All wired into the Pip-Boy themed UI with a custom favicon.
 ## File ownership
 
 ```
-oracle/web/
-  __init__.py
-  __main__.py              # `python -m oracle.web` — starts uvicorn
-  app.py                   # FastAPI app, routes
-  templates/
-    index.html             # Pip-Boy themed dashboard
-  static/
-    pipboy.css             # Retro green-on-dark styling
-    favicon.svg            # Retro radio icon
 oracle/diag/
   __init__.py
-  tts_worker.py            # subprocess TTS invocation for RSS hygiene
+  __main__.py              # `python -m oracle.diag` — starts uvicorn
+  server.py                # FastAPI app, routes, inline Pip-Boy UI
+  tts_worker.py            # persistent-subprocess TTS worker
   tegrastats.py            # background tegrastats poller + parser
 oracle/
   log.py                   # ring-buffer sink for /api/logs (in-process)
   state.py                 # cross-process state file (running app → diag)
   health.py                # health check primitives
 systemd/
-  radio-oracle-web.service
+  radio-oracle-diag.service
 ```
 
 ## Settings
 
 ```bash
-# Set on the systemd unit or via env
-ORACLE_WEB_HOST=0.0.0.0     # default; bind interface
-ORACLE_WEB_PORT=8080         # default
+# CLI flags on the unit: python -m oracle.diag --host 0.0.0.0 --port 8000
 ```
 
 ## Dependencies
 
 ```toml
-diagnostics = [
+diag = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
-    "jinja2>=3.1",
+    "psutil>=5.9",
+    ...
 ]
 ```
 
-`pip install -e ".[diagnostics]"`. Already declared as a `[diagnostics]`
-extra in `pyproject.toml`.
+`pip install -e ".[diag]"` (see `pyproject.toml` for the full list).
 
 ## Interface contract
 
 **Provides** (HTTP, browser- or curl-consumable):
-- `GET /`                     → dashboard (Jinja2 template)
+- `GET /`                     → dashboard (inline HTML, no templating)
 - `POST /api/record`          → mic capture → WAV
 - `POST /api/speak`           → Kokoro synth (subprocess) + Jetson playback
 - `GET /api/speak.wav`        → synth only, return WAV (no playback)
@@ -91,6 +88,8 @@ extra in `pyproject.toml`.
 - `GET /api/stats`            → CPU/mem/swap/load avg/temps via psutil
 - `GET /api/persona`          → user_name, assistant_name
 - `POST /api/persona`         → set user_name (persists to persona.toml)
+- `GET /api/conversations`    → recent sessions + summaries
+- `GET /api/hardware/inputs` / `POST /api/hardware/led` → hardware tab
 
 **Consumes** (read-only):
 - WS 1: `Potentiometer`, `DigitalSwitch`, `StatusLEDs` (hardware tab)
@@ -115,19 +114,19 @@ they don't fight for the audio device.
 
 ```bash
 # Stop the main app first if it's running, then:
-python -m oracle.web --host 0.0.0.0 --port 8080
+python -m oracle.diag --host 0.0.0.0 --port 8000
 
-# Or via systemd:
-sudo systemctl start radio-oracle-web
+# Or via systemd (Conflicts= stops the main app):
+sudo systemctl start radio-oracle-diag
 
 # From any LAN device:
-curl http://<jetson>:8080/api/health | jq
-# Or just open http://<jetson>:8080 in a browser
+curl http://<jetson>:8000/api/health | jq
+# Or just open http://<jetson>:8000 in a browser
 ```
 
 ## TODO
 
-- [ ] mDNS / Bonjour so the page is discoverable as `oracle.local:8080`
+- [ ] mDNS / Bonjour so the page is discoverable as `oracle.local:8000`
 - [ ] Per-collection HNSW memory footprint chart
 - [ ] Tegrastats: per-rail GPU power (currently only GPU%, freq, temps)
 - [ ] Auth / token on `POST /api/ask*` (LAN-trust assumption today)

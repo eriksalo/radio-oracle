@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import threading
 import wave
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 from loguru import logger
@@ -91,7 +91,9 @@ def record_until_silence(
         gain = min(0.5 / peak, 50.0)
         if gain > 1.0:
             audio = (audio * gain).astype(np.float32)
-            logger.info(f"Recorded {duration:.1f}s of audio (peak {peak:.3f}, applied {gain:.0f}x gain)")
+            logger.info(
+                f"Recorded {duration:.1f}s of audio (peak {peak:.3f}, {gain:.0f}x gain)"
+            )
         else:
             logger.info(f"Recorded {duration:.1f}s of audio (peak {peak:.3f})")
     else:
@@ -126,6 +128,7 @@ def _stream_play(
     handed it to sd.play(), which baked the volume in at playback start.
     """
     import sounddevice as sd
+
     from oracle.hardware.volume import get_volume_control
 
     audio = np.ascontiguousarray(audio, dtype=np.float32)

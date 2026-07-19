@@ -15,7 +15,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-
 # Keyword patterns per collection. Earlier rules win; collections are
 # ordered by how strongly the keyword signals a likely match.
 _RULES: dict[str, re.Pattern[str]] = {
@@ -75,7 +74,8 @@ _RULES: dict[str, re.Pattern[str]] = {
         r"what (?:music|songs|tracks|albums?|artists?) do (?:i|you|we) have|"
         r"queue (?:up )?(?:music|a song|some songs|the music)|"
         # explicit-genre fallback when paired with a play/listen verb earlier in the sentence
-        r"(?:acoustic|folk|rock|jazz|blues|country|metal|punk|reggae|hip[- ]?hop|classical|electronic) (?:music|songs?|tunes?)"
+        r"(?:acoustic|folk|rock|jazz|blues|country|metal|punk|reggae|"
+        r"hip[- ]?hop|classical|electronic) (?:music|songs?|tunes?)"
         r")\b",
         flags=re.IGNORECASE,
     ),

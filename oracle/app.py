@@ -527,7 +527,9 @@ class OracleApp:
                 logger.warning(f"Reader close error: {e}")
         self._stop_wakeword()
 
-        for op in (self.button.cleanup, self.power.cleanup, self.leds.cleanup, get_volume_control().cleanup):
+        cleanup_ops = (self.button.cleanup, self.power.cleanup,
+                       self.leds.cleanup, get_volume_control().cleanup)
+        for op in cleanup_ops:
             try:
                 op()
             except Exception as e:  # noqa: BLE001

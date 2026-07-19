@@ -11,8 +11,6 @@ Usage:
 import argparse
 from pathlib import Path
 
-from loguru import logger
-
 
 def _fmt_duration(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)

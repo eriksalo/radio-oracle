@@ -166,7 +166,7 @@ def main() -> None:
         print(f"With author:    {with_author}")
         print(f"Without author: {without}")
         if with_author > 0:
-            print(f"\nTop 20 authors:")
+            print("\nTop 20 authors:")
             for r in conn.execute(
                 "SELECT author, count(*) FROM books WHERE author IS NOT NULL AND author != '' "
                 "GROUP BY 1 ORDER BY 2 DESC LIMIT 20"
@@ -214,7 +214,7 @@ def main() -> None:
         print(f"Updated: {updated}")
 
     if samples:
-        print(f"\nSample extractions:")
+        print("\nSample extractions:")
         for author, path in samples:
             fname = Path(path).name
             print(f"  {author:40s}  ← {fname}")
