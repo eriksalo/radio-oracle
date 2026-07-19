@@ -44,7 +44,7 @@ one line:
 
 ```bash
 rsync -avz -e ssh --rsync-path="sudo rsync" \
-    librarian.onnx erik@10.0.0.186:/opt/radio-oracle/models/librarian-lk.onnx
+    librarian.onnx erik@radio-oracle.local:/opt/radio-oracle/models/librarian-lk.onnx
 
 # /opt/radio-oracle/.env
 #   ORACLE_WAKEWORD_MODEL=models/librarian-lk.onnx

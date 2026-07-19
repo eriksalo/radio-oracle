@@ -11,9 +11,9 @@ verification checklist. Work through it top to bottom.
 # From the workstation checkout
 rsync -avz -e ssh --rsync-path="sudo rsync" \
     oracle config scripts systemd pyproject.toml CLAUDE.md \
-    erik@10.0.0.186:/opt/radio-oracle/
+    erik@radio-oracle.local:/opt/radio-oracle/
 
-ssh erik@10.0.0.186
+ssh erik@radio-oracle.local
 sudo -u oracle /opt/radio-oracle/.venv/bin/pip install -e "/opt/radio-oracle[all]"
 ollama pull qwen3:4b-instruct-2507-q4_K_M   # ~2.5 GB
 sudo systemctl restart radio-oracle

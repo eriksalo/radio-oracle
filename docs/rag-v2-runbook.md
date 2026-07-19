@@ -118,7 +118,7 @@ queries ("flurbon coefficient" → nothing injected).
 ## 6. Ship to the Jetson
 
 ```bash
-rsync -av data/faiss_v2/ erik@10.0.0.186:/opt/radio-oracle/data/faiss_v2/
+rsync -av data/faiss_v2/ erik@radio-oracle.local:/opt/radio-oracle/data/faiss_v2/
 # On the Jetson: point ORACLE_FAISS_INDEX_DIR=data/faiss_v2 in .env,
 # restart, spot-check + timing (first query downloads the embedder to the
 # HF cache — do it once while attended). Keep data/faiss/ until burned in.

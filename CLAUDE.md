@@ -65,20 +65,20 @@ workstream's doc, and use lazy imports so missing deps degrade gracefully.
 
 ## Deploying to the Jetson
 
-The Jetson is at `erik@10.0.0.186`, project installed at `/opt/radio-oracle` (owned by `oracle` user).
+The Jetson is at `erik@radio-oracle.local`, project installed at `/opt/radio-oracle` (owned by `oracle` user).
 
 ```bash
 # Push code changes (files owned by oracle, need sudo on remote)
-rsync -avz -e ssh --rsync-path="sudo rsync" <files> erik@10.0.0.186:/opt/radio-oracle/...
+rsync -avz -e ssh --rsync-path="sudo rsync" <files> erik@radio-oracle.local:/opt/radio-oracle/...
 
 # Restart after deploy
-ssh erik@10.0.0.186 "sudo systemctl restart radio-oracle"
+ssh erik@radio-oracle.local "sudo systemctl restart radio-oracle"
 
 # Check logs
-ssh erik@10.0.0.186 "sudo journalctl -u radio-oracle -f"
+ssh erik@radio-oracle.local "sudo journalctl -u radio-oracle -f"
 
 # Push FAISS indices
-rsync -av data/faiss/ erik@10.0.0.186:/opt/radio-oracle/data/faiss/
+rsync -av data/faiss/ erik@radio-oracle.local:/opt/radio-oracle/data/faiss/
 ```
 
 Always commit and push after code changes. Always deploy and restart the service to verify on hardware.
