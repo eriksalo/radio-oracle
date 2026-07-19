@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,8 +40,23 @@ _TRACK_SELECT = (
 
 def _row_to_track(row: sqlite3.Row) -> Track:
     d = dict(row)
-    d["path"] = str(Path(d["path"]).resolve())
+    d["path"] = str(_resolve_track_path(d["path"]))
     return Track(**d)
+
+
+def _resolve_track_path(stored: str) -> Path:
+    """Resolve a stored filepath_rel to an absolute path.
+
+    Relative paths may be relative to the music directory (new indexer) or to
+    the process working directory (legacy Jetson DB); prefer whichever exists.
+    """
+    p = Path(stored)
+    if p.is_absolute():
+        return p
+    under_music = (settings.music_path / p).resolve()
+    if under_music.exists():
+        return under_music
+    return p.resolve()
 
 
 class Catalog:
@@ -54,20 +70,39 @@ class Catalog:
         self._init_schema()
 
     def _init_schema(self) -> None:
+        # Must match the column names _TRACK_SELECT reads; the deployed Jetson
+        # DB predates this code and already has this shape (plus extra columns).
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS tracks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                artist TEXT NOT NULL DEFAULT '',
-                album TEXT NOT NULL DEFAULT '',
-                genre TEXT NOT NULL DEFAULT '',
-                duration REAL NOT NULL DEFAULT 0,
-                path TEXT NOT NULL UNIQUE
+                track_id TEXT PRIMARY KEY,
+                title TEXT,
+                artist TEXT DEFAULT '',
+                album TEXT DEFAULT '',
+                genre TEXT DEFAULT '',
+                duration_sec REAL DEFAULT 0,
+                filename TEXT NOT NULL,
+                filepath_rel TEXT NOT NULL UNIQUE
             );
             CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
             CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
         """)
         self._conn.commit()
+        self._check_schema()
+
+    def _check_schema(self) -> None:
+        """Fail loudly if the tracks table lacks the columns the queries read."""
+        cols = {
+            r["name"] for r in self._conn.execute("PRAGMA table_info(tracks)").fetchall()
+        }
+        required = {"track_id", "title", "artist", "album", "genre",
+                    "duration_sec", "filename", "filepath_rel"}
+        missing = required - cols
+        if missing:
+            raise RuntimeError(
+                f"music DB {self._db_path} has incompatible tracks schema; "
+                f"missing columns: {sorted(missing)}. Re-index with "
+                "scripts/index_music.py into a fresh DB or migrate the table."
+            )
 
     # ---------------------------------------------------------------- query
 
@@ -110,8 +145,9 @@ class Catalog:
             track = self.random_track()
             return [track] if track else []
         album_name = row["album"]
+        # Filenames usually carry the track number ("01 - ..."); title doesn't.
         rows = self._conn.execute(
-            f"{_TRACK_SELECT} WHERE album = ? ORDER BY title",
+            f"{_TRACK_SELECT} WHERE album = ? ORDER BY filename",
             (album_name,),
         ).fetchall()
         return [_row_to_track(r) for r in rows]
@@ -147,23 +183,36 @@ class Catalog:
 
     def _already_indexed(self, path: str) -> bool:
         row = self._conn.execute(
-            "SELECT id FROM tracks WHERE path = ?", (path,)
+            "SELECT track_id FROM tracks WHERE filepath_rel = ?",
+            (_stored_path(Path(path)),),
         ).fetchone()
         return row is not None
 
     def _index_file(self, path: Path) -> None:
         """Extract tags and insert into the database."""
         title, artist, album, genre, duration = _extract_tags(path)
+        stored = _stored_path(path)
+        track_id = hashlib.sha1(stored.encode()).hexdigest()[:16]
         self._conn.execute(
-            "INSERT INTO tracks (title, artist, album, genre, duration, path) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (title, artist, album, genre, duration, str(path)),
+            "INSERT INTO tracks (track_id, title, artist, album, genre, "
+            "duration_sec, filename, filepath_rel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (track_id, title, artist, album, genre, duration, path.name, stored),
         )
         self._conn.commit()
         logger.debug(f"Indexed: {artist} — {title} ({duration:.0f}s)")
 
     def close(self) -> None:
         self._conn.close()
+
+
+def _stored_path(path: Path) -> str:
+    """Path form written to filepath_rel: relative to the music dir when
+    possible (portable across machines), absolute otherwise."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(settings.music_path.resolve()))
+    except ValueError:
+        return str(resolved)
 
 
 def _extract_tags(path: Path) -> tuple[str, str, str, str, float]:
