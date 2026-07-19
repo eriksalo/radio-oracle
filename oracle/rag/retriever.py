@@ -111,6 +111,12 @@ class Retriever:
                 if routing.matched:
                     logger.debug(f"Router matched: {routing.matched}; order: {routing.order}")
                 collection_names = routing.order
+        excluded = {
+            n.strip()
+            for n in settings.rag_exclude_collections.split(",")
+            if n.strip()
+        }
+        collection_names = [n for n in collection_names if n not in excluded]
         if params.max_collections > 0:
             collection_names = collection_names[:params.max_collections]
         if not collection_names:
@@ -126,7 +132,17 @@ class Retriever:
 
         hits.sort(key=lambda h: h.distance)
 
-        if params.rerank_pool > 0 and hits:
+        # Relevance gate: better to inject nothing than off-topic chunks —
+        # the persona is instructed to say when the archives have no answer.
+        before = len(hits)
+        hits = [h for h in hits if h.distance <= settings.rag_max_distance]
+        if before and not hits:
+            logger.info(
+                f"RAG: all {before} hits above distance gate "
+                f"{settings.rag_max_distance} — injecting nothing"
+            )
+
+        if params.rerank_pool > 0 and hits and settings.rag_rerank_enabled:
             pool = hits[: params.rerank_pool]
             hits = self._get_reranker().rerank(query_text, pool, final_k)
         else:
@@ -140,6 +156,11 @@ class Retriever:
         parts = ["=== Retrieved Knowledge ==="]
         for i, r in enumerate(results, 1):
             source = r.get("source", "unknown")
-            parts.append(f"\n[Source {i}: {source}]\n{r['text']}")
+            # Article/book title lets the persona actually cite sources
+            # ("according to the Wikipedia entry on X") instead of just
+            # naming the collection.
+            title = (r.get("metadata") or {}).get("title") or ""
+            label = f"{source} — {title}" if title else source
+            parts.append(f"\n[Source {i}: {label}]\n{r['text']}")
         parts.append("\n=== End Retrieved Knowledge ===")
         return "\n".join(parts)

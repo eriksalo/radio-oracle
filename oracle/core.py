@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from config.settings import settings
-from oracle.llm import check_ollama, stream_chat
+from oracle.llm import chat, check_ollama, stream_chat
 from oracle.memory.context import ContextBuilder, catch_up_summaries
 from oracle.memory.store import ConversationStore
 from oracle.persona import build_system_prompt, get_greeting
@@ -72,11 +72,61 @@ def _try_rag_query(user_input: str) -> str:
     if retriever is None:
         return ""
     try:
-        results = retriever.query(user_input)
+        from oracle.rag.modes import detect_mode
+
+        # "tell me more" / "go deeper" style wording upgrades to deep mode:
+        # wider candidate pool + cross-encoder rerank.
+        results = retriever.query(user_input, mode=detect_mode(user_input))
         return retriever.format_context(results)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"RAG query failed: {e}")
         return ""
+
+
+# Follow-ups like "where did he die?" embed uselessly on their own — the
+# pronoun refers to the previous turn. Detect them and rewrite into a
+# self-contained query with a quick LLM call before retrieval.
+_FOLLOWUP_RE = re.compile(
+    r"\b(he|she|it|they|him|her|them|his|hers|its|their|theirs|"
+    r"that|this|those|these|there|one)\b",
+    re.IGNORECASE,
+)
+
+_REWRITE_PROMPT = (
+    "Rewrite the user's latest message as one short, self-contained search "
+    "query, resolving pronouns and references using the conversation. "
+    "Output only the query, nothing else."
+)
+
+
+def _needs_rewrite(text: str) -> bool:
+    return bool(_FOLLOWUP_RE.search(text)) or len(text.split()) <= 5
+
+
+async def _retrieval_query(store: ConversationStore, session_id: str, text: str) -> str:
+    """The text to embed for retrieval — rewritten if it's a follow-up."""
+    if not settings.rag_query_rewrite or not _needs_rewrite(text):
+        return text
+    # The current user message was already stored; history is everything before.
+    recent = store.get_messages(session_id, limit=5)
+    prior = recent[:-1] if recent else []
+    if not prior:
+        return text
+    history = "\n".join(f"{m['role']}: {m['content']}" for m in prior)
+    try:
+        out = await chat(
+            [
+                {"role": "system", "content": _REWRITE_PROMPT},
+                {"role": "user", "content": f"Conversation:\n{history}\n\nLatest message: {text}"},
+            ]
+        )
+        out = out.strip().strip('"')
+        if 0 < len(out) <= 200 and "\n" not in out:
+            logger.debug(f"Retrieval query rewritten: {text!r} -> {out!r}")
+            return out
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Query rewrite failed, using raw text: {e}")
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +156,8 @@ async def text_repl() -> None:
             break
 
         store.add_message(session_id, "user", user_input)
-        rag_context = _try_rag_query(user_input)
+        retrieval_text = await _retrieval_query(store, session_id, user_input)
+        rag_context = _try_rag_query(retrieval_text)
         messages = await ctx.build(system_prompt, rag_context)
         messages.append({"role": "user", "content": user_input})
 
@@ -321,7 +372,8 @@ async def voice_turn(
     logger.info(f"You: {text}")
     vc.store.add_message(vc.session_id, "user", text)
 
-    rag_context = await asyncio.to_thread(_try_rag_query, text)
+    retrieval_text = await _retrieval_query(vc.store, vc.session_id, text)
+    rag_context = await asyncio.to_thread(_try_rag_query, retrieval_text)
     messages = await vc.ctx_builder.build(vc.system_prompt, rag_context)
     messages.append({"role": "user", "content": text})
 

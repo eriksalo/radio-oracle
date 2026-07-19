@@ -72,6 +72,21 @@ class OracleSettings(BaseSettings):
     rag_top_k: int = 5
     chunk_size: int = 512
     chunk_overlap: int = 64
+    # Relevance gate: drop hits with normalized distance above this before
+    # injecting into the LLM (0 = best). Without it, off-topic chunks are
+    # always injected even when nothing relevant exists. FAISS distances
+    # here are 1 - score/score_scale; good hits land ~0.15-0.35.
+    rag_max_distance: float = 0.65
+    # Rewrite short/pronoun-heavy follow-ups ("where did he die?") into
+    # self-contained queries using recent turns, via a quick LLM call.
+    rag_query_rewrite: bool = True
+    # Collections never used for knowledge answers (the music catalog is
+    # searched via Catalog, not RAG — its rows polluted answers as
+    # "Retrieved Knowledge").
+    rag_exclude_collections: str = "music"
+    # Kill-switch for cross-encoder reranking (deep mode) if it proves too
+    # slow on the Jetson CPU.
+    rag_rerank_enabled: bool = True
     # Comma-separated collection names to search by default. Empty/None means
     # all collections — but on memory-constrained hosts, large HNSW indexes
     # (e.g. a full Wikipedia embedding) won't fit in RAM, so restrict the set.
@@ -90,13 +105,13 @@ class OracleSettings(BaseSettings):
     collection_backends: dict[str, str] = {}
     faiss_index_dir: Path = Path("data/faiss")
     faiss_collection_config: dict[str, dict] = {
-        "wikipedia":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
-        "gutenberg":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
-        "wikimed":     {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
-        "wikibooks":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
-        "ifixit":      {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
-        "crashcourse": {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
-        "music":       {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 64, "score_scale": 20.0},
+        "wikipedia":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
+        "gutenberg":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
+        "wikimed":     {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
+        "wikibooks":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
+        "ifixit":      {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
+        "crashcourse": {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
+        "music":       {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
     }
 
     # Memory
