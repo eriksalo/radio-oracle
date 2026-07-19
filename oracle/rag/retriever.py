@@ -150,6 +150,7 @@ class Retriever:
         if not results:
             return ""
         parts = ["=== Retrieved Knowledge ==="]
+        limit = settings.rag_chunk_char_limit
         for i, r in enumerate(results, 1):
             source = r.get("source", "unknown")
             # Article/book title lets the persona actually cite sources
@@ -157,6 +158,13 @@ class Retriever:
             # naming the collection.
             title = (r.get("metadata") or {}).get("title") or ""
             label = f"{source} — {title}" if title else source
-            parts.append(f"\n[Source {i}: {label}]\n{r['text']}")
+            text = r["text"]
+            if limit and len(text) > limit:
+                # Full 512-word chunks are ~3.3KB each; five of them cost
+                # ~10s of prompt prefill per turn on the Jetson. Truncate
+                # at a word boundary — the lead of a chunk carries most of
+                # the answer-bearing content.
+                text = text[:limit].rsplit(" ", 1)[0] + " …"
+            parts.append(f"\n[Source {i}: {label}]\n{text}")
         parts.append("\n=== End Retrieved Knowledge ===")
         return "\n".join(parts)

@@ -82,7 +82,14 @@ class FaissIvfPqBackend:
         if not self._sqlite_path.exists():
             raise FileNotFoundError(f"FAISS sqlite missing: {self._sqlite_path}")
         logger.info(f"Loading FAISS index {self._index_path.name} ...")
-        self._index = faiss.read_index(str(self._index_path))
+        # mmap instead of loading resident: the seven indices total ~1.7GB,
+        # which on the 8GB Jetson pushed the box into swap once the LLM,
+        # STT, TTS, and embedder were also loaded. With mmap the OS pages
+        # index data from NVMe on demand and can evict it under pressure;
+        # measured query latency stays in the same range (warm pages).
+        self._index = faiss.read_index(
+            str(self._index_path), faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY
+        )
         if hasattr(self._index, "nprobe"):
             self._index.nprobe = self._ef_search
         # Connect to the idmap sqlite read-only.

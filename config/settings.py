@@ -15,9 +15,11 @@ class OracleSettings(BaseSettings):
     ollama_model: str = "qwen3:4b-instruct-2507-q4_K_M"
     ollama_timeout: float = 120.0
     # Context window: Ollama defaults to 2048, which silently truncates
-    # persona + RAG context + history. 8192 fits the 8GB budget with the
-    # 3B/4B models used here (KV cache ~0.5-1GB).
-    ollama_num_ctx: int = 8192
+    # persona + RAG context + history. 4096 fits the trimmed RAG payload
+    # (rag_chunk_char_limit) + memory + 10-message history with room to
+    # spare; 8192 measured 4.2GB total for the 4B model on the Jetson and
+    # pushed the box into swap once STT/TTS/retriever were resident.
+    ollama_num_ctx: int = 4096
     # Factuality-leaning sampling for a RAG-grounded archive persona.
     ollama_temperature: float = 0.6
     ollama_top_p: float = 0.9
@@ -83,9 +85,15 @@ class OracleSettings(BaseSettings):
     chunk_overlap: int = 64
     # Relevance gate: drop hits with normalized distance above this before
     # injecting into the LLM (0 = best). Without it, off-topic chunks are
-    # always injected even when nothing relevant exists. FAISS distances
-    # here are 1 - score/score_scale; good hits land ~0.15-0.35.
-    rag_max_distance: float = 0.65
+    # always injected even when nothing relevant exists. Calibrated on the
+    # Jetson 2026-07-19 (nomic-v1.5, score_scale=20): real hits 0.10-0.17,
+    # junk 0.38+. Re-calibrate when the embedder or score_scale changes.
+    rag_max_distance: float = 0.32
+    # Per-chunk character cap at injection time. Full 512-word chunks are
+    # ~3.3KB; five uncapped chunks cost ~10s of prompt prefill per turn on
+    # the Jetson. 1200 chars keeps the answer-bearing lead of each chunk.
+    # 0 disables.
+    rag_chunk_char_limit: int = 1200
     # Rewrite short/pronoun-heavy follow-ups ("where did he die?") into
     # self-contained queries using recent turns, via a quick LLM call.
     rag_query_rewrite: bool = True

@@ -96,10 +96,22 @@ Rollback: ORACLE_STT_BACKEND=faster-whisper.
 
 | Check | Date | Result |
 |---|---|---|
-| Qwen3 decode tok/s | | |
-| Radio command wake→action | | |
-| Librarian wake→first audio | | |
-| Rerank cost (deep mode) | | |
-| nprobe 128 retrieval latency | | |
-| Peak RAM during librarian turn | | |
-| Parakeet RTF vs whisper | | |
+| Qwen3 decode tok/s | 2026-07-19 | 11.1 @ 15W → **16.2 @ 25W** (nvpmodel -m 1; temp 60°C under load) |
+| Qwen3 footprint | 2026-07-19 | 3.3GB @ num_ctx 4096 + FA + q8 KV (was 4.2GB @ 8192) |
+| RAG recall@5 (golden 32) | 2026-07-19 | **93.75%** (misses: 2 verbatim-quote literary lookups) |
+| Retrieval latency (warm, nprobe 128) | 2026-07-19 | p50 ~1.0s (0.14s embed + FAISS) |
+| Distance gate | 2026-07-19 | calibrated 0.65 → **0.32** (real 0.10-0.17, junk 0.38+); junk → 0 injected |
+| Follow-up rewrite | 2026-07-19 | works: "where did he die?" → "Where did Nikola Tesla die?" (+~2s) |
+| Sim. librarian turn (no STT) | 2026-07-19 | first audio ~11s warm / ~19s LLM-cold; full reply 16-28s |
+| RAM during full turn | 2026-07-19 | 6.0GB used / 1.2GB avail (FAISS mmap'd; no swap) |
+| voice_init (STT+TTS+warm retriever) | 2026-07-19 | ~28s one-time at boot |
+| Radio command wake→action | | (manual: needs voice/button) |
+| Rerank cost (deep mode) | | (manual: say "tell me more") |
+| Parakeet RTF vs whisper | | (not yet enabled) |
+
+**Notes from the 2026-07-19 session:** device now at radio-oracle.local
+(DHCP moved it off .186); power mode set to 25W (revert:
+`sudo nvpmodel -m 0`); RAG had been silently broken on-device since
+2026-05-24 (transformers/torch conflict — fixed, pinned); books FTS index
+built (60k titles, ~8ms searches); music catalog verified on fresh AND
+production DBs.

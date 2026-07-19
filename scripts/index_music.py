@@ -36,7 +36,7 @@ def main() -> None:
             return
         for t in tracks:
             dur = _fmt_duration(t.duration)
-            print(f"  [{t.id:4d}] {t.artist or 'Unknown'} — {t.title} [{dur}]")
+            print(f"  [{t.id[:8]}] {t.artist or 'Unknown'} — {t.title} [{dur}]")
         print(f"\n{len(tracks)} tracks total")
         return
 
@@ -47,7 +47,7 @@ def main() -> None:
             return
         for t in results:
             dur = _fmt_duration(t.duration)
-            print(f"  [{t.id:4d}] {t.artist or 'Unknown'} — {t.title} [{dur}]")
+            print(f"  [{t.id[:8]}] {t.artist or 'Unknown'} — {t.title} [{dur}]")
         print(f"\n{len(results)} matches")
         return
 

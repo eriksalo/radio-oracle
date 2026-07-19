@@ -136,6 +136,8 @@ else
     cat > /etc/systemd/system/ollama.service.d/override.conf << 'OLLAMA'
 [Service]
 Environment="OLLAMA_MAX_LOADED_MODELS=1"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
 OLLAMA
 fi
 

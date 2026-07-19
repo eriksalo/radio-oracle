@@ -58,6 +58,10 @@ def _get_retriever():
                 logger.info("RAG: no collections found — retrieval disabled")
                 _retriever = False
                 return None
+            # Warm the backends now: FAISS read_index + embedder load are
+            # lazy, so without this the first real question after boot
+            # pays ~30s of disk I/O (measured on the Jetson).
+            r.query("warmup", top_k=1)
             _retriever = r
         except Exception as e:  # noqa: BLE001
             logger.debug(f"RAG unavailable: {e}")

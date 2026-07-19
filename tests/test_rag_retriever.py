@@ -82,3 +82,13 @@ def test_followup_detection():
     assert _needs_rewrite("more about that")
     assert _needs_rewrite("why?")  # very short
     assert not _needs_rewrite("describe the construction of medieval aqueducts in detail")
+
+
+def test_format_context_truncates_long_chunks(monkeypatch):
+    monkeypatch.setattr(settings, "rag_chunk_char_limit", 100)
+    r = Retriever(embedder=MagicMock())
+    long_text = "word " * 100
+    ctx = r.format_context([_hit(long_text, "wikipedia", 0.2).to_dict()])
+    body = ctx.split("]\n", 1)[1]
+    assert len(body) < 150
+    assert "…" in body
