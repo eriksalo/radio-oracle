@@ -61,7 +61,7 @@ ORACLE_WAKE_WORD=librarian
 ```bash
 pip install -e ".[stt,voice,rag,tts]"
 ./scripts/download_models.sh
-ollama pull llama3.2:3b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
 
 For the production unit on Jetson: `[all]` plus the steps in

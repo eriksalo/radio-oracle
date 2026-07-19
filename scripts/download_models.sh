@@ -60,4 +60,4 @@ echo "automatically by sentence-transformers on first use."
 
 echo ""
 echo "Done. Pull the Ollama model separately:"
-echo "  ollama pull llama3.2:3b"
+echo "  ollama pull qwen3:4b-instruct-2507-q4_K_M"

@@ -22,7 +22,7 @@ Powered by a Jetson Orin Nano Super with a 1TB knowledge store spanning Wikipedi
 
 | Layer | Choice |
 |-------|--------|
-| LLM | Ollama + Llama 3.2 3B (Q4_K_M) |
+| LLM | Ollama + Qwen3-4B-Instruct-2507 (Q4_K_M) |
 | STT | whisper.cpp (small.en, GPU) |
 | TTS | Kokoro (am_michael, CPU, ONNX) |
 | RAG | FAISS IVF-PQ + nomic-embed-text-v1.5 (768-d) |
@@ -53,7 +53,7 @@ sudo ./scripts/setup_jetson.sh             # install everything
 
 # Download models
 ./scripts/download_models.sh
-ollama pull llama3.2:3b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 
 # Install all runtime deps
 .venv/bin/pip install -e ".[all]"
@@ -142,7 +142,7 @@ All settings use the `ORACLE_` env prefix and can be set via `.env` / `direnv`:
 
 ```bash
 ORACLE_OLLAMA_HOST=http://localhost:11434
-ORACLE_OLLAMA_MODEL=llama3.2:3b
+ORACLE_OLLAMA_MODEL=qwen3:4b-instruct-2507-q4_K_M
 ORACLE_MODE=voice              # or "text"
 ORACLE_LOG_LEVEL=INFO
 ORACLE_RAG_TOP_K=5

@@ -97,7 +97,7 @@ if [[ "$DRY_RUN" != true ]]; then
         sleep 1
     done
 fi
-run_cmd ollama pull llama3.2:3b
+run_cmd ollama pull qwen3:4b-instruct-2507-q4_K_M
 
 # 7. Download voice models
 echo "7. Downloading voice models..."

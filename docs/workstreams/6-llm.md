@@ -5,7 +5,7 @@ memory with summarization, RAG-context wiring.
 
 ## Status
 
-Working end-to-end. Llama 3.2 3B Q4_K_M via Ollama; SQLite-backed memory
+Working end-to-end. Qwen3-4B-Instruct-2507 Q4_K_M via Ollama (Llama 3.2 3B until 2026-07); SQLite-backed memory
 with periodic LLM summarization; RAG context injected when collections
 exist.
 
@@ -42,7 +42,7 @@ tests/
 
 ```bash
 ORACLE_OLLAMA_HOST=http://localhost:11434
-ORACLE_OLLAMA_MODEL=llama3.2:3b
+ORACLE_OLLAMA_MODEL=qwen3:4b-instruct-2507-q4_K_M
 ORACLE_OLLAMA_TIMEOUT=120
 ORACLE_DB_PATH=data/oracle.db
 ORACLE_MAX_CONTEXT_TURNS=10
@@ -57,7 +57,7 @@ guardrails.
 ```bash
 pip install -e .                  # core httpx + pydantic-settings
 # external: Ollama daemon
-ollama pull llama3.2:3b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
 
 Optional `[rag]` for the RAG context path (lazy-imported).

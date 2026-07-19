@@ -9,7 +9,10 @@ class OracleSettings(BaseSettings):
 
     # Ollama
     ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2:3b"
+    # Qwen3-4B-Instruct-2507 (Q4_K_M, ~2.5GB): best-in-class instruction
+    # following + JSON/tool calling for its size as of mid-2026; replaced
+    # Llama 3.2 3B (set ORACLE_OLLAMA_MODEL=llama3.2:3b to roll back).
+    ollama_model: str = "qwen3:4b-instruct-2507-q4_K_M"
     ollama_timeout: float = 120.0
     # Context window: Ollama defaults to 2048, which silently truncates
     # persona + RAG context + history. 8192 fits the 8GB budget with the

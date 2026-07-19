@@ -31,7 +31,7 @@ make test       # pytest
 
 ## Key Design Decisions
 
-- LLM: Ollama + Llama 3.2 3B Q4_K_M (~2.5GB VRAM)
+- LLM: Ollama + Qwen3-4B-Instruct-2507 Q4_K_M (~2.5GB VRAM; llama3.2:3b is the rollback)
 - STT and LLM are sequential (never concurrent) to fit in 8GB unified memory
 - LLM calls always set num_ctx (8192) — Ollama's 2048 default silently truncates
 - Memory: sessions are summarized at close (or caught up at next boot) and folded

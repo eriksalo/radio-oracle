@@ -3,7 +3,7 @@ from config.settings import OracleSettings
 
 def test_default_settings():
     s = OracleSettings()
-    assert s.ollama_model == "llama3.2:3b"
+    assert s.ollama_model == "qwen3:4b-instruct-2507-q4_K_M"
     assert s.mode == "text"
     assert s.audio_sample_rate == 16000
     assert s.rag_top_k == 5
