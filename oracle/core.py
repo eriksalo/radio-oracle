@@ -133,6 +133,7 @@ async def _retrieval_query(store: ConversationStore, session_id: str, text: str)
 # Text REPL
 # ---------------------------------------------------------------------------
 
+
 async def text_repl() -> None:
     """Interactive text REPL — type queries, get streamed responses."""
     system_prompt, store, session_id = await _init_common()
@@ -182,6 +183,7 @@ async def text_repl() -> None:
 # Voice
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class VoiceContext:
     """Bundle of long-lived voice-mode resources.
@@ -193,6 +195,7 @@ class VoiceContext:
         which only keyword-matches the result. Kept loaded across calls so
         ``librarian, next song`` doesn't pay a per-command model reload.
     """
+
     stt: WhisperSTT
     stt_fast: WhisperSTT
     tts: KokoroTTS
@@ -345,9 +348,7 @@ async def voice_turn(
             leds.set_mode("librarian")
         logger.info("Listening...")
         try:
-            audio = await asyncio.to_thread(
-                record_until_silence, should_abort=should_abort
-            )
+            audio = await asyncio.to_thread(record_until_silence, should_abort=should_abort)
         except (ValueError, OSError) as e:
             logger.warning(f"Mic unavailable for voice turn: {e}")
             return False
@@ -399,9 +400,7 @@ async def voice_turn(
             audio_out = await asyncio.to_thread(vc.tts.synthesize, sentence)
             if aborted():
                 continue
-            await asyncio.to_thread(
-                play_audio, audio_out, vc.tts.sample_rate, should_abort
-            )
+            await asyncio.to_thread(play_audio, audio_out, vc.tts.sample_rate, should_abort)
 
     worker = asyncio.create_task(_tts_worker())
     try:
@@ -454,6 +453,7 @@ async def voice_loop() -> None:
 # ---------------------------------------------------------------------------
 # Mode dispatcher
 # ---------------------------------------------------------------------------
+
 
 async def run(mode: str = "text") -> None:
     """Main entry point for the Oracle."""

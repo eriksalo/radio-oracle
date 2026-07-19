@@ -85,7 +85,13 @@ _RULES: dict[str, re.Pattern[str]] = {
 # it's the broadest signal for "who/when/what" questions, then practical
 # corpora, then literary.
 _DEFAULT_ORDER: tuple[str, ...] = (
-    "wikipedia", "wikimed", "ifixit", "wikibooks", "gutenberg", "crashcourse", "music"
+    "wikipedia",
+    "wikimed",
+    "ifixit",
+    "wikibooks",
+    "gutenberg",
+    "crashcourse",
+    "music",
 )
 
 

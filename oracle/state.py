@@ -18,8 +18,7 @@ from typing import Any
 from loguru import logger
 
 _DEFAULT_STATE_PATH = Path(
-    os.environ.get("ORACLE_STATE_FILE")
-    or (os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+    os.environ.get("ORACLE_STATE_FILE") or (os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
 ).expanduser()
 
 
@@ -63,7 +62,7 @@ class StateWriter:
             "started_at": time.time(),
             "mode": "starting",
             "power_on": False,
-            "last_button": None,        # {"kind": "short"|"long", "ts": <unix>}
+            "last_button": None,  # {"kind": "short"|"long", "ts": <unix>}
             "last_transition_ts": time.time(),
             "last_transcription": None,  # {"text": str, "ts": <unix>}
             "updated_at": time.time(),

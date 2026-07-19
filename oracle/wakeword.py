@@ -71,8 +71,7 @@ class WakeWordDetector:
             self._model_key = path
 
         logger.info(
-            f"Wake word detector: model={self._model_key!r} "
-            f"(threshold={self._threshold}, onnx)"
+            f"Wake word detector: model={self._model_key!r} (threshold={self._threshold}, onnx)"
         )
 
     def start(self) -> None:
@@ -81,7 +80,9 @@ class WakeWordDetector:
             return
         self._stop.clear()
         self._thread = threading.Thread(
-            target=self._loop, name="wakeword", daemon=True,
+            target=self._loop,
+            name="wakeword",
+            daemon=True,
         )
         self._thread.start()
 
@@ -153,10 +154,7 @@ class WakeWordDetector:
                     score = predictions.get(self._model_key, 0.0)
 
                     if score >= self._threshold:
-                        logger.info(
-                            f"Wake word detected: {self._model_key} "
-                            f"(score={score:.3f})"
-                        )
+                        logger.info(f"Wake word detected: {self._model_key} (score={score:.3f})")
                         self._model.reset()
                         if self.on_wake is not None:
                             self.on_wake()

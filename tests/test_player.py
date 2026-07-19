@@ -47,9 +47,7 @@ def player(cat, monkeypatch):
 
 def test_plays_album_tracks_in_order(player, monkeypatch):
     played: list[str] = []
-    monkeypatch.setattr(
-        Player, "_play_file", lambda self, track: played.append(track.title)
-    )
+    monkeypatch.setattr(Player, "_play_file", lambda self, track: played.append(track.title))
     player._continuous = False
     player._play_thread(first_track=None, play_intro=False)
     assert played == ["One", "Two", "Three"]
@@ -88,9 +86,7 @@ def test_next_album_sets_skip(player):
 
 
 def test_play_and_stop_lifecycle(player, monkeypatch):
-    monkeypatch.setattr(
-        Player, "_play_file", lambda self, track: time.sleep(0.02)
-    )
+    monkeypatch.setattr(Player, "_play_file", lambda self, track: time.sleep(0.02))
     player.play(continuous=False)
     assert player.is_playing
     deadline = time.time() + 2.0

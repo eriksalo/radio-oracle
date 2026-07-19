@@ -33,7 +33,7 @@ _THRESH_HIGH = 2.5
 class SwitchReading:
     channel: int
     voltage: float
-    closed: bool          # True = switch shorted to GND (active-low style)
+    closed: bool  # True = switch shorted to GND (active-low style)
 
 
 class DigitalSwitch:

@@ -26,14 +26,10 @@ class CrossEncoderReranker:
         try:
             from sentence_transformers import CrossEncoder
 
-            logger.info(
-                f"Loading reranker: {self._model_name} (device={self._device})"
-            )
+            logger.info(f"Loading reranker: {self._model_name} (device={self._device})")
             self._model = CrossEncoder(self._model_name, device=self._device)
         except ImportError:
-            logger.error(
-                "sentence-transformers missing — install via the rag extra."
-            )
+            logger.error("sentence-transformers missing — install via the rag extra.")
             raise
 
     def rerank(self, query: str, hits: list[Hit], top_k: int) -> list[Hit]:

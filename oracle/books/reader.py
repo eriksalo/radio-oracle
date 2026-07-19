@@ -65,6 +65,7 @@ class Reader:
     def _get_tts(self) -> KokoroTTS:
         if self._tts is None:
             from oracle.tts import KokoroTTS
+
             self._tts = KokoroTTS()
         return self._tts
 
@@ -83,9 +84,7 @@ class Reader:
             if bm:
                 chapter_idx = bm.chapter_idx
                 para_idx = bm.para_idx
-                logger.info(
-                    f"Resuming '{book.title}' from ch {chapter_idx}, para {para_idx}"
-                )
+                logger.info(f"Resuming '{book.title}' from ch {chapter_idx}, para {para_idx}")
 
         self._position = ReadingPosition(
             book_id=book_id,
@@ -237,9 +236,7 @@ class Reader:
         return True
 
     def _interrupted(self) -> bool:
-        return not self._paused.is_set() or bool(
-            self._should_stop and self._should_stop()
-        )
+        return not self._paused.is_set() or bool(self._should_stop and self._should_stop())
 
     def _speak(self, text: str) -> None:
         from oracle.audio import play_audio

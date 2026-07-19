@@ -42,8 +42,7 @@ class KokoroTTS:
             from kokoro_onnx import Kokoro
 
             logger.info(
-                f"Loading Kokoro model from {self._model_path}, "
-                f"voices from {self._voices_path}"
+                f"Loading Kokoro model from {self._model_path}, voices from {self._voices_path}"
             )
             self._kokoro = Kokoro(
                 str(self._model_path),
@@ -51,9 +50,7 @@ class KokoroTTS:
             )
             logger.info("Kokoro TTS loaded")
         except ImportError:
-            logger.error(
-                "kokoro-onnx not installed. Install with: pip install kokoro-onnx"
-            )
+            logger.error("kokoro-onnx not installed. Install with: pip install kokoro-onnx")
             raise
 
     def synthesize(self, text: str) -> np.ndarray:

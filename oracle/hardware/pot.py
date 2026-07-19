@@ -22,15 +22,18 @@ _REG_CONVERSION = 0x00
 _REG_CONFIG = 0x01
 
 # Config bits (datasheet §9.5.3)
-_OS_SINGLE = 0x8000          # start a single conversion
-_MUX_SINGLE = {              # single-ended on AINx
-    0: 0x4000, 1: 0x5000, 2: 0x6000, 3: 0x7000,
+_OS_SINGLE = 0x8000  # start a single conversion
+_MUX_SINGLE = {  # single-ended on AINx
+    0: 0x4000,
+    1: 0x5000,
+    2: 0x6000,
+    3: 0x7000,
 }
-_PGA_4_096V = 0x0200         # ±4.096 V — covers a 3.3 V rail with headroom
-_MODE_SINGLE = 0x0100        # one-shot
-_DR_64SPS = 0x0060           # 64 samples/s — 15.6 ms/conversion
-_DR_128SPS = 0x0080          # 128 samples/s
-_DR_250SPS = 0x00A0          # 250 samples/s — 4 ms/conversion
+_PGA_4_096V = 0x0200  # ±4.096 V — covers a 3.3 V rail with headroom
+_MODE_SINGLE = 0x0100  # one-shot
+_DR_64SPS = 0x0060  # 64 samples/s — 15.6 ms/conversion
+_DR_128SPS = 0x0080  # 128 samples/s
+_DR_250SPS = 0x00A0  # 250 samples/s — 4 ms/conversion
 _COMP_DISABLE = 0x0003
 
 # Default data rate. With the centralized SharedAdcPoller cycling through
@@ -41,9 +44,9 @@ _COMP_DISABLE = 0x0003
 # comfortably in 100 ms.
 _DEFAULT_DATA_RATE = _DR_64SPS
 
-_FS_VOLTAGE = 4.096          # full-scale voltage for _PGA_4_096V
-_FS_CODE = 32767             # 16-bit signed; positive range only used here
-_VREF_NOMINAL = 3.3          # the rail across the pot, for percent calc
+_FS_VOLTAGE = 4.096  # full-scale voltage for _PGA_4_096V
+_FS_CODE = 32767  # 16-bit signed; positive range only used here
+_VREF_NOMINAL = 3.3  # the rail across the pot, for percent calc
 
 # Conversion timing — wait this long after triggering a single-shot
 # conversion before reading the result. At 64 SPS conversion is ~15.6 ms,
@@ -148,7 +151,7 @@ class ADS1115:
 class PotReading:
     raw: int
     voltage: float
-    pct: float                # 0..100, clamped
+    pct: float  # 0..100, clamped
 
 
 class Potentiometer:

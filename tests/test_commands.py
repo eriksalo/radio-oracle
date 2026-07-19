@@ -8,6 +8,7 @@ from oracle import commands
 
 # ---------------------------------------------------------------- keywords
 
+
 @pytest.mark.parametrize(
     "text,expected",
     [
@@ -45,6 +46,7 @@ def test_keyword_match_misses(text):
 
 
 # ---------------------------------------------------------------- llm-json
+
 
 @pytest.mark.asyncio
 async def test_llm_intent_parses_clean_json(monkeypatch):
@@ -102,6 +104,7 @@ async def test_llm_intent_returns_none_on_chat_exception(monkeypatch):
 
 
 # ---------------------------------------------------------------- _do_action
+
 
 class _FakePlayer:
     def __init__(self):

@@ -40,8 +40,7 @@ PROFILE_PROMPT = (
 async def fold_into_profile(existing: str | None, new_summary: str) -> str:
     """Merge a session summary into the rolling long-term profile."""
     body = (
-        f"Existing profile:\n{existing or '(none yet)'}\n\n"
-        f"New conversation summary:\n{new_summary}"
+        f"Existing profile:\n{existing or '(none yet)'}\n\nNew conversation summary:\n{new_summary}"
     )
     messages = [
         {"role": "system", "content": PROFILE_PROMPT},

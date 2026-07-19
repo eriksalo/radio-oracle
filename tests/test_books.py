@@ -164,9 +164,7 @@ def test_paused_interrupt_does_not_advance(reading):
 
 
 def test_session_find_current_and_controls(library, tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "oracle.books.session.Library", lambda: library
-    )
+    monkeypatch.setattr("oracle.books.session.Library", lambda: library)
     monkeypatch.setattr(
         "oracle.books.session.BookmarkStore",
         lambda: BookmarkStore(db_path=tmp_path / "books.db"),

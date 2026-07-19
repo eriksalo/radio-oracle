@@ -28,7 +28,7 @@ from oracle.state import read_state
 # the ``HardwareInputs`` / LED state lives for the lifetime of the process.
 _hw_inputs: _HardwareInputs | None = None
 _hw_leds = None  # type: ignore[var-annotated]
-_hw_pot = None   # type: ignore[var-annotated]
+_hw_pot = None  # type: ignore[var-annotated]
 
 
 @asynccontextmanager
@@ -80,6 +80,7 @@ class PersonaUpdate(BaseModel):
 # /api/record — capture mic on Jetson, return WAV
 # ---------------------------------------------------------------------------
 
+
 @app.post("/api/record")
 async def record(req: RecordRequest) -> Response:
     from oracle.audio import audio_to_wav_bytes, record_until_silence
@@ -126,7 +127,12 @@ class _PersistentTTSWorker:
             try:
                 await self._ensure_started()
                 return await self._call(text, radio_filter)
-            except (BrokenPipeError, ConnectionResetError, asyncio.IncompleteReadError, RuntimeError) as e:
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                asyncio.IncompleteReadError,
+                RuntimeError,
+            ) as e:
                 self._reset()
                 if attempt == 1:
                     raise RuntimeError(f"tts worker failed: {e}") from e
@@ -150,7 +156,10 @@ class _PersistentTTSWorker:
         if self._proc is not None and self._proc.returncode is None:
             return
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "oracle.diag.tts_worker", "--persistent",
+            sys.executable,
+            "-m",
+            "oracle.diag.tts_worker",
+            "--persistent",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             # stderr inherits from parent → goes to journalctl
@@ -163,7 +172,11 @@ class _PersistentTTSWorker:
         logger.info(f"diag: persistent tts worker started (pid={proc.pid})")
 
     async def _call(self, text: str, radio_filter: bool) -> bytes:
-        assert self._proc is not None and self._proc.stdin is not None and self._proc.stdout is not None
+        assert (
+            self._proc is not None
+            and self._proc.stdin is not None
+            and self._proc.stdout is not None
+        )
         text_bytes = text.encode("utf-8")
         flag = "1" if radio_filter else "0"
         header = f"{flag} {len(text_bytes)}\n".encode("ascii")
@@ -242,6 +255,7 @@ async def speak_wav(text: str, radio_filter: bool = False) -> Response:
 # /api/ask — LLM (+ optional RAG)
 # ---------------------------------------------------------------------------
 
+
 @app.post("/api/ask")
 async def ask(req: AskRequest) -> dict:
     from oracle.llm import chat
@@ -287,6 +301,7 @@ async def ask(req: AskRequest) -> dict:
 # /api/persona — get/set the name the assistant addresses the user by
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/persona")
 def get_persona() -> dict:
     from oracle.persona import get_user_name, load_persona
@@ -312,6 +327,7 @@ def update_persona(req: PersonaUpdate) -> dict:
 # ---------------------------------------------------------------------------
 # /api/ask/stream — same as /api/ask but streams tokens via Server-Sent Events
 # ---------------------------------------------------------------------------
+
 
 @app.post("/api/ask/stream")
 async def ask_stream(req: AskRequest) -> StreamingResponse:
@@ -351,7 +367,7 @@ async def ask_stream(req: AskRequest) -> StreamingResponse:
         try:
             async for token in stream_chat(messages):
                 yield f"data: {json.dumps({'type': 'token', 'value': token})}\n\n"
-            yield "data: {\"type\": \"done\"}\n\n"
+            yield 'data: {"type": "done"}\n\n'
         except Exception as e:  # noqa: BLE001
             logger.warning(f"diag: ask stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
@@ -366,6 +382,7 @@ async def ask_stream(req: AskRequest) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 # /api/health — subsystem reachability checks
 # ---------------------------------------------------------------------------
+
 
 async def _check_ollama() -> dict:
     from oracle.llm import check_ollama
@@ -571,6 +588,7 @@ def hw_led(req: LEDRequest) -> dict:
 # /api/state — read shared state file written by the running radio-oracle
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/state")
 def app_state() -> dict:
     snap = read_state()
@@ -590,6 +608,7 @@ def app_state() -> dict:
 # /api/conversations — recent sessions with summaries (ported from the
 # retired oracle/web app)
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/conversations")
 def recent_conversations() -> dict:
@@ -619,6 +638,7 @@ def recent_conversations() -> dict:
 # ---------------------------------------------------------------------------
 # /api/logs — tail of in-process loguru ring buffer
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/logs")
 def logs(tail: int = 200, level: str | None = None) -> dict:
@@ -665,6 +685,7 @@ def journal(unit: str = "radio-oracle", tail: int = 200) -> dict:
 # /api/gpu — Jetson GPU + RAM stats from background tegrastats poller
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/gpu")
 def gpu() -> dict:
     return tegrastats.snapshot()
@@ -673,6 +694,7 @@ def gpu() -> dict:
 # ---------------------------------------------------------------------------
 # /api/stats — CPU, memory, swap, load avg, temperatures
 # ---------------------------------------------------------------------------
+
 
 def _read_temps() -> dict[str, float]:
     out: dict[str, float] = {}

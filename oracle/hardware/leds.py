@@ -30,19 +30,19 @@ class Color:
 # Mode → channel intent (True = that channel lit). Polarity to GPIO pins
 # is handled in ``_write`` for a common-anode LED.
 MODE_COLORS: dict[str, Color] = {
-    "off":       Color(False, False, False),
-    "radio":     Color(False, True,  False),  # green
-    "librarian": Color(False, False, True),   # blue — wake-heard / listening
-    "reader":    Color(True,  False, True),   # purple (R+B)
-    "thinking":  Color(False, False, True),   # blue — blinks
-    "speaking":  Color(False, False, True),   # blue — solid
-    "error":     Color(True,  False, False),  # red — blinks
+    "off": Color(False, False, False),
+    "radio": Color(False, True, False),  # green
+    "librarian": Color(False, False, True),  # blue — wake-heard / listening
+    "reader": Color(True, False, True),  # purple (R+B)
+    "thinking": Color(False, False, True),  # blue — blinks
+    "speaking": Color(False, False, True),  # blue — solid
+    "error": Color(True, False, False),  # red — blinks
 }
 
 # Blink full period (seconds) per mode; absent = solid. Thinking blinks
 # at 2 Hz to read as "actively working" without strobing the room.
 _BLINK_PERIOD_S: dict[str, float] = {
-    "error":    0.6,
+    "error": 0.6,
     "thinking": 0.5,
 }
 
@@ -72,9 +72,7 @@ class StatusLEDs:
             # Common-anode: park each cathode HIGH so the LED is dark at boot.
             for pin in self._pins.values():
                 GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
-            logger.info(
-                f"RGB LED on R={self._pins['r']} G={self._pins['g']} B={self._pins['b']}"
-            )
+            logger.info(f"RGB LED on R={self._pins['r']} G={self._pins['g']} B={self._pins['b']}")
         except (ImportError, RuntimeError) as e:
             logger.warning(f"GPIO unavailable ({e}), LED will log only")
             self._gpio = None

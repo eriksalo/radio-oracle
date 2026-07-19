@@ -20,9 +20,7 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
-def _build_payload(
-    messages: list[dict[str, str]], model: str | None, stream: bool
-) -> dict:
+def _build_payload(messages: list[dict[str, str]], model: str | None, stream: bool) -> dict:
     # keep_alive=-1 pins the model in VRAM. On 8GB unified memory, allowing
     # Ollama's default 5-min unload causes cudaMalloc OOM on reload because
     # the 588MB compute buffer needs a contiguous block that fragments after
@@ -89,8 +87,7 @@ async def check_ollama() -> bool:
             logger.info(f"Ollama ready, model '{settings.ollama_model}' loaded")
             return True
         logger.warning(
-            f"Ollama reachable but model '{settings.ollama_model}' not found. "
-            f"Available: {models}"
+            f"Ollama reachable but model '{settings.ollama_model}' not found. Available: {models}"
         )
         return False
     except httpx.HTTPError as e:

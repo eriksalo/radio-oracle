@@ -11,9 +11,7 @@ from oracle.rag.retriever import Retriever
 
 def _retriever_with_hits(monkeypatch, hits_by_collection: dict[str, list[Hit]]):
     r = Retriever(embedder=MagicMock())
-    monkeypatch.setattr(
-        r, "list_collections", lambda: sorted(hits_by_collection.keys())
-    )
+    monkeypatch.setattr(r, "list_collections", lambda: sorted(hits_by_collection.keys()))
 
     def _get_backend(name):
         backend = MagicMock()
@@ -39,9 +37,7 @@ def test_relevance_gate_drops_offtopic(monkeypatch):
 
 
 def test_relevance_gate_can_empty_out(monkeypatch):
-    r = _retriever_with_hits(
-        monkeypatch, {"wikipedia": [_hit("junk", "wikipedia", 0.95)]}
-    )
+    r = _retriever_with_hits(monkeypatch, {"wikipedia": [_hit("junk", "wikipedia", 0.95)]})
     assert r.query("gibberish", collection_names=["wikipedia"]) == []
 
 
@@ -59,9 +55,7 @@ def test_excluded_collections_never_queried(monkeypatch):
 
 
 def test_rerank_kill_switch(monkeypatch):
-    r = _retriever_with_hits(
-        monkeypatch, {"wikipedia": [_hit("fact", "wikipedia", 0.2)]}
-    )
+    r = _retriever_with_hits(monkeypatch, {"wikipedia": [_hit("fact", "wikipedia", 0.2)]})
     monkeypatch.setattr(settings, "rag_rerank_enabled", False)
     boom = MagicMock(side_effect=AssertionError("reranker must not be built"))
     monkeypatch.setattr(r, "_get_reranker", boom)

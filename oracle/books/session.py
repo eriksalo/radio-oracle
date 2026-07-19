@@ -27,9 +27,7 @@ class ReaderSession:
     def __init__(self, tts: KokoroTTS | None = None) -> None:
         self._library = Library()
         self._bookmarks = BookmarkStore()
-        self._reader = Reader(
-            library=self._library, bookmarks=self._bookmarks, tts=tts
-        )
+        self._reader = Reader(library=self._library, bookmarks=self._bookmarks, tts=tts)
 
     # ------------------------------------------------------------- selection
 

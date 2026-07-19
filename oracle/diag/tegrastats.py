@@ -56,17 +56,17 @@ def parse_line(line: str) -> dict[str, Any]:
     """Extract the structured fields we care about from one tegrastats line."""
     out: dict[str, Any] = {}
 
-    if (m := _RE_RAM.search(line)):
+    if m := _RE_RAM.search(line):
         out["ram_used_mb"] = int(m.group(1))
         out["ram_total_mb"] = int(m.group(2))
-    if (m := _RE_SWAP.search(line)):
+    if m := _RE_SWAP.search(line):
         out["swap_used_mb"] = int(m.group(1))
         out["swap_total_mb"] = int(m.group(2))
-    if (m := _RE_GPU_PCT.search(line)):
+    if m := _RE_GPU_PCT.search(line):
         out["gpu_pct"] = int(m.group(1))
-    if (m := _RE_GPU_FREQ.search(line)):
+    if m := _RE_GPU_FREQ.search(line):
         out["gpu_freq_mhz"] = int(m.group(1))
-    if (m := _RE_CPU_PCT.search(line)):
+    if m := _RE_CPU_PCT.search(line):
         cpus: list[int] = []
         for part in m.group(1).split(","):
             pct = part.split("%")[0].strip()

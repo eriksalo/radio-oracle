@@ -26,10 +26,12 @@ import sys
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--radio-filter", action="store_true",
-                        help="(one-shot only) apply radio filter to output")
-    parser.add_argument("--persistent", action="store_true",
-                        help="serve repeated requests over stdin/stdout")
+    parser.add_argument(
+        "--radio-filter", action="store_true", help="(one-shot only) apply radio filter to output"
+    )
+    parser.add_argument(
+        "--persistent", action="store_true", help="serve repeated requests over stdin/stdout"
+    )
     args = parser.parse_args()
 
     if args.persistent:

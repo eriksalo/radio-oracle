@@ -25,7 +25,7 @@ from oracle.hardware.switch_adc import make_action_button_switch
 
 PressKind = Literal["short", "long"]
 _DEBOUNCE_S = 0.03
-_POLL_S = 0.04      # ADS1115 double-read ~10 ms; 40 ms gap ≈ 20 Hz, fine for press timing
+_POLL_S = 0.04  # ADS1115 double-read ~10 ms; 40 ms gap ≈ 20 Hz, fine for press timing
 
 
 @dataclass(frozen=True)
@@ -58,8 +58,7 @@ class ActionButton:
             )
         else:
             logger.warning(
-                f"ADS1115 unavailable ({self._switch.error}); "
-                "button will use keyboard fallback"
+                f"ADS1115 unavailable ({self._switch.error}); button will use keyboard fallback"
             )
 
     def start(self) -> None:

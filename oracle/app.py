@@ -280,9 +280,7 @@ class OracleApp:
             if query:
                 book = session.find_book(query)
                 if book is None:
-                    await speak_text(
-                        voice_ctx, f"I couldn't find {query} in the archive."
-                    )
+                    await speak_text(voice_ctx, f"I couldn't find {query} in the archive.")
             if book is None and not query:
                 book = session.current_book()
             if book is None:
@@ -309,9 +307,7 @@ class OracleApp:
             def should_stop() -> bool:
                 return exit_requested or not self.power.is_on
 
-            read_task = asyncio.create_task(
-                asyncio.to_thread(session.read_continuous, should_stop)
-            )
+            read_task = asyncio.create_task(asyncio.to_thread(session.read_continuous, should_stop))
             pending_press: float | None = None
             try:
                 while not read_task.done():
@@ -379,9 +375,7 @@ class OracleApp:
         logger.info(f"Book request: {text!r}")
         book = session.find_book(text)
         if book is None:
-            await speak_text(
-                voice_ctx, f"I couldn't find {text.strip()} in the archive."
-            )
+            await speak_text(voice_ctx, f"I couldn't find {text.strip()} in the archive.")
         return book
 
     # ---------------------------------------------------------------- music
@@ -527,8 +521,12 @@ class OracleApp:
                 logger.warning(f"Reader close error: {e}")
         self._stop_wakeword()
 
-        cleanup_ops = (self.button.cleanup, self.power.cleanup,
-                       self.leds.cleanup, get_volume_control().cleanup)
+        cleanup_ops = (
+            self.button.cleanup,
+            self.power.cleanup,
+            self.leds.cleanup,
+            get_volume_control().cleanup,
+        )
         for op in cleanup_ops:
             try:
                 op()

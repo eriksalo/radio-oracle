@@ -113,8 +113,7 @@ class WhisperSTT:
         )
         if proc.returncode != 0:
             logger.error(
-                f"STT worker failed (rc={proc.returncode}): "
-                f"{proc.stderr.decode(errors='replace')}"
+                f"STT worker failed (rc={proc.returncode}): {proc.stderr.decode(errors='replace')}"
             )
             return ""
 

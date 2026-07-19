@@ -38,8 +38,7 @@ class PowerSwitch:
             )
         else:
             logger.warning(
-                f"ADS1115 unavailable ({self._switch.error}); "
-                "power switch fixed 'on' (dev)"
+                f"ADS1115 unavailable ({self._switch.error}); power switch fixed 'on' (dev)"
             )
             self._is_on = True
 

@@ -51,10 +51,7 @@ def faiss_fixture(tmp_path: Path) -> tuple[Path, Path]:
     )
     con.executemany(
         "INSERT INTO faiss_idmap VALUES (?,?,?,?,?,?,?)",
-        [
-            (i, f"id{i:03d}", f"document body {i}", "wikipedia", "", "", i)
-            for i in range(n)
-        ],
+        [(i, f"id{i:03d}", f"document body {i}", "wikipedia", "", "", i) for i in range(n)],
     )
     con.commit()
     con.close()
@@ -77,9 +74,7 @@ def test_faiss_backend_query_returns_hits(faiss_fixture, monkeypatch):
         def embed_single(self, text):
             return fake_emb.tolist()
 
-    monkeypatch.setattr(
-        faiss_ivfpq, "_get_shared_embedder", lambda *a, **kw: _FakeEmbedder()
-    )
+    monkeypatch.setattr(faiss_ivfpq, "_get_shared_embedder", lambda *a, **kw: _FakeEmbedder())
 
     backend = FaissIvfPqBackend(
         name="wikipedia",

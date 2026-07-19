@@ -46,6 +46,7 @@ class DispatchResult:
     mode ("read me Moby Dick"); None means the reader picks (resume the
     current book, or ask).
     """
+
     next_mode: NextMode
     resume_music: bool = True
     reader_query: str | None = None
@@ -89,16 +90,16 @@ def _build_keyword_table() -> list[_KeywordRule]:
     # firing on "skipper", etc.
     raw: list[tuple[str, str]] = [
         # Mode transitions first so they don't get eaten by "stop".
-        (r"\bi\s+have\s+a\s+question\b",        "mode_librarian"),
+        (r"\bi\s+have\s+a\s+question\b", "mode_librarian"),
         (r"\bi'?d\s+like\s+to\s+read\s+a\s+book\b", "mode_reader"),
         (r"\b(?:read|listen\s+to)\s+a\s+book\b", "mode_reader"),
         # Track / album ops.
-        (r"\bnext\s+(?:song|track)\b",           "next"),
+        (r"\bnext\s+(?:song|track)\b", "next"),
         (r"\bskip(?:\s+(?:this|song|track))?\b", "next"),
         (r"\b(?:next|new|change|another)\s+album\b", "next_album"),
         # Transport.
         (r"\b(?:pause|stop)\s+(?:the\s+)?music\b", "pause"),
-        (r"\bresume\s+(?:the\s+)?music\b",       "resume"),
+        (r"\bresume\s+(?:the\s+)?music\b", "resume"),
     ]
     return [_KeywordRule(re.compile(p, re.IGNORECASE), a) for p, a in raw]
 
@@ -186,6 +187,7 @@ async def dispatch_radio_command(
       3. perform the action and optionally TTS-ack
       4. return next_mode + whether the wake handler should resume music
     """
+
     def aborted() -> bool:
         return bool(should_abort and should_abort())
 

@@ -88,15 +88,11 @@ class Library:
     # ---------------------------------------------------------------- query
 
     def list_books(self) -> list[Book]:
-        rows = self._conn.execute(
-            "SELECT * FROM books ORDER BY title"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM books ORDER BY title").fetchall()
         return [Book(**dict(r)) for r in rows]
 
     def get_book(self, book_id: int) -> Book | None:
-        row = self._conn.execute(
-            "SELECT * FROM books WHERE id = ?", (book_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
         return Book(**dict(row)) if row else None
 
     def search(self, query: str) -> list[Book]:
@@ -142,9 +138,7 @@ class Library:
         n_books = self._conn.execute("SELECT COUNT(*) c FROM books").fetchone()["c"]
         # COUNT(*) on an external-content FTS table reads the *content*
         # table, not the index — count the docsize shadow table instead.
-        n_fts = self._conn.execute(
-            "SELECT COUNT(*) c FROM books_fts_docsize"
-        ).fetchone()["c"]
+        n_fts = self._conn.execute("SELECT COUNT(*) c FROM books_fts_docsize").fetchone()["c"]
         if n_fts < n_books:
             logger.info(f"Building books FTS index ({n_books} books)...")
             self._conn.execute("INSERT INTO books_fts(books_fts) VALUES('rebuild')")
@@ -158,8 +152,7 @@ class Library:
         if not row:
             return None
         text_rows = self._conn.execute(
-            "SELECT text FROM paragraphs "
-            "WHERE book_id = ? AND chapter_idx = ? ORDER BY para_idx",
+            "SELECT text FROM paragraphs WHERE book_id = ? AND chapter_idx = ? ORDER BY para_idx",
             (book_id, chapter_idx),
         ).fetchall()
         full_text = "\n\n".join(r["text"] for r in text_rows)
@@ -172,8 +165,7 @@ class Library:
 
     def get_paragraph(self, book_id: int, chapter_idx: int, para_idx: int) -> str | None:
         row = self._conn.execute(
-            "SELECT text FROM paragraphs "
-            "WHERE book_id = ? AND chapter_idx = ? AND para_idx = ?",
+            "SELECT text FROM paragraphs WHERE book_id = ? AND chapter_idx = ? AND para_idx = ?",
             (book_id, chapter_idx, para_idx),
         ).fetchone()
         return row["text"] if row else None
@@ -209,9 +201,7 @@ class Library:
         return added
 
     def _already_indexed(self, path: str) -> bool:
-        row = self._conn.execute(
-            "SELECT id FROM books WHERE path = ?", (path,)
-        ).fetchone()
+        row = self._conn.execute("SELECT id FROM books WHERE path = ?", (path,)).fetchone()
         return row is not None
 
     def _index_txt(self, path: Path) -> None:
@@ -305,7 +295,7 @@ def _split_chapters(text: str) -> list[tuple[str, str]]:
     chapters: list[tuple[str, str]] = []
 
     # Text before first chapter heading
-    preamble = text[:splits[0].start()].strip()
+    preamble = text[: splits[0].start()].strip()
     if preamble and len(preamble) > 200:
         chapters.append(("Preamble", preamble))
 

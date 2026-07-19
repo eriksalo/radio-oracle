@@ -27,6 +27,7 @@ class VolumeControl:
     def __init__(self, pot: Potentiometer | None = None) -> None:
         if pot is None:
             from oracle.hardware.switch_adc import shared_adc, shared_adc_poller
+
             poller = shared_adc_poller()
             poller.register(settings.pot_ads1115_channel)
             pot = Potentiometer(adc=shared_adc(), poller=poller)

@@ -52,8 +52,7 @@ def test_retriever_deep_mode_invokes_reranker(monkeypatch):
 
     fake_backend = MagicMock()
     fake_backend.query.return_value = [
-        Hit(text=f"doc {i}", source="x", distance=i * 0.01, chunk_id=str(i))
-        for i in range(50)
+        Hit(text=f"doc {i}", source="x", distance=i * 0.01, chunk_id=str(i)) for i in range(50)
     ]
     fake_reranker = MagicMock()
     fake_reranker.rerank.side_effect = lambda q, hits, k: hits[:k]

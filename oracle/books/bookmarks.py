@@ -45,9 +45,7 @@ class BookmarkStore:
         self._conn.commit()
 
     def get(self, book_id: int) -> Bookmark | None:
-        row = self._conn.execute(
-            "SELECT * FROM bookmarks WHERE book_id = ?", (book_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM bookmarks WHERE book_id = ?", (book_id,)).fetchone()
         return Bookmark(**dict(row)) if row else None
 
     def save(self, book_id: int, chapter_idx: int, para_idx: int) -> None:
@@ -69,9 +67,7 @@ class BookmarkStore:
 
     def list_in_progress(self) -> list[Bookmark]:
         """Return all bookmarks (books that have been started)."""
-        rows = self._conn.execute(
-            "SELECT * FROM bookmarks ORDER BY updated_at DESC"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM bookmarks ORDER BY updated_at DESC").fetchall()
         return [Bookmark(**dict(r)) for r in rows]
 
     def close(self) -> None:

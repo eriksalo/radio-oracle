@@ -352,6 +352,7 @@ class Player:
         """Poll the pot and push the result to Pulse when it changes."""
         try:
             from oracle.hardware.volume import get_volume_control
+
             ctl = get_volume_control()
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Volume bridge unavailable: {e}")

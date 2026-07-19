@@ -11,8 +11,8 @@ def main() -> None:
         choices=["text", "voice", "hardware"],
         default=None,
         help="Run mode: text REPL, headless voice loop, or hardware-driven "
-             "state machine (power switch + button + RGB LED). "
-             "Default: from ORACLE_MODE env or 'text'.",
+        "state machine (power switch + button + RGB LED). "
+        "Default: from ORACLE_MODE env or 'text'.",
     )
     args = parser.parse_args()
 

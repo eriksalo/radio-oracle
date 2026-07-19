@@ -40,7 +40,7 @@ class OracleSettings(BaseSettings):
     # Kokoro TTS
     tts_model_path: Path = Path("models/kokoro-v1.0.onnx")
     tts_voices_path: Path = Path("models/voices-v1.0.bin")
-    tts_voice: str = "am_michael"   # American male, natural
+    tts_voice: str = "am_michael"  # American male, natural
     tts_speed: float = 1.0
 
     # Audio
@@ -105,13 +105,48 @@ class OracleSettings(BaseSettings):
     collection_backends: dict[str, str] = {}
     faiss_index_dir: Path = Path("data/faiss")
     faiss_collection_config: dict[str, dict] = {
-        "wikipedia":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
-        "gutenberg":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
-        "wikimed":     {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
-        "wikibooks":   {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
-        "ifixit":      {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
-        "crashcourse": {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
-        "music":       {"model": "nomic-ai/nomic-embed-text-v1.5", "query_prefix": "search_query: ", "ef_search": 128, "score_scale": 20.0},
+        "wikipedia": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 128,
+            "score_scale": 20.0,
+        },
+        "gutenberg": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 128,
+            "score_scale": 20.0,
+        },
+        "wikimed": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 128,
+            "score_scale": 20.0,
+        },
+        "wikibooks": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 128,
+            "score_scale": 20.0,
+        },
+        "ifixit": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 128,
+            "score_scale": 20.0,
+        },
+        "crashcourse": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 128,
+            "score_scale": 20.0,
+        },
+        "music": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 128,
+            "score_scale": 20.0,
+        },
     }
 
     # Memory
@@ -126,8 +161,8 @@ class OracleSettings(BaseSettings):
     # Books / e-reader
     books_path: Path = Path("data/books")
     books_db_path: Path = Path("data/books.db")
-    reading_paragraph_pause: float = 0.6   # seconds between paragraphs
-    reading_chapter_pause: float = 2.0     # seconds between chapters
+    reading_paragraph_pause: float = 0.6  # seconds between paragraphs
+    reading_chapter_pause: float = 2.0  # seconds between chapters
 
     # Mode
     mode: Literal["text", "voice", "hardware"] = "text"
@@ -138,18 +173,18 @@ class OracleSettings(BaseSettings):
     # because the Tegra234 GPIO INPUT register has a loopback bug on JP 6.2.x
     # for these pads. See memory/hdr40-pinmux-overlay.md.
     action_button_pin: int = 18  # (legacy wiring on BCM 18; now unused for reads)
-    led_red_pin: int = 16       # BOARD pin 16 (via 330Ω to common-anode RGB LED)
-    led_green_pin: int = 18     # BOARD pin 18
-    led_blue_pin: int = 22      # BOARD pin 22
-    power_switch_pin: int = 17   # (legacy wiring on BCM 17; now unused for reads)
-    wake_word: str = "librarian"       # (legacy) spoken keyword checked in STT transcript
-    wakeword_model: str = "models/librarian.onnx"   # custom-trained openWakeWord model
-    wakeword_threshold: float = 0.7     # detection confidence threshold (0–1)
+    led_red_pin: int = 16  # BOARD pin 16 (via 330Ω to common-anode RGB LED)
+    led_green_pin: int = 18  # BOARD pin 18
+    led_blue_pin: int = 22  # BOARD pin 22
+    power_switch_pin: int = 17  # (legacy wiring on BCM 17; now unused for reads)
+    wake_word: str = "librarian"  # (legacy) spoken keyword checked in STT transcript
+    wakeword_model: str = "models/librarian.onnx"  # custom-trained openWakeWord model
+    wakeword_threshold: float = 0.7  # detection confidence threshold (0–1)
     long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
-    pot_i2c_bus: int = 7                  # /dev/i2c-N for the ADS1115 (header pins 3/5)
-    pot_ads1115_addr: int = 0x48          # default ADDR-floating address
-    pot_ads1115_channel: int = 0          # AIN0 (single-ended)
-    power_switch_ads1115_channel: int = 1   # AIN1, SPST toggle → GND, 10k pull-up to 3V3
+    pot_i2c_bus: int = 7  # /dev/i2c-N for the ADS1115 (header pins 3/5)
+    pot_ads1115_addr: int = 0x48  # default ADDR-floating address
+    pot_ads1115_channel: int = 0  # AIN0 (single-ended)
+    power_switch_ads1115_channel: int = 1  # AIN1, SPST toggle → GND, 10k pull-up to 3V3
     action_button_ads1115_channel: int = 2  # AIN2, momentary push-button → GND, 10k pull-up to 3V3
 
 

@@ -52,8 +52,11 @@ def record_until_silence(
     )
 
     stream_opts = dict(
-        samplerate=capture_sr, channels=ch, dtype="float32",
-        blocksize=block_size, device=device,
+        samplerate=capture_sr,
+        channels=ch,
+        dtype="float32",
+        blocksize=block_size,
+        device=device,
     )
     with sd.InputStream(**stream_opts) as stream:
         while True:
@@ -81,6 +84,7 @@ def record_until_silence(
     if capture_sr != out_sr:
         # Whisper expects 16k mono; downsample from device native rate.
         from math import gcd
+
         g = gcd(capture_sr, out_sr)
         audio = resample_poly(audio, out_sr // g, capture_sr // g).astype(np.float32)
     duration = len(audio) / out_sr
@@ -91,9 +95,7 @@ def record_until_silence(
         gain = min(0.5 / peak, 50.0)
         if gain > 1.0:
             audio = (audio * gain).astype(np.float32)
-            logger.info(
-                f"Recorded {duration:.1f}s of audio (peak {peak:.3f}, {gain:.0f}x gain)"
-            )
+            logger.info(f"Recorded {duration:.1f}s of audio (peak {peak:.3f}, {gain:.0f}x gain)")
         else:
             logger.info(f"Recorded {duration:.1f}s of audio (peak {peak:.3f})")
     else:
@@ -149,7 +151,7 @@ def _stream_play(
         take = min(frames, total - cursor)
         gain = vc.gain
         if take > 0:
-            chunk = audio[cursor:cursor + take]
+            chunk = audio[cursor : cursor + take]
             if channels == 1:
                 outdata[:take, 0] = chunk * gain
             else:

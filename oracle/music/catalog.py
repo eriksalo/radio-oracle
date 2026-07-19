@@ -91,11 +91,17 @@ class Catalog:
 
     def _check_schema(self) -> None:
         """Fail loudly if the tracks table lacks the columns the queries read."""
-        cols = {
-            r["name"] for r in self._conn.execute("PRAGMA table_info(tracks)").fetchall()
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(tracks)").fetchall()}
+        required = {
+            "track_id",
+            "title",
+            "artist",
+            "album",
+            "genre",
+            "duration_sec",
+            "filename",
+            "filepath_rel",
         }
-        required = {"track_id", "title", "artist", "album", "genre",
-                    "duration_sec", "filename", "filepath_rel"}
         missing = required - cols
         if missing:
             raise RuntimeError(
@@ -107,15 +113,11 @@ class Catalog:
     # ---------------------------------------------------------------- query
 
     def list_tracks(self) -> list[Track]:
-        rows = self._conn.execute(
-            f"{_TRACK_SELECT} ORDER BY artist, album, title"
-        ).fetchall()
+        rows = self._conn.execute(f"{_TRACK_SELECT} ORDER BY artist, album, title").fetchall()
         return [_row_to_track(r) for r in rows]
 
     def get_track(self, track_id: str) -> Track | None:
-        row = self._conn.execute(
-            f"{_TRACK_SELECT} WHERE track_id = ?", (track_id,)
-        ).fetchone()
+        row = self._conn.execute(f"{_TRACK_SELECT} WHERE track_id = ?", (track_id,)).fetchone()
         return _row_to_track(row) if row else None
 
     def search(self, query: str) -> list[Track]:
@@ -129,9 +131,7 @@ class Catalog:
         return [_row_to_track(r) for r in rows]
 
     def random_track(self) -> Track | None:
-        row = self._conn.execute(
-            f"{_TRACK_SELECT} ORDER BY RANDOM() LIMIT 1"
-        ).fetchone()
+        row = self._conn.execute(f"{_TRACK_SELECT} ORDER BY RANDOM() LIMIT 1").fetchone()
         return _row_to_track(row) if row else None
 
     def random_album_tracks(self) -> list[Track]:
@@ -165,9 +165,7 @@ class Catalog:
             logger.warning(f"Music directory not found: {d}")
             return 0
 
-        files = sorted(
-            f for f in d.rglob("*") if f.suffix.lower() in _MUSIC_EXTS
-        )
+        files = sorted(f for f in d.rglob("*") if f.suffix.lower() in _MUSIC_EXTS)
         added = 0
         for f in files:
             if self._already_indexed(str(f)):
