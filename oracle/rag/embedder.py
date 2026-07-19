@@ -55,7 +55,12 @@ class Embedder:
                 f"Loading embedding model: {self._model_name} "
                 f"(device={self._device}, fp16={self._fp16}, batch_size={self._batch_size})"
             )
-            self._model = SentenceTransformer(self._model_name, device=self._device)
+            # trust_remote_code: nomic-embed ships its modeling code in the
+            # repo (nomic-bert-2048); the workstation reembed script already
+            # passes this — the runtime side must match.
+            self._model = SentenceTransformer(
+                self._model_name, device=self._device, trust_remote_code=True
+            )
             if self._fp16:
                 if str(self._model.device).startswith("cuda"):
                     self._model.half()

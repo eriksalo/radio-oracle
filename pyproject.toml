@@ -21,6 +21,11 @@ voice = [
 rag = [
     "chromadb>=0.5",
     "sentence-transformers>=3.0",
+    # nomic-embed's remote modeling code imports einops at runtime
+    "einops>=0.7",
+    # transformers 5.x needs torch>=2.6; the Jetson has CPU torch 2.4.1
+    # (root-installed 2026-05-24), which silently broke the embedder.
+    "transformers<5",
 ]
 tts = [
     "kokoro-onnx>=0.4",
