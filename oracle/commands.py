@@ -40,9 +40,14 @@ class DispatchResult:
     ``resume_music`` is the hint the wake handler reads to decide whether
     to SIGCONT the previously-paused music. False when the user asked
     for silence ('pause'/'stop' commands) or for a mode change.
+
+    ``reader_query`` carries a requested book title/author into reader
+    mode ("read me Moby Dick"); None means the reader picks (resume the
+    current book, or ask).
     """
     next_mode: NextMode
     resume_music: bool = True
+    reader_query: str | None = None
 
 
 _LLM_SYSTEM_PROMPT = """You are a strict voice-command parser for a radio. \
@@ -56,7 +61,8 @@ action must be one of:
   "pause"       — pause music
   "resume"      — resume music
   "stop"        — stop music
-  "none"        — request not a music command
+  "read_book"   — read a book aloud; query is the book title or author
+  "none"        — request not a music or book command
 
 Examples:
 "play some jazz"         -> {"action":"play","query":"jazz"}
@@ -65,6 +71,8 @@ Examples:
 "skip this"              -> {"action":"next","query":null}
 "another album"          -> {"action":"next_album","query":null}
 "hush"                   -> {"action":"pause","query":null}
+"read me Moby Dick"      -> {"action":"read_book","query":"Moby Dick"}
+"read Sherlock Holmes to me" -> {"action":"read_book","query":"Sherlock Holmes"}
 "what time is it"        -> {"action":"none","query":null}
 """
 
@@ -243,6 +251,9 @@ def _do_action(
     if action == "mode_reader":
         _speak(vc, "Book reader mode.", should_abort)
         return DispatchResult("reader", resume_music=False)
+    if action == "read_book":
+        # Reader announces the title itself; no generic ack needed.
+        return DispatchResult("reader", resume_music=False, reader_query=query)
     if player is None:
         _speak(vc, "Music player isn't available.", should_abort)
         return DispatchResult("radio", resume_music=True)

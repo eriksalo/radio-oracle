@@ -152,6 +152,14 @@ async def voice_close(vc: VoiceContext) -> None:
     vc.store.close()
 
 
+async def speak_text(vc: VoiceContext, text: str) -> None:
+    """Synthesize and play a short announcement through the shared TTS."""
+    from oracle.audio import play_audio
+
+    audio = vc.tts.synthesize(text)
+    play_audio(audio, vc.tts.sample_rate)
+
+
 async def wake_word_listen(
     vc: VoiceContext,
     leds: "StatusLEDs | None" = None,

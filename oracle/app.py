@@ -6,15 +6,16 @@ States:
               (next song / play artist / "I have a question" / etc.).
   LIBRARIAN — long-press button or wake-phrase "I have a question". Voice
               conversation loop with clarifying questions; music paused.
-  READER    — wake-phrase "I'd like to read a book". Book TTS playback; music
-              paused. (Stub for now — returns to RADIO immediately.)
+  READER    — wake-phrase "I'd like to read a book" or "read me <title>".
+              Book TTS playback (resumes the current book from its
+              bookmark, or asks for a title); music paused.
 
 Transitions:
   power-on               : STANDBY -> RADIO (music starts)
   power-off              : *       -> STANDBY (music stops, all I/O halted)
   long-press button      : RADIO  <-> LIBRARIAN; READER -> RADIO
-  short-press button     : RADIO   -> next track; no-op elsewhere
-  double-press button    : RADIO   -> next album (with AM intro); no-op elsewhere
+  short-press button     : RADIO   -> next track; READER -> pause/resume
+  double-press button    : RADIO   -> next album (AM intro); READER -> next chapter
   wake word + voice cmd  : RADIO   -> player action OR transition to LIBRARIAN/READER
 """
 
@@ -51,6 +52,10 @@ class OracleApp:
         self._player = None  # lazy init
         self._wakeword = None  # lazy init
         self._wake_event: asyncio.Event | None = None
+        self._reader_session = None  # lazy init
+        # Book title/author requested via "read me <title>"; consumed by
+        # the reader loop on entry.
+        self._pending_book_query: str | None = None
         # Double-press detection: buffer the first short press and wait
         # up to _DOUBLE_PRESS_S to see if a second one arrives.
         self._pending_short_press: float | None = None
@@ -148,9 +153,7 @@ class OracleApp:
                     if self._state == "librarian":
                         self.leds.set_mode("librarian")
                 elif self._state == "reader":
-                    # Stub: book-reading loop not wired up yet.
-                    logger.info("Reader mode: not yet implemented; returning to radio")
-                    self._enter("radio")
+                    await self._run_reader(voice_ctx)
                 elif self._state == "radio":
                     self._ensure_music()
                     await self._radio_wait(voice_ctx)
@@ -225,10 +228,162 @@ class OracleApp:
                     if result.resume_music:
                         self._resume_music()
                 else:
+                    self._pending_book_query = result.reader_query
                     self._enter(result.next_mode)
                 return
 
             await asyncio.sleep(0.05)
+
+    # ---------------------------------------------------------------- reader
+
+    def _get_reader(self, voice_ctx):
+        """Lazily create the reading session (shares the voice TTS)."""
+        if self._reader_session is not None:
+            return self._reader_session
+        try:
+            from oracle.books.session import ReaderSession
+
+            session = ReaderSession(tts=voice_ctx.tts)
+            if session.book_count() == 0:
+                logger.info("Book library empty — reader disabled")
+                session.close()
+                return None
+            self._reader_session = session
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Book reader unavailable: {e}")
+            self._reader_session = None
+        return self._reader_session
+
+    async def _run_reader(self, voice_ctx) -> None:
+        """Reader mode: pick a book, read it aloud, service buttons.
+
+        Controls while reading: short press = pause/resume, double press =
+        next chapter, long press = back to radio. Book choice by voice on
+        entry ("read me Moby Dick" carries the title in; otherwise resume
+        the current book, else ask). The wake detector is muted throughout —
+        TTS bypasses AEC, so book audio would false-trigger it.
+        """
+        from oracle.core import speak_text
+
+        query = self._pending_book_query
+        self._pending_book_query = None
+
+        session = self._get_reader(voice_ctx)
+        if session is None:
+            await speak_text(voice_ctx, "The book archive isn't available.")
+            self._enter("radio")
+            return
+
+        if self._wakeword:
+            self._wakeword.mute()
+        try:
+            book = None
+            if query:
+                book = session.find_book(query)
+                if book is None:
+                    await speak_text(
+                        voice_ctx, f"I couldn't find {query} in the archive."
+                    )
+            if book is None and not query:
+                book = session.current_book()
+            if book is None:
+                book = await self._ask_which_book(voice_ctx, session)
+            if book is None:
+                self._enter("radio")
+                return
+
+            if session.has_bookmark(book.id):
+                announce = f"Resuming {book.title}."
+            elif book.author:
+                announce = f"Reading {book.title}, by {book.author}."
+            else:
+                announce = f"Reading {book.title}."
+            await speak_text(voice_ctx, announce)
+
+            if not session.start(book):
+                await speak_text(voice_ctx, "I couldn't open that book.")
+                self._enter("radio")
+                return
+
+            exit_requested = False
+
+            def should_stop() -> bool:
+                return exit_requested or not self.power.is_on
+
+            read_task = asyncio.create_task(
+                asyncio.to_thread(session.read_continuous, should_stop)
+            )
+            pending_press: float | None = None
+            try:
+                while not read_task.done():
+                    now = time.monotonic()
+                    for evt in self._drain_events():
+                        self._state_writer.record_button(evt.kind, evt.duration)
+                        if evt.kind == "long":
+                            pending_press = None
+                            exit_requested = True
+                        elif evt.kind == "short":
+                            if (
+                                pending_press is not None
+                                and now - pending_press < self._double_press_window
+                            ):
+                                pending_press = None
+                                if not session.next_chapter():
+                                    logger.info("Already at the last chapter")
+                            else:
+                                pending_press = now
+                    if (
+                        pending_press is not None
+                        and now - pending_press >= self._double_press_window
+                    ):
+                        pending_press = None
+                        paused = session.toggle_pause()
+                        self.leds.set_mode("thinking" if paused else "reader")
+                    if not self.power.is_on:
+                        exit_requested = True
+                    await asyncio.sleep(0.05)
+            finally:
+                exit_requested = True
+                await read_task
+                session.stop()  # persists the bookmark
+        finally:
+            if self._wakeword:
+                self._wakeword.unmute()
+
+        if self._state == "reader":
+            self._enter("radio")
+
+    async def _ask_which_book(self, voice_ctx, session):
+        """Prompt for a title/author by voice and search the library."""
+        from oracle.audio import record_until_silence
+        from oracle.core import speak_text
+
+        await speak_text(voice_ctx, "Which book? Say a title or an author.")
+        try:
+            audio = record_until_silence(should_abort=lambda: not self.power.is_on)
+        except (ValueError, OSError) as e:
+            logger.warning(f"Mic unavailable for book choice: {e}")
+            return None
+        if len(audio) == 0 or not self.power.is_on:
+            return None
+
+        self.leds.set_mode("thinking")
+        voice_ctx.stt.load()
+        try:
+            text = voice_ctx.stt.transcribe(audio)
+        finally:
+            voice_ctx.stt.unload()
+        if not text.strip():
+            await speak_text(voice_ctx, "I didn't catch that.")
+            return None
+
+        logger.info(f"Book request: {text!r}")
+        book = session.find_book(text)
+        if book is None:
+            await speak_text(
+                voice_ctx, f"I couldn't find {text.strip()} in the archive."
+            )
+        return book
 
     # ---------------------------------------------------------------- music
 
@@ -345,6 +500,11 @@ class OracleApp:
         self._stop_music()
         if self._player:
             self._player.close()
+        if self._reader_session:
+            try:
+                self._reader_session.close()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Reader close error: {e}")
         self._stop_wakeword()
 
         for op in (self.button.cleanup, self.power.cleanup, self.leds.cleanup, get_volume_control().cleanup):

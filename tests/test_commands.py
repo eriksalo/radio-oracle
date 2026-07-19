@@ -270,3 +270,18 @@ def test_do_action_no_player_speaks_unavailable(silent_speak):
     assert out.next_mode == "radio"
     assert out.resume_music is True
     assert silent_speak == ["<played>"]
+
+
+def test_do_action_read_book_carries_query(silent_speak):
+    out = commands._do_action("read_book", "moby dick", None, None, _FakeVC(), None)
+    assert out.next_mode == "reader"
+    assert out.resume_music is False
+    assert out.reader_query == "moby dick"
+    # Reader announces the title itself — no generic ack here.
+    assert silent_speak == []
+
+
+def test_do_action_read_book_without_query(silent_speak):
+    out = commands._do_action("read_book", None, None, None, _FakeVC(), None)
+    assert out.next_mode == "reader"
+    assert out.reader_query is None

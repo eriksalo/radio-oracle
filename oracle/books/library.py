@@ -100,13 +100,55 @@ class Library:
         return Book(**dict(row)) if row else None
 
     def search(self, query: str) -> list[Book]:
-        """Case-insensitive title/author search."""
+        """Title/author search — FTS5 (voice-friendly, word-based) with a
+        LIKE fallback for substrings and for SQLite builds without FTS5."""
+        if not query.strip():
+            return []
+        fts_hits = self._search_fts(query)
+        if fts_hits:
+            return fts_hits
         pattern = f"%{query}%"
         rows = self._conn.execute(
             "SELECT * FROM books WHERE title LIKE ? OR author LIKE ? ORDER BY title",
             (pattern, pattern),
         ).fetchall()
         return [Book(**dict(r)) for r in rows]
+
+    def _search_fts(self, query: str) -> list[Book]:
+        terms = re.findall(r"\w+", query)
+        if not terms:
+            return []
+        try:
+            self._ensure_fts()
+            # Quoted terms → no FTS syntax surprises; implicit AND ranks
+            # "moby dick" straight to Moby-Dick across 60k titles.
+            match = " ".join(f'"{t}"' for t in terms)
+            rows = self._conn.execute(
+                "SELECT b.* FROM books_fts f JOIN books b ON b.id = f.rowid "
+                "WHERE books_fts MATCH ? ORDER BY rank LIMIT 20",
+                (match,),
+            ).fetchall()
+            return [Book(**dict(r)) for r in rows]
+        except sqlite3.OperationalError as e:
+            logger.debug(f"FTS search unavailable ({e}); falling back to LIKE")
+            return []
+
+    def _ensure_fts(self) -> None:
+        """Create and populate the FTS index on first use (one-time cost)."""
+        self._conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS books_fts "
+            "USING fts5(title, author, content='books', content_rowid='id')"
+        )
+        n_books = self._conn.execute("SELECT COUNT(*) c FROM books").fetchone()["c"]
+        # COUNT(*) on an external-content FTS table reads the *content*
+        # table, not the index — count the docsize shadow table instead.
+        n_fts = self._conn.execute(
+            "SELECT COUNT(*) c FROM books_fts_docsize"
+        ).fetchone()["c"]
+        if n_fts < n_books:
+            logger.info(f"Building books FTS index ({n_books} books)...")
+            self._conn.execute("INSERT INTO books_fts(books_fts) VALUES('rebuild')")
+            self._conn.commit()
 
     def get_chapter(self, book_id: int, chapter_idx: int) -> Chapter | None:
         row = self._conn.execute(
@@ -203,6 +245,13 @@ class Library:
             "UPDATE books SET total_chapters = ?, total_paragraphs = ? WHERE id = ?",
             (len(chapters), total_paras, book_id),
         )
+        try:
+            self._conn.execute(
+                "INSERT INTO books_fts(rowid, title, author) VALUES (?, ?, ?)",
+                (book_id, title, author),
+            )
+        except sqlite3.OperationalError:
+            pass  # FTS table not built yet; _ensure_fts rebuilds lazily
         self._conn.commit()
         logger.info(f"Indexed: {title} — {len(chapters)} chapters, {total_paras} paragraphs")
 

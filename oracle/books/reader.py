@@ -37,13 +37,17 @@ class Reader:
         self,
         library: Library | None = None,
         bookmarks: BookmarkStore | None = None,
+        tts: "KokoroTTS | None" = None,
     ) -> None:
         self._library = library or Library()
         self._bookmarks = bookmarks or BookmarkStore()
-        self._tts: KokoroTTS | None = None
+        self._tts: KokoroTTS | None = tts
         self._position: ReadingPosition | None = None
         self._paused = threading.Event()
         self._paused.set()  # starts unpaused
+        # Abort check consulted during playback so pause/stop takes effect
+        # mid-paragraph instead of after it finishes (~30s later).
+        self._should_stop: Callable[[], bool] | None = None
 
     @property
     def position(self) -> ReadingPosition | None:
@@ -52,6 +56,10 @@ class Reader:
     @property
     def is_reading(self) -> bool:
         return self._position is not None
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._paused.is_set()
 
     def _get_tts(self) -> "KokoroTTS":
         if self._tts is None:
@@ -81,6 +89,9 @@ class Reader:
             total_chapters=book.total_chapters,
         )
         self._paused.set()
+        # Persist immediately so this book becomes the "current book"
+        # (freshest bookmark) even before the first paragraph completes.
+        self._save_bookmark()
         logger.info(f"Reading: '{book.title}' — ch {chapter_idx}, para {para_idx}")
         return self._position
 
@@ -126,6 +137,13 @@ class Reader:
         # Speak it
         self._speak(text)
 
+        # If playback was interrupted (pause/stop) or the position was
+        # jumped (next_chapter) while speaking, don't advance — resume
+        # should re-read the interrupted paragraph.
+        if self._interrupted() or self._position is not pos:
+            self._save_bookmark()
+            return text
+
         # Advance to next paragraph
         self._position = ReadingPosition(
             book_id=pos.book_id,
@@ -145,23 +163,27 @@ class Reader:
         Args:
             should_stop: callback returning True to interrupt reading
         """
-        while self._position is not None:
-            # Check pause
-            while not self._paused.is_set():
+        self._should_stop = should_stop
+        try:
+            while self._position is not None:
+                # Check pause
+                while not self._paused.is_set():
+                    if should_stop and should_stop():
+                        return
+                    time.sleep(0.1)
+
                 if should_stop and should_stop():
+                    self._save_bookmark()
                     return
-                time.sleep(0.1)
 
-            if should_stop and should_stop():
-                self._save_bookmark()
-                return
+                text = self.read_paragraph()
+                if text is None:
+                    break
 
-            text = self.read_paragraph()
-            if text is None:
-                break
-
-            # Pause between paragraphs
-            time.sleep(settings.reading_paragraph_pause)
+                # Pause between paragraphs
+                time.sleep(settings.reading_paragraph_pause)
+        finally:
+            self._should_stop = None
 
     def _advance_chapter(self) -> bool:
         """Move to the first paragraph of the next chapter. Returns False if at end."""
@@ -191,12 +213,35 @@ class Reader:
         )
         return True
 
+    def next_chapter(self) -> bool:
+        """Jump to the start of the next chapter. Returns False at book end."""
+        pos = self._position
+        if not pos:
+            return False
+        next_ch = pos.chapter_idx + 1
+        if next_ch >= pos.total_chapters:
+            return False
+        self._position = ReadingPosition(
+            book_id=pos.book_id,
+            chapter_idx=next_ch,
+            para_idx=0,
+            total_chapters=pos.total_chapters,
+        )
+        self._save_bookmark()
+        logger.info(f"Skipped to chapter {next_ch}")
+        return True
+
+    def _interrupted(self) -> bool:
+        return not self._paused.is_set() or bool(
+            self._should_stop and self._should_stop()
+        )
+
     def _speak(self, text: str) -> None:
         from oracle.audio import play_audio
 
         tts = self._get_tts()
         audio = tts.synthesize(text)
-        play_audio(audio, tts.sample_rate)
+        play_audio(audio, tts.sample_rate, should_abort=self._interrupted)
 
     def _save_bookmark(self) -> None:
         if self._position:
