@@ -39,19 +39,43 @@ async def _init_common() -> tuple[str, ConversationStore, str]:
     return system_prompt, store, session_id
 
 
+# Retriever is expensive to construct (embedder + FAISS index loads from
+# disk) — build once, reuse every turn. None = not yet tried; False = tried
+# and unavailable (don't retry every turn).
+_retriever: object | None = None
+
+
+def _get_retriever():
+    global _retriever
+    if _retriever is False:
+        return None
+    if _retriever is None:
+        try:
+            from oracle.rag.retriever import Retriever
+
+            r = Retriever()
+            if not r.list_collections():
+                logger.info("RAG: no collections found — retrieval disabled")
+                _retriever = False
+                return None
+            _retriever = r
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"RAG unavailable: {e}")
+            _retriever = False
+            return None
+    return _retriever
+
+
 def _try_rag_query(user_input: str) -> str:
     """Attempt RAG retrieval. Returns empty string if RAG unavailable."""
+    retriever = _get_retriever()
+    if retriever is None:
+        return ""
     try:
-        from oracle.rag.retriever import Retriever
-
-        retriever = Retriever()
-        collections = retriever.list_collections()
-        if not collections:
-            return ""
         results = retriever.query(user_input)
         return retriever.format_context(results)
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"RAG unavailable: {e}")
+        logger.warning(f"RAG query failed: {e}")
         return ""
 
 
@@ -137,11 +161,16 @@ async def voice_init() -> VoiceContext:
     ctx_builder = ContextBuilder(store, session_id)
     stt = WhisperSTT()
     stt_fast = WhisperSTT(model_name=settings.faster_whisper_radio_model)
-    # Preload the radio model so the first wake command isn't blocked
-    # behind a cold ~3s tiny.en load. Cheap (~80 MB, ~3s) and radio is
-    # the default mode the user lands in.
-    stt_fast.load()
     tts = KokoroTTS()
+    # Preload everything the first interaction needs, off the event loop:
+    # the radio STT model (radio is the mode the user lands in), Kokoro
+    # (first spoken reply otherwise pays a cold model load), and the RAG
+    # retriever (embedder + FAISS indices — seconds of disk I/O).
+    await asyncio.gather(
+        asyncio.to_thread(stt_fast.load),
+        asyncio.to_thread(tts.load),
+        asyncio.to_thread(_get_retriever),
+    )
 
     return VoiceContext(
         stt=stt,
@@ -158,9 +187,12 @@ async def voice_init() -> VoiceContext:
 
 
 async def voice_close(vc: VoiceContext) -> None:
+    from oracle.llm import close_client
+
     if vc.catch_up is not None and not vc.catch_up.done():
         vc.catch_up.cancel()  # re-attempted at next boot
     await vc.ctx_builder.close()
+    await close_client()
     vc.store.close()
 
 
@@ -262,7 +294,9 @@ async def voice_turn(
             leds.set_mode("librarian")
         logger.info("Listening...")
         try:
-            audio = record_until_silence(should_abort=should_abort)
+            audio = await asyncio.to_thread(
+                record_until_silence, should_abort=should_abort
+            )
         except (ValueError, OSError) as e:
             logger.warning(f"Mic unavailable for voice turn: {e}")
             return False
@@ -275,7 +309,7 @@ async def voice_turn(
         if aborted():
             return False
         vc.stt.load()
-        text = vc.stt.transcribe(audio)
+        text = await asyncio.to_thread(vc.stt.transcribe, audio)
         vc.stt.unload()
         if aborted():
             return False
@@ -287,7 +321,7 @@ async def voice_turn(
     logger.info(f"You: {text}")
     vc.store.add_message(vc.session_id, "user", text)
 
-    rag_context = _try_rag_query(text)
+    rag_context = await asyncio.to_thread(_try_rag_query, text)
     messages = await vc.ctx_builder.build(vc.system_prompt, rag_context)
     messages.append({"role": "user", "content": text})
 
@@ -297,25 +331,46 @@ async def voice_turn(
     if leds is not None:
         leds.set_mode("speaking")
 
-    async for token in stream_chat(messages):
-        if aborted():
-            break
-        response_parts.append(token)
-        sentence_buffer += token
-        sentences = _SENTENCE_END_RE.split(sentence_buffer)
-        if len(sentences) > 1:
-            for sentence in sentences[:-1]:
-                sentence = sentence.strip()
-                if sentence:
-                    audio_out = vc.tts.synthesize(sentence)
-                    play_audio(audio_out, vc.tts.sample_rate, should_abort=should_abort)
-                    if aborted():
-                        break
-            sentence_buffer = sentences[-1]
+    # Pipeline TTS with generation: completed sentences go onto a queue and
+    # a worker synthesizes/plays them in a thread, so the token stream keeps
+    # flowing while earlier sentences are being spoken. Previously synthesis
+    # + playback blocked the event loop and stalled the stream per sentence.
+    tts_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=8)
 
-    if sentence_buffer.strip() and not aborted():
-        audio_out = vc.tts.synthesize(sentence_buffer.strip())
-        play_audio(audio_out, vc.tts.sample_rate, should_abort=should_abort)
+    async def _tts_worker() -> None:
+        while True:
+            sentence = await tts_queue.get()
+            if sentence is None:
+                return
+            if aborted():
+                continue  # keep draining so the producer never blocks
+            audio_out = await asyncio.to_thread(vc.tts.synthesize, sentence)
+            if aborted():
+                continue
+            await asyncio.to_thread(
+                play_audio, audio_out, vc.tts.sample_rate, should_abort
+            )
+
+    worker = asyncio.create_task(_tts_worker())
+    try:
+        async for token in stream_chat(messages):
+            if aborted():
+                break
+            response_parts.append(token)
+            sentence_buffer += token
+            sentences = _SENTENCE_END_RE.split(sentence_buffer)
+            if len(sentences) > 1:
+                for sentence in sentences[:-1]:
+                    sentence = sentence.strip()
+                    if sentence:
+                        await tts_queue.put(sentence)
+                sentence_buffer = sentences[-1]
+
+        if sentence_buffer.strip() and not aborted():
+            await tts_queue.put(sentence_buffer.strip())
+    finally:
+        await tts_queue.put(None)
+        await worker
 
     response_text = "".join(response_parts)
     logger.info(f"Oracle: {response_text}")

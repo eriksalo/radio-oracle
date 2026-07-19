@@ -28,8 +28,6 @@ from typing import Literal
 
 from loguru import logger
 
-_SPEAKER_SINK = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.stereo-fallback"
-
 from oracle.hardware import ActionButton, ButtonEvent, PowerSwitch, StatusLEDs
 from oracle.state import StateWriter
 
@@ -53,6 +51,7 @@ class OracleApp:
         self._wakeword = None  # lazy init
         self._wake_event: asyncio.Event | None = None
         self._reader_session = None  # lazy init
+        self._voice_ctx = None  # set in run() after voice_init
         # Book title/author requested via "read me <title>"; consumed by
         # the reader loop on entry.
         self._pending_book_query: str | None = None
@@ -105,7 +104,6 @@ class OracleApp:
     async def run(self) -> None:
         from oracle.core import (
             VoiceContext,
-            voice_close,
             voice_init,
             voice_turn,
         )
@@ -126,6 +124,7 @@ class OracleApp:
                 await asyncio.sleep(0.1)
 
             voice_ctx = await voice_init()
+            self._voice_ctx = voice_ctx
             self._start_wakeword(loop)
             self._enter("radio")
 
@@ -432,12 +431,29 @@ class OracleApp:
             self.leds.set_mode("radio")
             if old in ("librarian", "reader"):
                 self._resume_music()
+                # Reload the radio STT model in the background so the first
+                # wake command back in radio doesn't pay the cold load.
+                self._set_stt_fast_loaded(True)
         elif state == "librarian":
             self._pause_music()
             self.leds.set_mode("librarian")
+            # Librarian turns load small.en; free base.en while we're here —
+            # on 8GB unified memory every resident model counts.
+            self._set_stt_fast_loaded(False)
         elif state == "reader":
             self._pause_music()
             self.leds.set_mode("reader")
+            self._set_stt_fast_loaded(False)
+
+    def _set_stt_fast_loaded(self, loaded: bool) -> None:
+        """(Un)load the radio STT model off the event loop."""
+        vc = getattr(self, "_voice_ctx", None)
+        if vc is None:
+            return
+        import threading
+
+        op = vc.stt_fast.load if loaded else vc.stt_fast.unload
+        threading.Thread(target=op, name="stt-fast-swap", daemon=True).start()
 
     def _on_power_change(self, is_on: bool) -> None:
         """Called from power switch thread — immediately update LED."""
@@ -469,30 +485,34 @@ class OracleApp:
                     self._pending_short_press is not None
                     and now - self._pending_short_press < self._double_press_window
                 ):
-                    # Second short press within window → next album.
+                    # Second short press within window → upgrade to next album.
                     self._pending_short_press = None
                     self._next_album()
                     logger.debug("Double press → next album")
                 else:
-                    # Buffer this press; fire next_track if no second press comes.
+                    # Act immediately — buffering the press added a fixed
+                    # 0.4s lag to every single skip. A second press within
+                    # the window upgrades the skip to a new album, which is
+                    # fine: the caller wanted to move on either way.
                     self._pending_short_press = now
+                    self._next_track()
 
-        # Flush an expired pending short press as a single next-track.
+        # Expire the double-press window.
         if (
             self._pending_short_press is not None
             and now - self._pending_short_press >= self._double_press_window
         ):
             self._pending_short_press = None
-            if self._state == "radio":
-                self._next_track()
 
     def _should_exit_librarian(self) -> bool:
+        """Abort check polled from inside voice_turn (possibly from a worker
+        thread). Peeks — deliberately doesn't consume — the long-press event:
+        _handle_buttons drains it afterwards and performs the actual
+        librarian→radio transition. list() snapshots the deque so a
+        concurrent put from the button thread can't break iteration."""
         if not self.power.is_on:
             return True
-        for evt in list(self.button.events.queue):
-            if evt.kind == "long":
-                return True
-        return False
+        return any(evt.kind == "long" for evt in list(self.button.events.queue))
 
     async def _shutdown(self, voice_ctx) -> None:
         from oracle.hardware.volume import get_volume_control

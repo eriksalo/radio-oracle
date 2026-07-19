@@ -11,6 +11,13 @@ class OracleSettings(BaseSettings):
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
     ollama_timeout: float = 120.0
+    # Context window: Ollama defaults to 2048, which silently truncates
+    # persona + RAG context + history. 8192 fits the 8GB budget with the
+    # 3B/4B models used here (KV cache ~0.5-1GB).
+    ollama_num_ctx: int = 8192
+    # Factuality-leaning sampling for a RAG-grounded archive persona.
+    ollama_temperature: float = 0.6
+    ollama_top_p: float = 0.9
 
     # Whisper STT
     stt_backend: Literal["faster-whisper", "pywhispercpp"] = "faster-whisper"
@@ -40,7 +47,10 @@ class OracleSettings(BaseSettings):
     audio_sample_rate: int = 16000
     audio_channels: int = 1
     vad_energy_threshold: float = 0.004
-    vad_silence_duration: float = 1.5
+    # Librarian questions can have brief mid-sentence pauses, but 1.5s made
+    # every turn feel sluggish; 0.9s tested as a good balance. Raise via env
+    # if slow speakers get cut off.
+    vad_silence_duration: float = 0.9
     # Radio commands ("next song", "pause music") are short with no
     # internal pauses, so a shorter trailing-silence window cuts ~1s
     # off the perceived wake-to-action latency.
