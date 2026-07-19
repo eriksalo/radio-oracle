@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from config.settings import settings
 from oracle.llm import check_ollama, stream_chat
-from oracle.memory.context import ContextBuilder
+from oracle.memory.context import ContextBuilder, catch_up_summaries
 from oracle.memory.store import ConversationStore
 from oracle.persona import build_system_prompt, get_greeting
 
@@ -62,6 +63,7 @@ async def text_repl() -> None:
     """Interactive text REPL — type queries, get streamed responses."""
     system_prompt, store, session_id = await _init_common()
     ctx = ContextBuilder(store, session_id)
+    catch_up = asyncio.create_task(catch_up_summaries(store, session_id))
 
     greeting = get_greeting()
     print(f"\n=== The Oracle === (type 'quit' to exit)\n\nOracle: {greeting}\n")
@@ -93,8 +95,11 @@ async def text_repl() -> None:
 
         response_text = "".join(full_response)
         store.add_message(session_id, "assistant", response_text)
-        await ctx.maybe_summarize()
+        ctx.schedule_summarize()
 
+    if not catch_up.done():
+        catch_up.cancel()
+    await ctx.close()
     store.close()
 
 
@@ -113,13 +118,14 @@ class VoiceContext:
         which only keyword-matches the result. Kept loaded across calls so
         ``librarian, next song`` doesn't pay a per-command model reload.
     """
-    stt: "WhisperSTT"
-    stt_fast: "WhisperSTT"
-    tts: "KokoroTTS"
+    stt: WhisperSTT
+    stt_fast: WhisperSTT
+    tts: KokoroTTS
     store: ConversationStore
     ctx_builder: ContextBuilder
     system_prompt: str
     session_id: str
+    catch_up: asyncio.Task | None = None
 
 
 async def voice_init() -> VoiceContext:
@@ -145,10 +151,16 @@ async def voice_init() -> VoiceContext:
         ctx_builder=ctx_builder,
         system_prompt=system_prompt,
         session_id=session_id,
+        # Summarize sessions that ended without one (power-off usually
+        # beats the in-session threshold) — background, off the boot path.
+        catch_up=asyncio.create_task(catch_up_summaries(store, session_id)),
     )
 
 
 async def voice_close(vc: VoiceContext) -> None:
+    if vc.catch_up is not None and not vc.catch_up.done():
+        vc.catch_up.cancel()  # re-attempted at next boot
+    await vc.ctx_builder.close()
     vc.store.close()
 
 
@@ -162,9 +174,9 @@ async def speak_text(vc: VoiceContext, text: str) -> None:
 
 async def wake_word_listen(
     vc: VoiceContext,
-    leds: "StatusLEDs | None" = None,
+    leds: StatusLEDs | None = None,
     should_abort: Callable[[], bool] | None = None,
-    player: "Player | None" = None,
+    player: Player | None = None,
 ) -> str | None:
     """Listen for the wake word. Returns text after the wake word, or None.
 
@@ -226,7 +238,7 @@ async def wake_word_listen(
 
 async def voice_turn(
     vc: VoiceContext,
-    leds: "StatusLEDs | None" = None,
+    leds: StatusLEDs | None = None,
     should_abort: Callable[[], bool] | None = None,
     pre_text: str | None = None,
 ) -> bool:
@@ -308,7 +320,7 @@ async def voice_turn(
     response_text = "".join(response_parts)
     logger.info(f"Oracle: {response_text}")
     vc.store.add_message(vc.session_id, "assistant", response_text)
-    await vc.ctx_builder.maybe_summarize()
+    vc.ctx_builder.schedule_summarize()
     return True
 
 

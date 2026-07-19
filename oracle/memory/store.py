@@ -39,6 +39,11 @@ class ConversationStore:
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session
                 ON messages(session_id, timestamp);
+            CREATE TABLE IF NOT EXISTS profile (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
         self._conn.commit()
 
@@ -87,6 +92,64 @@ class ConversationStore:
         self._conn.execute(
             "UPDATE sessions SET summary = ? WHERE session_id = ?",
             (summary, session_id),
+        )
+        self._conn.commit()
+
+    def get_summary(self, session_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT summary FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return row["summary"] if row else None
+
+    def count_messages(self, session_id: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM messages WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return row["cnt"]
+
+    def latest_summarized_session(self, exclude: str | None = None) -> dict | None:
+        """Most recent prior session that has a summary."""
+        rows = self._conn.execute(
+            "SELECT session_id, started_at, summary FROM sessions "
+            "WHERE summary IS NOT NULL AND summary != '' "
+            "ORDER BY started_at DESC LIMIT 5",
+        ).fetchall()
+        for r in rows:
+            if r["session_id"] != exclude:
+                return dict(r)
+        return None
+
+    def unsummarized_sessions(self, exclude: str | None = None, limit: int = 3) -> list[dict]:
+        """Recent sessions that have messages but never got a summary.
+
+        Sessions usually end by power-off, well before the in-session
+        summarize threshold — these are caught up at next boot.
+        """
+        rows = self._conn.execute(
+            "SELECT s.session_id, s.started_at FROM sessions s "
+            "WHERE (s.summary IS NULL OR s.summary = '') "
+            "AND s.session_id != ? "
+            "AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.session_id) "
+            "ORDER BY s.started_at DESC LIMIT ?",
+            (exclude or "", limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---------------------------------------------------------------- profile
+
+    def get_profile(self) -> str | None:
+        """The rolling long-term profile of the user (single row)."""
+        row = self._conn.execute("SELECT content FROM profile WHERE id = 1").fetchone()
+        return row["content"] if row else None
+
+    def update_profile(self, content: str) -> None:
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            "INSERT INTO profile (id, content, updated_at) VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET content = excluded.content, "
+            "updated_at = excluded.updated_at",
+            (content, now),
         )
         self._conn.commit()
 
