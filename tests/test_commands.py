@@ -174,7 +174,7 @@ def test_do_action_next(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("next", None, player, None, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert player.calls == [("next",)]
 
 
@@ -182,7 +182,7 @@ def test_do_action_next_album(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("next_album", None, player, None, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert player.calls == [("next_album",)]
 
 
@@ -191,7 +191,7 @@ def test_do_action_pause_does_not_resume(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("pause", None, player, None, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is False
+    assert out.resume_channel is False
     # Dispatcher shouldn't re-pause an already-paused player.
     assert player.calls == []
 
@@ -200,7 +200,7 @@ def test_do_action_resume_signals_resume(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("resume", None, player, None, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert player.calls == [("resume",)]
 
 
@@ -208,7 +208,7 @@ def test_do_action_stop_does_not_resume(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("stop", None, player, None, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is False
+    assert out.resume_channel is False
     assert player.calls == [("stop",)]
 
 
@@ -218,7 +218,7 @@ def test_do_action_play_hits_search_and_plays_first(silent_speak):
     catalog = _FakeCatalog(results=[track])
     out = commands._do_action("play", "Pink Floyd", player, catalog, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert catalog.queries == ["Pink Floyd"]
     # stop() called first (to clear current album), then play(track=track)
     assert player.calls == [("stop",), ("play", track)]
@@ -230,7 +230,7 @@ def test_do_action_play_no_results_acks_and_stays(silent_speak):
     catalog = _FakeCatalog(results=[])
     out = commands._do_action("play", "nonexistent", player, catalog, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert player.calls == []
     assert silent_speak == ["<played>"]
 
@@ -239,22 +239,24 @@ def test_do_action_play_without_query_asks_back(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("play", None, player, _FakeCatalog([]), _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert player.calls == []
     assert silent_speak == ["<played>"]
 
 
 def test_do_action_mode_transitions_return_correct_state(silent_speak):
+    # mode_librarian is intercepted in dispatch (question flow) and never
+    # reaches _do_action; channel switches do.
     player = _FakePlayer()
-    lib = commands._do_action("mode_librarian", None, player, None, _FakeVC(), None)
-    assert lib.next_mode == "librarian"
-    assert lib.resume_music is False  # mode switch: leave music paused
-
     rdr = commands._do_action("mode_reader", None, player, None, _FakeVC(), None)
     assert rdr.next_mode == "reader"
-    assert rdr.resume_music is False
+    assert rdr.resume_channel is False
 
-    # No player actions for mode transitions.
+    back = commands._do_action("music_on", None, player, None, _FakeVC(), None, context="book")
+    assert back.next_mode == "radio"
+    assert back.resume_channel is False
+
+    # No transport actions for pure switches.
     assert player.calls == []
 
 
@@ -262,7 +264,7 @@ def test_do_action_none_is_silent_noop(silent_speak):
     player = _FakePlayer()
     out = commands._do_action("none", None, player, None, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert player.calls == []
     assert silent_speak == []
 
@@ -270,14 +272,14 @@ def test_do_action_none_is_silent_noop(silent_speak):
 def test_do_action_no_player_speaks_unavailable(silent_speak):
     out = commands._do_action("next", None, None, None, _FakeVC(), None)
     assert out.next_mode == "radio"
-    assert out.resume_music is True
+    assert out.resume_channel is True
     assert silent_speak == ["<played>"]
 
 
 def test_do_action_read_book_carries_query(silent_speak):
     out = commands._do_action("read_book", "moby dick", None, None, _FakeVC(), None)
     assert out.next_mode == "reader"
-    assert out.resume_music is False
+    assert out.resume_channel is False
     assert out.reader_query == "moby dick"
     # Reader announces the title itself — no generic ack here.
     assert silent_speak == []
@@ -353,3 +355,82 @@ async def test_question_turns_followup_window(monkeypatch):
 
     assert turns == ["who was tesla?", "and what about his brother?"]
     assert recordings == []  # both window recordings consumed
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("play music", "music_on"),
+        ("back to the music", "music_on"),
+        ("put on some music", "music_on"),
+        ("continue my book", "mode_reader"),
+        ("read my book", "mode_reader"),
+        ("next chapter", "next_chapter"),
+        ("pause", "pause"),
+        ("stop.", "pause"),
+        ("quiet", "pause"),
+        ("resume", "resume"),
+        ("what music do we have", "list_music"),
+        ("what books do you have by mark twain", "list_books"),
+    ],
+)
+def test_channel_and_exploration_keywords(text, expected):
+    assert commands._keyword_match(text) == expected
+
+
+def test_extract_qualifier():
+    assert commands._extract_qualifier("what books do you have by Mark Twain?") == "Mark Twain"
+    assert commands._extract_qualifier("what music is there like jazz") == "jazz"
+    assert commands._extract_qualifier("what music do we have") is None
+
+
+class _FakeReader:
+    def __init__(self):
+        self.calls = []
+
+    def next_chapter(self):
+        self.calls.append("next_chapter")
+        return True
+
+
+def test_book_context_transport(silent_speak):
+    rdr = _FakeReader()
+    out = commands._do_action("next", None, None, None, _FakeVC(), None, context="book", reader=rdr)
+    assert out.next_mode == "reader" and out.resume_channel is True
+    assert rdr.calls == ["next_chapter"]
+
+    out = commands._do_action(
+        "pause", None, None, None, _FakeVC(), None, context="book", reader=rdr
+    )
+    assert out.next_mode == "reader" and out.resume_channel is False
+
+
+def test_play_mid_book_switches_channel(silent_speak):
+    out = commands._do_action("play", "pink floyd", None, None, _FakeVC(), None, context="book")
+    assert out.next_mode == "radio"
+    assert out.resume_channel is False
+    assert out.play_query == "pink floyd"
+
+
+class _StatsCatalog:
+    def stats(self):
+        return {"tracks": 4024, "artists": 1797, "albums": 1681, "hours": 296.8}
+
+    def sample_artists(self, n=6):
+        return ["Pink Floyd", "Blue Oyster Cult"]
+
+    def search(self, q):
+        class T:
+            artist = "Pink Floyd"
+            title = "Money"
+
+        return [T(), T()] if q == "pink floyd" else []
+
+
+def test_describe_music_summary_and_filtered():
+    text = commands._describe_music(_StatsCatalog(), None)
+    assert "4024 tracks" in text and "Pink Floyd" in text
+    text = commands._describe_music(_StatsCatalog(), "pink floyd")
+    assert "2 tracks match" in text
+    text = commands._describe_music(_StatsCatalog(), "zzz")
+    assert "Nothing" in text

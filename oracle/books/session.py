@@ -75,6 +75,13 @@ class ReaderSession:
         self._reader.pause()
         return True
 
+    def pause(self) -> None:
+        """Pause (aborts the current paragraph mid-sentence; bookmark saved)."""
+        self._reader.pause()
+
+    def resume(self) -> None:
+        self._reader.resume()
+
     def next_chapter(self) -> bool:
         return self._reader.next_chapter()
 

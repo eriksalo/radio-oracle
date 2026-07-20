@@ -184,3 +184,9 @@ def test_session_find_current_and_controls(library, tmp_path, monkeypatch):
     assert session.next_chapter() is True
     assert session.has_bookmark(book.id)
     session.stop()
+
+
+def test_count_and_sample_authors(library):
+    assert library.count_books() == 2
+    authors = library.sample_authors(10)
+    assert set(authors) == {"Herman Melville", "Arthur Conan Doyle"}

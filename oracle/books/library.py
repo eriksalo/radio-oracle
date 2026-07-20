@@ -170,6 +170,17 @@ class Library:
         ).fetchone()
         return row["text"] if row else None
 
+    def count_books(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) AS cnt FROM books").fetchone()
+        return row["cnt"]
+
+    def sample_authors(self, n: int = 5) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT author FROM books WHERE author != '' ORDER BY RANDOM() LIMIT ?",
+            (n,),
+        ).fetchall()
+        return [r["author"] for r in rows]
+
     def get_paragraph_count(self, book_id: int, chapter_idx: int) -> int:
         row = self._conn.execute(
             "SELECT COUNT(*) as cnt FROM paragraphs WHERE book_id = ? AND chapter_idx = ?",

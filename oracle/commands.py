@@ -1,13 +1,15 @@
-"""Radio-mode wake-word command dispatcher.
+"""Wake-word command dispatcher — one surface for both channels.
 
-Pipeline: record → STT → keyword match → LLM-JSON fallback → action.
+Pipeline: record → STT → keyword match → question heuristic →
+LLM-JSON fallback → action.
 
-The wake word in radio mode is the user's main control surface for the
-music player and for entering the voice-conversation modes (librarian,
-reader). Common ops ('next song', 'next album', 'pause music') match
-keywords for sub-second latency; freeform requests like "play some jazz"
-or "put on Pink Floyd" fall through to a one-shot LLM intent extractor
-that emits JSON we route to ``Catalog.search()`` + ``Player.play()``.
+The same utterance vocabulary works whether music or a book is playing
+(``context``): "pause"/"next" act on the current channel, "play music" /
+"read my book" switch channels, "what music/books do you have" explores
+the archives, and anything interrogative is a question for the oracle —
+answered in place with a follow-up window, after which the channel
+resumes. Common ops match keywords for sub-second latency; freeform
+requests fall through to a one-shot LLM intent extractor.
 """
 
 from __future__ import annotations
@@ -31,25 +33,27 @@ if TYPE_CHECKING:
     from oracle.music.player import Player
 
 NextMode = Literal["radio", "librarian", "reader"]
+Channel = Literal["music", "book"]
 AbortCheck = Callable[[], bool] | None
 
 
 @dataclass(frozen=True)
 class DispatchResult:
-    """What the radio-mode dispatcher decided.
+    """What the dispatcher decided.
 
-    ``resume_music`` is the hint the wake handler reads to decide whether
-    to SIGCONT the previously-paused music. False when the user asked
-    for silence ('pause'/'stop' commands) or for a mode change.
+    ``next_mode`` is the channel to be on afterwards ("radio" = music,
+    "reader" = book). ``resume_channel`` says whether that channel should
+    keep playing — False when the user asked for silence.
 
-    ``reader_query`` carries a requested book title/author into reader
-    mode ("read me Moby Dick"); None means the reader picks (resume the
-    current book, or ask).
+    ``reader_query`` carries a requested book title/author into the book
+    channel ("read me Moby Dick"); ``play_query`` carries a music request
+    into the music channel ("play Pink Floyd" said mid-book).
     """
 
     next_mode: NextMode
-    resume_music: bool = True
+    resume_channel: bool = True
     reader_query: str | None = None
+    play_query: str | None = None
 
 
 _LLM_SYSTEM_PROMPT = """You are a strict voice-command parser for a radio. \
@@ -58,24 +62,31 @@ Output ONE JSON object on a single line, no prose, no code fences.
 Schema: {"action": <str>, "query": <str|null>}
 action must be one of:
   "play"        — start music matching query (artist/album/genre/title)
-  "next"        — skip to next track
+  "music_on"    — switch to / resume the music (no specific request)
+  "next"        — skip forward (track, or chapter when reading)
   "next_album"  — skip to a new album
-  "pause"       — pause music
-  "resume"      — resume music
-  "stop"        — stop music
+  "next_chapter"— skip to the next chapter of the book
+  "pause"       — pause playback
+  "resume"      — resume playback
+  "stop"        — stop playback / silence
   "read_book"   — read a book aloud; query is the book title or author
+  "list_music"  — what music is available; query narrows it (artist/genre)
+  "list_books"  — what books are available; query narrows it (author/title)
   "question"    — an information question or request for knowledge
   "none"        — not a command and not a question (fragments, noise)
 
 Examples:
 "play some jazz"         -> {"action":"play","query":"jazz"}
 "put on Pink Floyd"      -> {"action":"play","query":"Pink Floyd"}
-"play the white album"   -> {"action":"play","query":"white album"}
+"put the music back on"  -> {"action":"music_on","query":null}
 "skip this"              -> {"action":"next","query":null}
 "another album"          -> {"action":"next_album","query":null}
 "hush"                   -> {"action":"pause","query":null}
 "read me Moby Dick"      -> {"action":"read_book","query":"Moby Dick"}
 "read Sherlock Holmes to me" -> {"action":"read_book","query":"Sherlock Holmes"}
+"what music do we have"  -> {"action":"list_music","query":null}
+"any albums by the Beatles" -> {"action":"list_music","query":"Beatles"}
+"what books are there by Mark Twain" -> {"action":"list_books","query":"Mark Twain"}
 "why is the sky blue"    -> {"action":"question","query":null}
 "how do I splint a broken arm" -> {"action":"question","query":null}
 "umm never mind"         -> {"action":"none","query":null}
@@ -92,17 +103,26 @@ def _build_keyword_table() -> list[_KeywordRule]:
     # Order matters — first match wins. Boundaries (\b) keep "skip" from
     # firing on "skipper", etc.
     raw: list[tuple[str, str]] = [
-        # Mode transitions first so they don't get eaten by "stop".
+        # Channel switches / conversation first so they don't get eaten
+        # by the generic transport words below.
         (r"\bi\s+have\s+a\s+question\b", "mode_librarian"),
         (r"\bi'?d\s+like\s+to\s+read\s+a\s+book\b", "mode_reader"),
-        (r"\b(?:read|listen\s+to)\s+a\s+book\b", "mode_reader"),
-        # Track / album ops.
+        (r"\b(?:read|listen\s+to)\s+(?:a|my|the)\s+book\b", "mode_reader"),
+        (r"\b(?:continue|resume)\s+(?:my|the)\s+book\b", "mode_reader"),
+        (r"\b(?:play|back\s+to|put\s+on)\s+(?:the\s+|some\s+)?music\b", "music_on"),
+        # Exploration.
+        (r"\bwhat\s+music\b|\bwhat\s+(?:songs|albums|artists)\s+(?:do|are)\b", "list_music"),
+        (r"\bwhat\s+books?\b|\bwhich\s+books?\b", "list_books"),
+        # Chapter / track / album ops.
+        (r"\bnext\s+chapter\b", "next_chapter"),
         (r"\bnext\s+(?:song|track)\b", "next"),
-        (r"\bskip(?:\s+(?:this|song|track))?\b", "next"),
+        (r"\bskip(?:\s+(?:this|song|track|chapter))?\b", "next"),
         (r"\b(?:next|new|change|another)\s+album\b", "next_album"),
-        # Transport.
-        (r"\b(?:pause|stop)\s+(?:the\s+)?music\b", "pause"),
-        (r"\bresume\s+(?:the\s+)?music\b", "resume"),
+        # Transport — with or without the noun, channel decides meaning.
+        (r"\b(?:pause|stop)\s+(?:the\s+)?(?:music|reading|book)\b", "pause"),
+        (r"\bresume\s+(?:the\s+)?(?:music|reading|book)\b", "resume"),
+        (r"^\s*(?:pause|stop|quiet|silence|hush)[.!]?\s*$", "pause"),
+        (r"^\s*(?:resume|continue)[.!]?\s*$", "resume"),
     ]
     return [_KeywordRule(re.compile(p, re.IGNORECASE), a) for p, a in raw]
 
@@ -205,17 +225,21 @@ async def _question_turns(
     text: str,
     leds: StatusLEDs | None,
     should_abort: AbortCheck,
+    window: float | None = None,
 ) -> None:
     """Answer a question, then hold the mic open for follow-ups.
 
     Each answer overlaps a canned 'checking the archives' ack with the
     retrieval/generation dead air. After answering, the mic stays open
-    for settings.followup_window_s — a follow-up needs no wake word;
-    silence (or a button press) drops back to the music.
+    for *window* seconds (default settings.followup_window_s) — a
+    follow-up needs no wake word; silence (or a button press) lets the
+    interrupted channel resume.
     """
     import asyncio
 
     from oracle.core import voice_turn
+
+    window = settings.followup_window_s if window is None else window
 
     def aborted() -> bool:
         return bool(should_abort and should_abort())
@@ -227,7 +251,7 @@ async def _question_turns(
         finally:
             await ack
 
-        if settings.followup_window_s <= 0 or aborted():
+        if window <= 0 or aborted():
             return
         if leds is not None:
             leds.set_mode("librarian")  # solid blue: still listening
@@ -235,14 +259,14 @@ async def _question_turns(
             audio = await asyncio.to_thread(
                 record_until_silence,
                 silence_duration=settings.vad_silence_duration_radio,
-                onset_timeout=settings.followup_window_s,
+                onset_timeout=window,
                 should_abort=should_abort,
             )
         except (ValueError, OSError) as e:
             logger.warning(f"Mic unavailable for follow-up: {e}")
             return
         if aborted() or len(audio) == 0:
-            return  # no follow-up — music resumes
+            return  # no follow-up — the channel resumes
         vc.stt_fast.load()
         text = await asyncio.to_thread(vc.stt_fast.transcribe, audio)
         if not text.strip():
@@ -268,22 +292,28 @@ async def dispatch_radio_command(
     vc: VoiceContext,
     leds: StatusLEDs | None = None,
     should_abort: AbortCheck = None,
+    context: Channel = "music",
+    reader=None,
 ) -> DispatchResult:
-    """One radio-mode voice turn. Returns the next state intent.
+    """One wake-word voice turn — the single dispatcher for both channels.
+
+    ``context`` says which channel was playing ("music" or "book"): the
+    same words act on the current channel ("pause", "next"), and the
+    result's ``next_mode`` tells the caller which channel to be on after.
 
     Steps:
       1. record + STT (LED blue → blink)
-      2. keyword match; else LLM JSON intent
-      3. perform the action and optionally TTS-ack
-      4. return next_mode + whether the wake handler should resume music
+      2. keyword match; question heuristic; else LLM JSON intent
+      3. perform the action (questions hold a follow-up window)
+      4. return the channel intent
     """
 
     def aborted() -> bool:
         return bool(should_abort and should_abort())
 
-    # 1. Capture user utterance. Use a short trailing-silence window —
-    # radio commands ("next song", "pause music") have no internal
-    # pauses, so 0.6 s is plenty and shaves ~1 s off the perceived turn.
+    here = "radio" if context == "music" else "reader"
+
+    # 1. Capture user utterance.
     if leds is not None:
         leds.set_mode("librarian")  # solid blue while listening
     try:
@@ -293,22 +323,20 @@ async def dispatch_radio_command(
         )
     except (ValueError, OSError) as e:
         logger.warning(f"Mic unavailable: {e}")
-        return DispatchResult("radio", resume_music=True)
+        return DispatchResult(here)
     if aborted() or len(audio) == 0:
-        return DispatchResult("radio", resume_music=True)
+        return DispatchResult(here)
 
-    # 2. STT — blink blue while we think. ``stt_fast`` is preloaded in
-    # voice_init() with tiny.en; we keep it resident across calls so the
-    # second-and-subsequent commands don't pay a model reload, and only
-    # unload when falling through to the LLM (the 8 GB unified-memory
-    # rule requires STT and LLM to stay sequential — see CLAUDE.md).
+    # 2. STT — blink blue while we think. ``stt_fast`` is kept resident
+    # across calls (with parakeet it's the same object as ``stt``) and
+    # only unloaded around LLM-intent calls on the whisper backends.
     if leds is not None:
         leds.set_mode("thinking")
     vc.stt_fast.load()
     text = vc.stt_fast.transcribe(audio)
     if aborted() or not text.strip():
-        return DispatchResult("radio", resume_music=True)
-    logger.info(f"Radio command: {text!r}")
+        return DispatchResult(here)
+    logger.info(f"Voice command ({context}): {text!r}")
 
     # 3. Classify.
     action = _keyword_match(text)
@@ -329,18 +357,119 @@ async def dispatch_radio_command(
     else:
         logger.info(f"Keyword intent: action={action}")
 
-    # 4. Act + ack.
+    # 4. Act.
     if action == "question":
         # Oracle turn(s): answer with full RAG + memory + persona, hold
-        # the mic open for wake-word-free follow-ups, then drop back to
-        # the music. "I have a question" still switches to librarian
-        # mode for open-ended conversation.
+        # the mic open for wake-word-free follow-ups, then let the
+        # channel resume.
         await _question_turns(vc, text, leds, should_abort)
-        return DispatchResult("radio", resume_music=True)
+        return DispatchResult(here)
+
+    if action == "mode_librarian":
+        # "I have a question" — same overlay, just an invitation first
+        # and a longer follow-up window for open-ended conversation.
+        _speak(vc, "What would you like to know?", should_abort)
+        opening = await _listen_once(vc, onset_timeout=max(settings.followup_window_s * 2, 8.0))
+        if opening:
+            await _question_turns(
+                vc,
+                opening,
+                leds,
+                should_abort,
+                window=max(settings.followup_window_s * 2, 8.0),
+            )
+        return DispatchResult(here)
 
     if leds is not None:
         leds.set_mode("speaking")
-    return _do_action(action, query, player, catalog, vc, should_abort)
+    return _do_action(
+        action,
+        query,
+        player,
+        catalog,
+        vc,
+        should_abort,
+        context=context,
+        reader=reader,
+        raw_text=text,
+    )
+
+
+async def _listen_once(vc: VoiceContext, onset_timeout: float) -> str | None:
+    """Record one utterance and transcribe it; None on silence."""
+    import asyncio
+
+    try:
+        audio = await asyncio.to_thread(
+            record_until_silence,
+            silence_duration=settings.vad_silence_duration_radio,
+            onset_timeout=onset_timeout,
+        )
+    except (ValueError, OSError) as e:
+        logger.warning(f"Mic unavailable: {e}")
+        return None
+    if len(audio) == 0:
+        return None
+    vc.stt_fast.load()
+    text = await asyncio.to_thread(vc.stt_fast.transcribe, audio)
+    return text.strip() or None
+
+
+# Pulls "…by Mark Twain" / "…about bees" out of keyword-matched
+# exploration phrases (the keyword table doesn't capture queries).
+_QUALIFIER_RE = re.compile(r"\b(?:by|from|about|like|of)\s+(.+?)[.?!]?\s*$", re.IGNORECASE)
+
+
+def _extract_qualifier(text: str) -> str | None:
+    m = _QUALIFIER_RE.search(text)
+    return m.group(1).strip() if m else None
+
+
+def _describe_music(catalog: Catalog | None, query: str | None) -> str:
+    if catalog is None:
+        return "The music archive isn't available."
+    if query:
+        hits = catalog.search(query)
+        if not hits:
+            return f"Nothing in the music archive matches {query}."
+        artists = sorted({t.artist for t in hits if t.artist})[:4]
+        who = ", ".join(artists) if artists else hits[0].title
+        return f"{len(hits)} tracks match {query} — {who}. Say play and a name."
+    s = catalog.stats()
+    sample = ", ".join(catalog.sample_artists(6))
+    return (
+        f"The archive holds {s['tracks']} tracks — about {s['hours']:.0f} hours "
+        f"from {s['artists']} artists. A few of them: {sample}. "
+        "Ask again for other names, or say play and an artist."
+    )
+
+
+def _describe_books(query: str | None) -> str:
+    try:
+        from oracle.books.library import Library
+
+        lib = Library()
+        try:
+            if query:
+                hits = lib.search(query)[:4]
+                if not hits:
+                    return f"No books match {query}. Try an author or a title."
+                titles = "; ".join(
+                    f"{b.title} by {b.author}" if b.author else b.title for b in hits
+                )
+                return f"I have {titles}. Say read me, and a title."
+            n = lib.count_books()
+            sample = ", ".join(lib.sample_authors(5))
+            return (
+                f"The library holds {n} books. Authors include {sample}, "
+                "and about sixty thousand more. Ask by author, title, or "
+                "say what books, by someone."
+            )
+        finally:
+            lib.close()
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Book listing failed: {e}")
+        return "The book archive isn't available."
 
 
 def _do_action(
@@ -350,19 +479,60 @@ def _do_action(
     catalog: Catalog | None,
     vc: VoiceContext,
     should_abort: AbortCheck,
+    context: Channel = "music",
+    reader=None,
+    raw_text: str = "",
 ) -> DispatchResult:
-    if action == "mode_librarian":
-        _speak(vc, "Yes? What's your question?", should_abort)
-        return DispatchResult("librarian", resume_music=False)
-    if action == "mode_reader":
-        _speak(vc, "Book reader mode.", should_abort)
-        return DispatchResult("reader", resume_music=False)
+    here = "radio" if context == "music" else "reader"
+
+    # ---- channel switches -------------------------------------------------
+    if action in ("mode_reader",):
+        if context == "book":
+            return DispatchResult("reader")  # already here — just resume
+        return DispatchResult("reader", resume_channel=False)
     if action == "read_book":
         # Reader announces the title itself; no generic ack needed.
-        return DispatchResult("reader", resume_music=False, reader_query=query)
+        return DispatchResult("reader", resume_channel=False, reader_query=query)
+    if action == "music_on":
+        if context == "book":
+            _speak(vc, "Back to the music.", should_abort)
+            return DispatchResult("radio", resume_channel=False)
+        if player is not None:
+            player.resume()
+        return DispatchResult("radio")
+    if action == "play" and context == "book":
+        # A specific music request mid-book: bookmark and switch.
+        _speak(vc, "Switching to music.", should_abort)
+        return DispatchResult("radio", resume_channel=False, play_query=query)
+
+    # ---- exploration ------------------------------------------------------
+    if action == "list_music":
+        _speak(vc, _describe_music(catalog, query or _extract_qualifier(raw_text)), should_abort)
+        return DispatchResult(here)
+    if action == "list_books":
+        _speak(vc, _describe_books(query or _extract_qualifier(raw_text)), should_abort)
+        return DispatchResult(here)
+
+    # ---- book channel transport --------------------------------------------
+    if context == "book":
+        if action in ("next", "next_chapter", "next_album"):
+            if reader is not None and not reader.next_chapter():
+                _speak(vc, "That's the last chapter.", should_abort)
+            return DispatchResult("reader")
+        if action in ("pause", "stop"):
+            return DispatchResult("reader", resume_channel=False)
+        if action == "resume":
+            return DispatchResult("reader")
+        logger.debug(f"No-op action {action!r} in book context")
+        return DispatchResult("reader")
+
+    # ---- music channel transport -------------------------------------------
+    if action == "next_chapter":
+        # Chapter words while music plays → treat as resuming the book.
+        return DispatchResult("reader", resume_channel=False)
     if player is None:
         _speak(vc, "Music player isn't available.", should_abort)
-        return DispatchResult("radio", resume_music=True)
+        return DispatchResult("radio")
 
     if action == "next":
         player.next()
@@ -371,22 +541,22 @@ def _do_action(
     elif action == "pause":
         # Wake handler already paused music for STT; leave it paused
         # rather than letting the handler SIGCONT it on the way out.
-        return DispatchResult("radio", resume_music=False)
+        return DispatchResult("radio", resume_channel=False)
     elif action == "resume":
         player.resume()
     elif action == "stop":
         player.stop()
-        return DispatchResult("radio", resume_music=False)
+        return DispatchResult("radio", resume_channel=False)
     elif action == "play":
         if not query or catalog is None:
             _speak(vc, "What would you like to hear?", should_abort)
-            return DispatchResult("radio", resume_music=True)
+            return DispatchResult("radio")
         label = _play_query(player, catalog, query)
         if label is None:
             _speak(vc, f"I couldn't find anything for {query}.", should_abort)
         else:
             _speak(vc, f"Playing {label}.", should_abort)
     else:
-        # "none" or unknown — quietly drop back to music.
+        # "none" or unknown — quietly drop back to the channel.
         logger.debug(f"No-op action {action!r}")
-    return DispatchResult("radio", resume_music=True)
+    return DispatchResult("radio")

@@ -156,6 +156,28 @@ class Catalog:
         row = self._conn.execute("SELECT COUNT(*) as cnt FROM tracks").fetchone()
         return row["cnt"]
 
+    def stats(self) -> dict:
+        """Archive summary for spoken exploration answers."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS tracks, "
+            "COUNT(DISTINCT NULLIF(artist, '')) AS artists, "
+            "COUNT(DISTINCT NULLIF(album, '')) AS albums, "
+            "COALESCE(SUM(duration_sec), 0) AS seconds FROM tracks"
+        ).fetchone()
+        return {
+            "tracks": row["tracks"],
+            "artists": row["artists"],
+            "albums": row["albums"],
+            "hours": row["seconds"] / 3600.0,
+        }
+
+    def sample_artists(self, n: int = 6) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT artist FROM tracks WHERE artist != '' ORDER BY RANDOM() LIMIT ?",
+            (n,),
+        ).fetchall()
+        return [r["artist"] for r in rows]
+
     # ---------------------------------------------------------------- ingest
 
     def index_directory(self, music_dir: Path | None = None) -> int:

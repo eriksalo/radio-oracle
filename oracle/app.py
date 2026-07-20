@@ -1,22 +1,28 @@
-"""Hardware-driven application: power switch + button + RGB LED state machine.
+"""Hardware-driven application: two channels plus a conversation overlay.
+
+The radio is always tuned to one CHANNEL — music (RADIO state) or a book
+(READER state). The oracle is not a mode: any wake-word turn can be a
+channel command ("next song", "next chapter"), a channel switch ("read my
+book", "play music"), or a question — questions interrupt the channel,
+answer with a follow-up window, and the channel resumes by itself.
 
 States:
-  STANDBY   — power switch open. LED off, no audio, button ignored.
-  RADIO     — power on, default. Music plays; wake word triggers a command turn
-              (next song / play artist / "I have a question" / etc.).
-  LIBRARIAN — long-press button or wake-phrase "I have a question". Voice
-              conversation loop with clarifying questions; music paused.
-  READER    — wake-phrase "I'd like to read a book" or "read me <title>".
-              Book TTS playback (resumes the current book from its
-              bookmark, or asks for a title); music paused.
+  STANDBY — power switch open. LED off, no audio, button ignored.
+  RADIO   — music channel (default). Wake word → chime → say anything.
+  READER  — book channel. Same wake-word surface; narration pauses at the
+            sentence for the turn and resumes after. Bookmarks persist.
+  (LIBRARIAN remains in the State literal for the legacy --mode voice
+  path; the hardware flow no longer enters it — "I have a question" is
+  just a question turn with a longer follow-up window.)
 
 Transitions:
   power-on               : STANDBY -> RADIO (music starts)
   power-off              : *       -> STANDBY (music stops, all I/O halted)
-  long-press button      : RADIO  <-> LIBRARIAN; READER -> RADIO
-  short-press button     : RADIO   -> next track; READER -> pause/resume
-  double-press button    : RADIO   -> next album (AM intro); READER -> next chapter
-  wake word + voice cmd  : RADIO   -> player action OR transition to LIBRARIAN/READER
+  long-press button      : RADIO <-> READER (channel toggle)
+  short-press button     : RADIO -> next track; READER -> pause/resume;
+                           during any voice turn -> barge-in (stop talking)
+  double-press button    : RADIO -> next album (AM intro); READER -> next chapter
+  wake word              : chime, then one utterance — command, switch, or question
 """
 
 from __future__ import annotations
@@ -90,7 +96,7 @@ class OracleApp:
             # Flip LED from the detector thread for zero perceived delay.
             # StatusLEDs.set_mode is lock-guarded; GPIO writes are sub-ms.
             # Doing this in the asyncio path queues behind the chime + pause.
-            if self._state == "radio":
+            if self._state in ("radio", "reader"):
                 self.leds.set_mode("librarian")
             loop.call_soon_threadsafe(self._wake_event.set)
 
@@ -103,11 +109,7 @@ class OracleApp:
             self._wakeword = None
 
     async def run(self) -> None:
-        from oracle.core import (
-            VoiceContext,
-            voice_init,
-            voice_turn,
-        )
+        from oracle.core import VoiceContext, voice_init
 
         loop = asyncio.get_event_loop()
 
@@ -144,15 +146,7 @@ class OracleApp:
 
                 self._handle_buttons()
 
-                if self._state == "librarian":
-                    await voice_turn(
-                        voice_ctx,
-                        leds=self.leds,
-                        should_abort=self._should_exit_librarian,
-                    )
-                    if self._state == "librarian":
-                        self.leds.set_mode("librarian")
-                elif self._state == "reader":
+                if self._state == "reader":
                     await self._run_reader(voice_ctx)
                 elif self._state == "radio":
                     self._ensure_music()
@@ -221,14 +215,14 @@ class OracleApp:
                     )
                 except Exception:  # noqa: BLE001
                     logger.exception("dispatch_radio_command failed; recovering to radio")
-                    result = DispatchResult(next_mode="radio", resume_music=True)
+                    result = DispatchResult(next_mode="radio")
                 finally:
                     if self._wakeword:
                         self._wakeword.unmute()
 
                 if result.next_mode == "radio":
                     self.leds.set_mode("radio")
-                    if result.resume_music:
+                    if result.resume_channel:
                         self._resume_music()
                 else:
                     self._pending_book_query = result.reader_query
@@ -258,18 +252,18 @@ class OracleApp:
         return self._reader_session
 
     async def _run_reader(self, voice_ctx) -> None:
-        """Reader mode: pick a book, read it aloud, service buttons.
+        """Book channel: pick a book, read it aloud, service buttons + wake.
 
         Controls while reading: short press = pause/resume, double press =
-        next chapter, long press = back to radio. Book choice by voice on
-        entry ("read me Moby Dick" carries the title in; otherwise resume
-        the current book, else ask). The wake detector is muted throughout —
-        TTS bypasses AEC, so book audio would false-trigger it.
+        next chapter, long press = back to the music. The wake word stays
+        active (same reliability caveat as during music): "librarian" →
+        reading pauses mid-sentence → chime → any command or question →
+        reading resumes from that paragraph. Book choice by voice on entry
+        ("read me Moby Dick" carries the title in; otherwise resume the
+        current book, else ask).
         """
+        from oracle.commands import DispatchResult
         from oracle.core import speak_text
-
-        query = self._pending_book_query
-        self._pending_book_query = None
 
         session = self._get_reader(voice_ctx)
         if session is None:
@@ -277,40 +271,51 @@ class OracleApp:
             self._enter("radio")
             return
 
-        if self._wakeword:
-            self._wakeword.mute()
-        try:
-            book = None
-            if query:
-                book = session.find_book(query)
+        play_query: str | None = None
+        while self._state == "reader" and self.power.is_on:
+            query = self._pending_book_query
+            self._pending_book_query = None
+
+            # --- book selection (wake muted: we're prompting/announcing) ---
+            if self._wakeword:
+                self._wakeword.mute()
+            try:
+                book = None
+                if query:
+                    book = session.find_book(query)
+                    if book is None:
+                        await speak_text(voice_ctx, f"I couldn't find {query} in the archive.")
+                if book is None and not query:
+                    book = session.current_book()
                 if book is None:
-                    await speak_text(voice_ctx, f"I couldn't find {query} in the archive.")
-            if book is None and not query:
-                book = session.current_book()
-            if book is None:
-                book = await self._ask_which_book(voice_ctx, session)
-            if book is None:
-                self._enter("radio")
-                return
+                    book = await self._ask_which_book(voice_ctx, session)
+                if book is None:
+                    break
 
-            if session.has_bookmark(book.id):
-                announce = f"Resuming {book.title}."
-            elif book.author:
-                announce = f"Reading {book.title}, by {book.author}."
-            else:
-                announce = f"Reading {book.title}."
-            await speak_text(voice_ctx, announce)
+                if session.has_bookmark(book.id):
+                    announce = f"Resuming {book.title}."
+                elif book.author:
+                    announce = f"Reading {book.title}, by {book.author}."
+                else:
+                    announce = f"Reading {book.title}."
+                await speak_text(voice_ctx, announce)
 
-            if not session.start(book):
-                await speak_text(voice_ctx, "I couldn't open that book.")
-                self._enter("radio")
-                return
+                if not session.start(book):
+                    await speak_text(voice_ctx, "I couldn't open that book.")
+                    break
+            finally:
+                if self._wakeword:
+                    self._wakeword.unmute()
 
+            # --- reading loop: buttons + wake-word interrupts ---
             exit_requested = False
+            switch: DispatchResult | None = None
 
             def should_stop() -> bool:
                 return exit_requested or not self.power.is_on
 
+            if self._wake_event is not None:
+                self._wake_event.clear()
             read_task = asyncio.create_task(asyncio.to_thread(session.read_continuous, should_stop))
             pending_press: float | None = None
             try:
@@ -338,6 +343,12 @@ class OracleApp:
                         pending_press = None
                         paused = session.toggle_pause()
                         self.leds.set_mode("thinking" if paused else "reader")
+                    if self._wake_event is not None and self._wake_event.is_set():
+                        self._wake_event.clear()
+                        result = await self._reader_wake_turn(voice_ctx, session)
+                        if result is not None:
+                            switch = result
+                            exit_requested = True
                     if not self.power.is_on:
                         exit_requested = True
                     await asyncio.sleep(0.05)
@@ -345,12 +356,70 @@ class OracleApp:
                 exit_requested = True
                 await read_task
                 session.stop()  # persists the bookmark
+
+            if switch is None:
+                break  # finished, long-press, or power-off → music
+            if switch.next_mode == "reader" and switch.reader_query:
+                self._pending_book_query = switch.reader_query
+                continue  # reselect and keep reading
+            play_query = switch.play_query
+            break
+
+        if play_query:
+            self._start_specific_music(play_query)
+        if self._state == "reader":
+            self._enter("radio")
+
+    async def _reader_wake_turn(self, voice_ctx, session):
+        """One wake-word turn during reading. Returns a DispatchResult when
+        the reader loop must exit (channel switch / different book), else
+        None (reading continues or stays paused)."""
+        from oracle.commands import DispatchResult, dispatch_radio_command
+
+        logger.info("Wake word triggered — book command turn")
+        if self._wakeword:
+            self._wakeword.mute()
+        session.pause()  # aborts narration mid-sentence; bookmark saved
+        if settings.wake_chime:
+            from oracle.chime import play_wake_chime
+
+            play_wake_chime()
+        player = self._get_player()
+        try:
+            result = await dispatch_radio_command(
+                player=player,
+                catalog=player._catalog if player is not None else None,
+                vc=voice_ctx,
+                leds=self.leds,
+                should_abort=self._make_turn_abort(),
+                context="book",
+                reader=session,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("book dispatch failed; resuming reading")
+            result = DispatchResult("reader")
         finally:
             if self._wakeword:
                 self._wakeword.unmute()
 
-        if self._state == "reader":
-            self._enter("radio")
+        if result.next_mode == "reader" and not result.reader_query:
+            if result.resume_channel:
+                session.resume()
+                self.leds.set_mode("reader")
+            else:
+                self.leds.set_mode("thinking")  # paused, awaiting button/wake
+            return None
+        return result
+
+    def _start_specific_music(self, query: str) -> None:
+        """Start playback of a searched-for track/artist (channel switch)."""
+        player = self._get_player()
+        if player is None:
+            return
+        from oracle.commands import _play_query
+
+        label = _play_query(player, player._catalog, query)
+        logger.info(f"Channel switch to music: {query!r} -> {label!r}")
 
     async def _ask_which_book(self, voice_ctx, session):
         """Prompt for a title/author by voice and search the library."""
@@ -427,33 +496,11 @@ class OracleApp:
             self.leds.set_mode("off")
         elif state == "radio":
             self.leds.set_mode("radio")
-            if old in ("librarian", "reader"):
+            if old == "reader":
                 self._resume_music()
-                # Reload the radio STT model in the background so the first
-                # wake command back in radio doesn't pay the cold load.
-                self._set_stt_fast_loaded(True)
-        elif state == "librarian":
-            self._pause_music()
-            self.leds.set_mode("librarian")
-            # Librarian turns load small.en; free base.en while we're here —
-            # on 8GB unified memory every resident model counts.
-            self._set_stt_fast_loaded(False)
         elif state == "reader":
             self._pause_music()
             self.leds.set_mode("reader")
-            self._set_stt_fast_loaded(False)
-
-    def _set_stt_fast_loaded(self, loaded: bool) -> None:
-        """(Un)load the radio STT model off the event loop."""
-        vc = getattr(self, "_voice_ctx", None)
-        if vc is None:
-            return
-        if vc.stt_fast is vc.stt:
-            return  # single shared model (parakeet) — never evict it
-        import threading
-
-        op = vc.stt_fast.load if loaded else vc.stt_fast.unload
-        threading.Thread(target=op, name="stt-fast-swap", daemon=True).start()
 
     def _on_power_change(self, is_on: bool) -> None:
         """Called from power switch thread — immediately update LED."""
@@ -477,8 +524,8 @@ class OracleApp:
                 # Long press cancels any pending short press.
                 self._pending_short_press = None
                 if self._state == "radio":
-                    self._enter("librarian")
-                elif self._state in ("librarian", "reader"):
+                    self._enter("reader")  # channel toggle (resumes current book)
+                elif self._state == "reader":
                     self._enter("radio")
             elif evt.kind == "short" and self._state == "radio":
                 if (
@@ -527,16 +574,6 @@ class OracleApp:
             return True
 
         return check
-
-    def _should_exit_librarian(self) -> bool:
-        """Abort check polled from inside voice_turn (possibly from a worker
-        thread). Peeks — deliberately doesn't consume — the long-press event:
-        _handle_buttons drains it afterwards and performs the actual
-        librarian→radio transition. list() snapshots the deque so a
-        concurrent put from the button thread can't break iteration."""
-        if not self.power.is_on:
-            return True
-        return any(evt.kind == "long" for evt in list(self.button.events.queue))
 
     async def _shutdown(self, voice_ctx) -> None:
         from oracle.hardware.volume import get_volume_control

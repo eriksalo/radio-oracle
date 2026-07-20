@@ -143,3 +143,13 @@ def test_incompatible_schema_raises(tmp_path):
 
     with pytest.raises(RuntimeError, match="incompatible tracks schema"):
         Catalog(db_path=db)
+
+
+def test_stats_and_sample_artists(cat):
+    s = cat.stats()
+    assert s["tracks"] == 4
+    assert s["artists"] == 2
+    assert s["albums"] == 2
+    assert s["hours"] == pytest.approx(4 * 180 / 3600)
+    sample = cat.sample_artists(10)
+    assert set(sample) == {"Zebra", "Aardvark"}
