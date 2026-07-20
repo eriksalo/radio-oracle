@@ -39,5 +39,7 @@ def test_wake_chime_is_sane():
     assert chime.dtype.name == "float32"
     dur = len(chime) / _SAMPLE_RATE
     assert 0.2 < dur < 1.5  # silence-trimmed; short enough not to delay listening
-    assert abs(chime).max() <= 0.36  # normalized level → negligible mic leak
+    from config.settings import settings
+
+    assert abs(chime).max() <= settings.wake_chime_peak + 0.01
     assert wake_chime_audio() is chime  # cached, no reload per wake

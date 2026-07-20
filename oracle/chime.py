@@ -25,7 +25,6 @@ from loguru import logger
 from config.settings import settings
 
 _SAMPLE_RATE = 24000
-_TARGET_PEAK = 0.35  # audible but modest — echo residue stays below VAD
 _TRIM_THRESHOLD = 0.01  # of peak; trims the file's padding silence
 
 _chime: np.ndarray | None = None
@@ -50,7 +49,8 @@ def _load_wav(path) -> np.ndarray:
     audio = audio[loud[0] : loud[-1] + 1]
 
     # Normalize: the source peaks at ~0.11, inaudibly quiet on the radio.
-    return (audio * (_TARGET_PEAK / peak)).astype(np.float32)
+    # Played synchronously before the mic opens, so loud is safe.
+    return (audio * (settings.wake_chime_peak / peak)).astype(np.float32)
 
 
 def _tone(freq_start: float, freq_end: float, dur: float, amp: float) -> np.ndarray:

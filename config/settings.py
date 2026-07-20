@@ -198,6 +198,9 @@ class OracleSettings(BaseSettings):
     # Play the "ready to listen" chime after the wake word (oracle/chime.py).
     wake_chime: bool = True
     wake_chime_path: Path = Path("chime-clean-short.wav")
+    # Peak level the chime is normalized to (0-1). Safe to run loud: it
+    # plays synchronously before the mic opens.
+    wake_chime_peak: float = 0.85
     wake_word: str = "librarian"  # (legacy) spoken keyword checked in STT transcript
     wakeword_model: str = "models/librarian.onnx"  # custom-trained openWakeWord model
     wakeword_threshold: float = 0.7  # detection confidence threshold (0–1)
