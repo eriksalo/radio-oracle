@@ -203,6 +203,9 @@ class Player:
                         break
                     self._current = track
                     logger.info(f"Playing: {track.artist} — {track.title}")
+                    from oracle.activity import emit
+
+                    emit("playing", artist=track.artist, title=track.title, album=track.album)
                     self._play_file(track)
                     if self._stop_event.is_set():
                         return

@@ -97,6 +97,9 @@ class Reader:
         # (freshest bookmark) even before the first paragraph completes.
         self._save_bookmark()
         logger.info(f"Reading: '{book.title}' — ch {chapter_idx}, para {para_idx}")
+        from oracle.activity import emit
+
+        emit("reading", book=book.title, chapter=chapter_idx, paragraph=para_idx)
         return self._position
 
     def stop(self) -> None:
@@ -205,6 +208,9 @@ class Reader:
             return False
 
         logger.info(f"Chapter {next_ch}: {chapter.title}")
+        from oracle.activity import emit
+
+        emit("reading", chapter=next_ch, chapter_title=chapter.title)
         # Announce chapter
         self._speak(f"Chapter: {chapter.title}")
         time.sleep(settings.reading_chapter_pause)

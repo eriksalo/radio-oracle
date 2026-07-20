@@ -81,6 +81,13 @@ def _try_rag_query(user_input: str) -> str:
         # "tell me more" / "go deeper" style wording upgrades to deep mode:
         # wider candidate pool + cross-encoder rerank.
         results = retriever.query(user_input, mode=detect_mode(user_input))
+        if results:
+            from oracle.activity import emit
+
+            titles = [
+                (r.get("metadata") or {}).get("title") or r.get("source", "?") for r in results[:3]
+            ]
+            emit("consulted", sources=titles, hits=len(results))
         return retriever.format_context(results)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"RAG query failed: {e}")
@@ -272,7 +279,10 @@ async def voice_close(vc: VoiceContext) -> None:
 
 async def speak_text(vc: VoiceContext, text: str) -> None:
     """Synthesize and play a short announcement through the shared TTS."""
+    from oracle.activity import emit
     from oracle.audio import play_audio
+
+    emit("spoke", text=text)
 
     audio = vc.tts.synthesize(text)
     play_audio(audio, vc.tts.sample_rate)
@@ -391,6 +401,9 @@ async def voice_turn(
         return False
 
     logger.info(f"You: {text}")
+    from oracle.activity import emit
+
+    emit("asked", text=text)
     vc.store.add_message(vc.session_id, "user", text)
 
     retrieval_text = await _retrieval_query(vc.store, vc.session_id, text)
@@ -445,6 +458,7 @@ async def voice_turn(
 
     response_text = "".join(response_parts)
     logger.info(f"Oracle: {response_text}")
+    emit("answered", text=response_text)
     vc.store.add_message(vc.session_id, "assistant", response_text)
     vc.ctx_builder.schedule_summarize()
     return True

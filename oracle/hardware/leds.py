@@ -116,6 +116,9 @@ class StatusLEDs:
             if mode == self._mode:
                 return
             logger.debug(f"LED: {self._mode} -> {mode}")
+            from oracle.activity import emit
+
+            emit("phase", phase=mode)
             self._stop_blink()
             color = MODE_COLORS.get(mode, MODE_COLORS["off"])
             blink_period = _BLINK_PERIOD_S.get(mode)

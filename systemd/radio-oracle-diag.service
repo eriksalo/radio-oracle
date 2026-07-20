@@ -2,7 +2,9 @@
 Description=Radio Oracle - Diagnostics Web UI
 After=network.target ollama.service
 Wants=ollama.service
-Conflicts=radio-oracle.service
+# No Conflicts= anymore: the dashboard's read-only panels (activity feed,
+# state, stats) are meant to run WHILE the radio runs. The audio/GPIO test
+# cards may fail with device-busy in that case — the UI warns.
 
 [Service]
 Type=simple

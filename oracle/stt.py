@@ -110,6 +110,10 @@ class WhisperSTT:
         )
         text = " ".join(s.text.strip() for s in segments).strip()
         logger.info(f"STT result: {text!r}")
+        if text:
+            from oracle.activity import emit
+
+            emit("heard", text=text)
         return text
 
     def _transcribe_subprocess(self, audio: np.ndarray) -> str:

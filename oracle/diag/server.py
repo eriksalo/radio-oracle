@@ -605,6 +605,20 @@ def app_state() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# /api/activity — live event feed from the running app (heard / decided /
+# spoke / answered / playing / reading / phase)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/activity")
+def activity(after: int = 0, limit: int = 100) -> dict:
+    from oracle.activity import read_events
+
+    events = read_events(after=after, limit=min(limit, 300))
+    return {"events": events, "last_id": events[-1]["id"] if events else after}
+
+
+# ---------------------------------------------------------------------------
 # /api/conversations — recent sessions with summaries (ported from the
 # retired oracle/web app)
 # ---------------------------------------------------------------------------
@@ -1175,6 +1189,17 @@ _PAGE = """<!doctype html>
         Stop it to free the mic/speaker for the cards below.</div>
     </div>
 
+    <!-- Live activity feed -->
+    <div class="card" style="grid-column: 1 / -1">
+      <h2>[ * ] LIVE ACTIVITY</h2>
+      <div class="stat-row"><span>doing</span><span id="actPhase">—</span></div>
+      <div class="stat-row"><span>now playing</span><span id="actMedia">—</span></div>
+      <div id="actFeed" style="margin-top:8px;max-height:340px;overflow-y:auto;
+           font-size:12px;line-height:1.55"></div>
+      <div class="hint">Everything the oracle hears, decides, and says — live
+        from <code>radio-oracle.service</code>.</div>
+    </div>
+
     <!-- Hardware I/O -->
     <div class="card" style="grid-column: 1 / -1">
       <h2>[ ! ] HARDWARE I/O DIAGNOSTIC</h2>
@@ -1528,6 +1553,53 @@ async function pollState() {
 }
 pollState();
 setInterval(pollState, 1500);
+
+// ---- live activity feed ----
+let actAfter = 0;
+const ACT_LABELS = {
+  phase: 'PHASE', wake: 'WAKE', heard: 'HEARD', decided: 'DECIDED',
+  spoke: 'SPOKE', asked: 'ASKED', answered: 'ANSWERED',
+  consulted: 'ARCHIVES', playing: 'PLAYING', reading: 'READING', error: 'ERROR',
+};
+const PHASE_TEXT = {
+  radio: 'playing music', librarian: 'listening', thinking: 'thinking',
+  speaking: 'speaking', reader: 'reading a book', off: 'standby',
+};
+function actLine(ev) {
+  const t = new Date(ev.ts * 1000).toTimeString().slice(0, 8);
+  let detail = '';
+  if (ev.kind === 'phase') detail = PHASE_TEXT[ev.phase] || ev.phase;
+  else if (ev.kind === 'heard' || ev.kind === 'spoke' || ev.kind === 'asked' || ev.kind === 'answered') detail = '\u201c' + (ev.text || '') + '\u201d';
+  else if (ev.kind === 'decided') detail = ev.action + (ev.query ? ' \u2192 ' + ev.query : '');
+  else if (ev.kind === 'consulted') detail = (ev.sources || []).join(' / ') + ' (' + ev.hits + ' hits)';
+  else if (ev.kind === 'playing') detail = (ev.artist ? ev.artist + ' \u2014 ' : '') + ev.title;
+  else if (ev.kind === 'reading') detail = (ev.book ? ev.book + ', ' : '') + 'chapter ' + ev.chapter + (ev.chapter_title ? ': ' + ev.chapter_title : '');
+  else detail = JSON.stringify(ev);
+  const label = ACT_LABELS[ev.kind] || ev.kind.toUpperCase();
+  return '<div><span style="color:var(--grn-dim)">' + t + '</span> ' +
+         '<span style="display:inline-block;min-width:76px;color:var(--amber, #ffb641)">' + label + '</span> ' +
+         detail.replace(/</g, '&lt;') + '</div>';
+}
+async function pollActivity() {
+  try {
+    const r = await fetch('/api/activity?after=' + actAfter + '&limit=100');
+    const j = await r.json();
+    if (!j.events || !j.events.length) return;
+    const feed = $('actFeed');
+    const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+    for (const ev of j.events) {
+      feed.insertAdjacentHTML('beforeend', actLine(ev));
+      if (ev.kind === 'phase') $('actPhase').textContent = PHASE_TEXT[ev.phase] || ev.phase;
+      if (ev.kind === 'playing') $('actMedia').textContent = (ev.artist ? ev.artist + ' \u2014 ' : '') + ev.title;
+      if (ev.kind === 'reading' && ev.book) $('actMedia').textContent = '\ud83d\udcd6 ' + ev.book + ' (ch ' + ev.chapter + ')';
+    }
+    while (feed.childElementCount > 300) feed.removeChild(feed.firstChild);
+    if (atBottom) feed.scrollTop = feed.scrollHeight;
+    actAfter = j.last_id;
+  } catch (e) { /* server restarting */ }
+}
+pollActivity();
+setInterval(pollActivity, 1500);
 
 // --- hardware I/O poll + LED control ---
 async function pollHwInputs() {

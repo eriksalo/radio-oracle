@@ -198,6 +198,9 @@ async def _llm_intent(text: str) -> tuple[str, str | None]:
 
 
 def _speak(vc: VoiceContext, text: str, should_abort: AbortCheck = None) -> None:
+    from oracle.activity import emit
+
+    emit("spoke", text=text)
     audio = vc.tts.synthesize(text)
     play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
 
@@ -366,6 +369,10 @@ async def dispatch_radio_command(
         if action == "play_qualified":
             action, query = "play", _extract_qualifier(text)
         logger.info(f"Keyword intent: action={action} query={query!r}")
+
+    from oracle.activity import emit
+
+    emit("decided", action=action, query=query)
 
     # 4. Act.
     if action == "question":

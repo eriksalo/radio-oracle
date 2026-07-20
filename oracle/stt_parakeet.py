@@ -96,4 +96,8 @@ class ParakeetSTT:
         self._recognizer.decode_stream(stream)
         text = stream.result.text.strip()
         logger.info(f"STT result: {text!r}")
+        if text:
+            from oracle.activity import emit
+
+            emit("heard", text=text)
         return text

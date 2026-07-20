@@ -98,6 +98,9 @@ class OracleApp:
             # Doing this in the asyncio path queues behind the chime + pause.
             if self._state in ("radio", "reader"):
                 self.leds.set_mode("librarian")
+            from oracle.activity import emit
+
+            emit("wake")
             loop.call_soon_threadsafe(self._wake_event.set)
 
         self._wakeword = WakeWordDetector(on_wake=on_wake)
