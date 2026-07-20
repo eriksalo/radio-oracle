@@ -57,3 +57,14 @@ async def test_stream_chat_tokens_and_payload(monkeypatch):
     # must always pin the window explicitly.
     assert payload["options"]["num_ctx"] == settings.ollama_num_ctx
     assert payload["options"]["temperature"] == settings.ollama_temperature
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_caps_reply_length(monkeypatch):
+    lines = [json.dumps({"done": True})]
+    client = MockClient(lines)
+    monkeypatch.setattr(llm, "_get_client", lambda: client)
+    async for _ in stream_chat([{"role": "user", "content": "hi"}]):
+        pass
+    # Spoken replies are capped; summarizer/intent calls (chat) are not.
+    assert client.requests[0]["options"]["num_predict"] == settings.ollama_num_predict

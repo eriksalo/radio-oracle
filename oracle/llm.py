@@ -20,7 +20,12 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
-def _build_payload(messages: list[dict[str, str]], model: str | None, stream: bool) -> dict:
+def _build_payload(
+    messages: list[dict[str, str]],
+    model: str | None,
+    stream: bool,
+    num_predict: int | None = None,
+) -> dict:
     # keep_alive=-1 pins the model in VRAM. On 8GB unified memory, allowing
     # Ollama's default 5-min unload causes cudaMalloc OOM on reload because
     # the 588MB compute buffer needs a contiguous block that fragments after
@@ -29,16 +34,19 @@ def _build_payload(messages: list[dict[str, str]], model: str | None, stream: bo
     # num_ctx must be set explicitly: Ollama's default (2048 for most models)
     # silently truncates the prompt — persona + RAG chunks + history easily
     # exceed it, and the model loses whichever end Ollama drops.
+    options = {
+        "num_ctx": settings.ollama_num_ctx,
+        "temperature": settings.ollama_temperature,
+        "top_p": settings.ollama_top_p,
+    }
+    if num_predict:
+        options["num_predict"] = num_predict
     return {
         "model": model or settings.ollama_model,
         "messages": messages,
         "stream": stream,
         "keep_alive": -1,
-        "options": {
-            "num_ctx": settings.ollama_num_ctx,
-            "temperature": settings.ollama_temperature,
-            "top_p": settings.ollama_top_p,
-        },
+        "options": options,
     }
 
 
@@ -47,7 +55,9 @@ async def stream_chat(
     model: str | None = None,
 ) -> AsyncIterator[str]:
     """Stream chat completions from Ollama, yielding token strings."""
-    payload = _build_payload(messages, model, stream=True)
+    # Streamed replies are spoken aloud — cap length so the radio doesn't
+    # monologue (the persona asks for brevity; this enforces it).
+    payload = _build_payload(messages, model, stream=True, num_predict=settings.ollama_num_predict)
     client = _get_client()
     async with client.stream("POST", _CHAT_URL, json=payload) as response:
         response.raise_for_status()

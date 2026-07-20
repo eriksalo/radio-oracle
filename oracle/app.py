@@ -217,7 +217,7 @@ class OracleApp:
                         catalog=catalog,
                         vc=voice_ctx,
                         leds=self.leds,
-                        should_abort=lambda: not self.power.is_on,
+                        should_abort=self._make_turn_abort(),
                     )
                 except Exception:  # noqa: BLE001
                     logger.exception("dispatch_radio_command failed; recovering to radio")
@@ -503,6 +503,30 @@ class OracleApp:
             and now - self._pending_short_press >= self._double_press_window
         ):
             self._pending_short_press = None
+
+    def _make_turn_abort(self):
+        """Abort check for one radio voice turn: power-off, or any button
+        press = barge-in ("stop talking"). The press is consumed here so it
+        doesn't later fire next-track; the latch keeps the whole turn
+        (recording, LLM stream, TTS queue) aborted once tripped. Called
+        from worker threads — Queue.get_nowait is thread-safe."""
+        latch = {"hit": False}
+
+        def check() -> bool:
+            if not self.power.is_on:
+                return True
+            if latch["hit"]:
+                return True
+            try:
+                evt = self.button.events.get_nowait()
+            except Empty:
+                return False
+            self._state_writer.record_button(evt.kind, evt.duration)
+            logger.info(f"Button {evt.kind}-press during voice turn — interrupting")
+            latch["hit"] = True
+            return True
+
+        return check
 
     def _should_exit_librarian(self) -> bool:
         """Abort check polled from inside voice_turn (possibly from a worker

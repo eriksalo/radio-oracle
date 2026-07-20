@@ -312,3 +312,44 @@ def test_keywords_win_over_question_detection():
     # aren't question-shaped regressions.
     assert commands._keyword_match("next song") == "next"
     assert commands._looks_like_question("next song") is False
+
+
+@pytest.mark.asyncio
+async def test_question_turns_followup_window(monkeypatch):
+    import numpy as np
+
+    import oracle.core as core_mod
+    from config.settings import settings
+
+    turns: list[str] = []
+
+    async def fake_voice_turn(vc, leds=None, should_abort=None, pre_text=None):
+        turns.append(pre_text)
+        return True
+
+    recordings = [
+        np.ones(100, dtype=np.float32),  # follow-up spoken
+        np.array([], dtype=np.float32),  # then silence → window closes
+    ]
+
+    def fake_record(**kwargs):
+        assert kwargs.get("onset_timeout") == settings.followup_window_s
+        return recordings.pop(0)
+
+    class _FakeSTT:
+        def load(self):
+            pass
+
+        def transcribe(self, audio, sample_rate=None):
+            return "and what about his brother?"
+
+    vc = _FakeVC()
+    vc.stt_fast = _FakeSTT()
+    monkeypatch.setattr(core_mod, "voice_turn", fake_voice_turn)
+    monkeypatch.setattr(commands, "record_until_silence", fake_record)
+    monkeypatch.setattr(commands, "_play_thinking_ack", lambda vc, should_abort=None: None)
+
+    await commands._question_turns(vc, "who was tesla?", None, None)
+
+    assert turns == ["who was tesla?", "and what about his brother?"]
+    assert recordings == []  # both window recordings consumed

@@ -23,6 +23,10 @@ class OracleSettings(BaseSettings):
     # Factuality-leaning sampling for a RAG-grounded archive persona.
     ollama_temperature: float = 0.6
     ollama_top_p: float = 0.9
+    # Hard cap on streamed (spoken) replies. ~220 tokens ≈ 4-6 sentences ≈
+    # 15s of speech; uncapped replies measured ~1500 chars ≈ 30s+ spoken.
+    # Applies to stream_chat only — summarizer/intent calls stay uncapped.
+    ollama_num_predict: int = 220
 
     # STT
     # "parakeet" (NVIDIA Parakeet-TDT-0.6B via sherpa-onnx) replaces both
@@ -67,6 +71,10 @@ class OracleSettings(BaseSettings):
     # natural pause ("Why… is the weather…" recorded 2.2s → "Why?").
     # Radio turns now handle questions too, so match the librarian window.
     vad_silence_duration_radio: float = 0.9
+    # After the oracle answers a question, the mic stays open this many
+    # seconds for a follow-up (no wake word needed). Silence resumes the
+    # music. 0 disables.
+    followup_window_s: float = 5.0
     # PortAudio can't address ALSA `plughw`/`asym` PCMs, so we pin both
     # devices by name and open them at their native rates. Capture is
     # resampled to `audio_sample_rate` for Whisper.

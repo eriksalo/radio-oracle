@@ -22,12 +22,15 @@ def record_until_silence(
     energy_threshold: float | None = None,
     silence_duration: float | None = None,
     should_abort: AbortCheck = None,
+    onset_timeout: float | None = None,
 ) -> np.ndarray:
     """Record audio from default mic until silence is detected.
 
     Returns float32 numpy array of audio samples.  If *should_abort*
     returns True mid-recording, returns whatever has been captured so far
-    (may be empty).
+    (may be empty). If *onset_timeout* is set and no speech starts within
+    that many seconds, returns empty — used for the post-answer follow-up
+    window, where silence means "no follow-up, resume the music".
     """
     import sounddevice as sd
     from scipy.signal import resample_poly
@@ -43,6 +46,7 @@ def record_until_silence(
     block_size = int(capture_sr * block_duration)
     silence_blocks = 0
     max_silence_blocks = int(max_silence / block_duration)
+    onset_blocks_left = int(onset_timeout / block_duration) if onset_timeout else None
     started = False
     frames: list[np.ndarray] = []
 
@@ -75,6 +79,11 @@ def record_until_silence(
                 frames.append(data.copy())
                 if silence_blocks >= max_silence_blocks:
                     break
+            elif onset_blocks_left is not None:
+                onset_blocks_left -= 1
+                if onset_blocks_left <= 0:
+                    logger.debug("No speech within onset timeout")
+                    return np.array([], dtype=np.float32)
             # If not started and below threshold, keep waiting
 
     if not frames:

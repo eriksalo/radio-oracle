@@ -178,6 +178,78 @@ def _speak(vc: VoiceContext, text: str, should_abort: AbortCheck = None) -> None
     play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
 
 
+# Pre-synthesized "thinking" acknowledgments. A question turn takes ~6-10s
+# to first spoken audio (retrieval + prompt processing + generation); an
+# instant canned ack over that window converts dead air into feedback.
+_ACK_PHRASES = ("Checking the archives.", "Consulting the archives.", "One moment.")
+_ack_cache: list = []
+
+
+def _play_thinking_ack(vc: VoiceContext, should_abort: AbortCheck = None) -> None:
+    """Play a canned ack (synthesized once, then cached). Blocking ~1.5s —
+    run via a thread alongside the turn, not in front of it."""
+    import random
+
+    try:
+        if not _ack_cache:
+            for phrase in _ACK_PHRASES:
+                _ack_cache.append(vc.tts.synthesize(phrase))
+        audio = random.choice(_ack_cache)
+        play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Thinking ack failed: {e}")
+
+
+async def _question_turns(
+    vc: VoiceContext,
+    text: str,
+    leds: StatusLEDs | None,
+    should_abort: AbortCheck,
+) -> None:
+    """Answer a question, then hold the mic open for follow-ups.
+
+    Each answer overlaps a canned 'checking the archives' ack with the
+    retrieval/generation dead air. After answering, the mic stays open
+    for settings.followup_window_s — a follow-up needs no wake word;
+    silence (or a button press) drops back to the music.
+    """
+    import asyncio
+
+    from oracle.core import voice_turn
+
+    def aborted() -> bool:
+        return bool(should_abort and should_abort())
+
+    while True:
+        ack = asyncio.create_task(asyncio.to_thread(_play_thinking_ack, vc, should_abort))
+        try:
+            await voice_turn(vc, leds=leds, should_abort=should_abort, pre_text=text)
+        finally:
+            await ack
+
+        if settings.followup_window_s <= 0 or aborted():
+            return
+        if leds is not None:
+            leds.set_mode("librarian")  # solid blue: still listening
+        try:
+            audio = await asyncio.to_thread(
+                record_until_silence,
+                silence_duration=settings.vad_silence_duration_radio,
+                onset_timeout=settings.followup_window_s,
+                should_abort=should_abort,
+            )
+        except (ValueError, OSError) as e:
+            logger.warning(f"Mic unavailable for follow-up: {e}")
+            return
+        if aborted() or len(audio) == 0:
+            return  # no follow-up — music resumes
+        vc.stt_fast.load()
+        text = await asyncio.to_thread(vc.stt_fast.transcribe, audio)
+        if not text.strip():
+            return
+        logger.info(f"Follow-up: {text!r}")
+
+
 def _play_query(player: Player, catalog: Catalog, query: str) -> str | None:
     """Search and start playback. Returns a short human label on success."""
     hits = catalog.search(query)
@@ -259,12 +331,11 @@ async def dispatch_radio_command(
 
     # 4. Act + ack.
     if action == "question":
-        # One-shot oracle turn: answer with full RAG + memory + persona,
-        # then drop back to the music. "I have a question" still switches
-        # to librarian mode for multi-turn conversation.
-        from oracle.core import voice_turn
-
-        await voice_turn(vc, leds=leds, should_abort=should_abort, pre_text=text)
+        # Oracle turn(s): answer with full RAG + memory + persona, hold
+        # the mic open for wake-word-free follow-ups, then drop back to
+        # the music. "I have a question" still switches to librarian
+        # mode for open-ended conversation.
+        await _question_turns(vc, text, leds, should_abort)
         return DispatchResult("radio", resume_music=True)
 
     if leds is not None:
