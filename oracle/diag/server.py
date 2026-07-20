@@ -1591,7 +1591,7 @@ async function pollActivity() {
       feed.insertAdjacentHTML('beforeend', actLine(ev));
       if (ev.kind === 'phase') $('actPhase').textContent = PHASE_TEXT[ev.phase] || ev.phase;
       if (ev.kind === 'playing') $('actMedia').textContent = (ev.artist ? ev.artist + ' \u2014 ' : '') + ev.title;
-      if (ev.kind === 'reading' && ev.book) $('actMedia').textContent = '\ud83d\udcd6 ' + ev.book + ' (ch ' + ev.chapter + ')';
+      if (ev.kind === 'reading' && ev.book) $('actMedia').textContent = 'reading: ' + ev.book + ' (ch ' + ev.chapter + ')';
     }
     while (feed.childElementCount > 300) feed.removeChild(feed.firstChild);
     if (atBottom) feed.scrollTop = feed.scrollHeight;
