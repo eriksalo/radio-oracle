@@ -34,7 +34,10 @@ Environment=PULSE_SERVER=unix:/run/user/999/pulse/native
 
 # Resource limits
 MemoryMax=7G
-CPUQuota=90%
+# 550%: leave ~0.5 core for pulseaudio/system. 90% (0.9 of ONE core)
+# throttled every in-service synth/transcription since May — measured
+# 25.9s vs 3.5s for the same Kokoro sentence (2026-07-20).
+CPUQuota=550%
 
 # GPIO access
 SupplementaryGroups=gpio audio

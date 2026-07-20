@@ -271,6 +271,11 @@ class OracleApp:
             self._enter("radio")
             return
 
+        # Presses queued while something else was happening (e.g. button
+        # mashing during a slow turn) are stale intents — acting on them
+        # here caused rapid radio<->reader flapping. Start clean.
+        self._drain_events()
+
         play_query: str | None = None
         while self._state == "reader" and self.power.is_on:
             query = self._pending_book_query
@@ -287,9 +292,13 @@ class OracleApp:
                         await speak_text(voice_ctx, f"I couldn't find {query} in the archive.")
                 if book is None and not query:
                     book = session.current_book()
+                    if book is not None:
+                        logger.info(f"Reader: resuming current book {book.title!r}")
                 if book is None:
+                    logger.info("Reader: no current book — asking")
                     book = await self._ask_which_book(voice_ctx, session)
                 if book is None:
+                    logger.info("Reader: no book chosen — back to music")
                     break
 
                 if session.has_bookmark(book.id):
@@ -365,6 +374,7 @@ class OracleApp:
             play_query = switch.play_query
             break
 
+        self._drain_events()  # discard presses accumulated during reading
         if play_query:
             self._start_specific_music(play_query)
         if self._state == "reader":

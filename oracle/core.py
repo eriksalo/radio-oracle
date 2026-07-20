@@ -225,6 +225,17 @@ async def voice_init() -> VoiceContext:
     else:
         stt_fast = create_stt(model_name=settings.faster_whisper_radio_model)
     tts = KokoroTTS()
+
+    # Warm the LLM into VRAM now (keep_alive=-1 then pins it): otherwise
+    # the first question of the session pays the model load.
+    async def _warm_llm() -> None:
+        try:
+            await chat([{"role": "user", "content": "hi"}])
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"LLM warmup failed: {e}")
+
+    asyncio.create_task(_warm_llm())
+
     # Preload everything the first interaction needs, off the event loop:
     # the radio STT model (radio is the mode the user lands in), Kokoro
     # (first spoken reply otherwise pays a cold model load), and the RAG
