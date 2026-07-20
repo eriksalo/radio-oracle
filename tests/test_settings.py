@@ -32,12 +32,12 @@ def test_create_stt_backend_switch(monkeypatch):
     stt.unload()
 
 
-def test_wake_chirp_is_sane():
-    from oracle.chime import _SAMPLE_RATE, wake_chirp
+def test_wake_chime_is_sane():
+    from oracle.chime import _SAMPLE_RATE, wake_chime_audio
 
-    chirp = wake_chirp()
-    assert chirp.dtype.name == "float32"
-    dur = len(chirp) / _SAMPLE_RATE
-    assert 0.2 < dur < 0.6  # short enough not to delay listening
-    assert abs(chirp).max() <= 0.35  # modest level → negligible mic leak
-    assert wake_chirp() is chirp  # cached, no re-synthesis per wake
+    chime = wake_chime_audio()
+    assert chime.dtype.name == "float32"
+    dur = len(chime) / _SAMPLE_RATE
+    assert 0.2 < dur < 1.5  # silence-trimmed; short enough not to delay listening
+    assert abs(chime).max() <= 0.36  # normalized level → negligible mic leak
+    assert wake_chime_audio() is chime  # cached, no reload per wake

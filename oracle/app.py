@@ -201,9 +201,9 @@ class OracleApp:
                 # tail into the recording (both killed the previous
                 # attempt; see oracle/chime.py).
                 if settings.wake_chime:
-                    from oracle.chime import play_wake_chirp
+                    from oracle.chime import play_wake_chime
 
-                    play_wake_chirp()
+                    play_wake_chime()
 
                 player = self._get_player()
                 catalog = player._catalog if player is not None else None
