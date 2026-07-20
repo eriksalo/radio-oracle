@@ -12,12 +12,22 @@
 # Usage: ensure_aec.sh [direct|aec]
 #   direct — music/TTS to the raw USB sink (pre-2026-07 behavior)
 #   aec    — music/TTS through aec_sink so the canceller has a
-#            reference signal ("mono gambit"); wake word + STT hear
-#            music-cancelled audio. Default: $ORACLE_AUDIO_TOPOLOGY or aec.
+#            reference signal ("mono gambit"). MEASURED 2026-07-20: only
+#            ~3-7dB of cancellation — the mic and speaker are separate
+#            USB devices with independent clocks, which pulse's webrtc
+#            AEC cannot track even with drift_compensation. Kept for
+#            re-testing if the hardware ever changes (e.g. speaker moved
+#            to the ReSpeaker Lite's own amp → on-chip XU316 AEC).
+#            Default: $ORACLE_AUDIO_TOPOLOGY or direct.
+#
+# Even in direct mode this script matters: aec_source (mic + webrtc
+# noise suppression) becomes the default STT source — previously the
+# module failed at every boot (USB race + pipewire contention + idle
+# daemon exits, all fixed 2026-07-20) so the designed NS path never ran.
 
 set -u
 
-MODE="${1:-${ORACLE_AUDIO_TOPOLOGY:-aec}}"
+MODE="${1:-${ORACLE_AUDIO_TOPOLOGY:-direct}}"
 MIC_SRC="alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
 SPK_SINK_BASE="alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00"
 
@@ -38,16 +48,28 @@ if [[ "${have_src:-0}" -lt 1 || -z "${spk_sink:-}" ]]; then
 fi
 log "devices ready (speaker sink: $spk_sink)"
 
-# 2. Load echo-cancel if its source isn't live yet.
+# 2. Load echo-cancel if its source isn't live yet. The first attempt
+# right after daemon start often fails while the ALSA cards finish
+# probing (devices are listed before they are attachable) — retry.
 if ! pactl list short sources | grep -q '^[0-9]*[[:space:]]aec_source'; then
-    pactl load-module module-echo-cancel \
-        source_master="$MIC_SRC" \
-        sink_master="$spk_sink" \
-        aec_method=webrtc \
-        'aec_args=analog_gain_control=0 digital_gain_control=0 noise_suppression=1 extended_filter=1 high_pass_filter=1' \
-        source_name=aec_source sink_name=aec_sink \
-        && log "module-echo-cancel loaded" \
-        || { log "module-echo-cancel failed to load; leaving defaults alone"; exit 0; }
+    loaded=0
+    for attempt in $(seq 1 6); do
+        if pactl load-module module-echo-cancel \
+            source_master="$MIC_SRC" \
+            sink_master="$spk_sink" \
+            aec_method=webrtc \
+            'aec_args="analog_gain_control=0 digital_gain_control=0 noise_suppression=1 extended_filter=1 high_pass_filter=1"' \
+            source_name=aec_source sink_name=aec_sink >/dev/null 2>&1; then
+            loaded=1
+            log "module-echo-cancel loaded (attempt $attempt)"
+            break
+        fi
+        sleep 2
+    done
+    if [[ "$loaded" -ne 1 ]]; then
+        log "module-echo-cancel failed after 6 attempts; leaving defaults alone"
+        exit 0
+    fi
 fi
 
 # 3. Defaults per topology.

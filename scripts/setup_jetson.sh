@@ -117,6 +117,13 @@ run_cmd cp "$INSTALL_DIR/systemd/pulse-default.pa" /home/oracle/.config/pulse/de
 run_cmd chown -R oracle:oracle /home/oracle/.config/pulse
 # The service needs the oracle user's Pulse daemon at /run/user/999.
 run_cmd loginctl enable-linger oracle
+# pipewire fights pulseaudio for the ALSA devices (measured: echo-cancel
+# module init failures); this box is pulseaudio-only.
+run_cmd sudo -u oracle env XDG_RUNTIME_DIR=/run/user/999 systemctl --user mask pipewire.socket pipewire.service pipewire-media-session.service
+# Appliance daemon: never exit on idle — audio topology must survive
+# between interactions.
+run_cmd bash -c 'printf "exit-idle-time = -1\n" > /home/oracle/.config/pulse/daemon.conf'
+run_cmd chown oracle:oracle /home/oracle/.config/pulse/daemon.conf
 
 # 9. Install systemd services (main app + diagnostics page)
 echo "9. Installing systemd services..."

@@ -109,6 +109,20 @@ Rollback: ORACLE_STT_BACKEND=faster-whisper.
 | Rerank cost (deep mode) | | (manual: say "tell me more") |
 | Parakeet RTF vs whisper | 2026-07-20 | **enabled (CPU)**: 0.2-0.7s/utterance, perfect on test phrases; base.en 1.5-1.7s; small.en 4.3-4.7s |
 
+**Mono gambit (2026-07-20): tested, does not work.** Music routed
+through aec_sink measured only ~3-7dB of cancellation in the mic path
+(a working AEC gives 20+); root cause is the two independent USB audio
+clocks (ReSpeaker in, Jieli out), which pulse's webrtc canceller can't
+track. Wake-during-music therefore stays button-first. The real fix,
+if ever desired, is hardware: drive the speaker from the ReSpeaker
+Lite's own amp output so the XU316 does on-chip AEC with a shared
+clock (costs playback bandwidth — its USB sink is 16kHz). Side wins
+from the experiment: module-echo-cancel had been failing at every boot
+since May (USB enumeration race + pipewire/pulseaudio device fights +
+pulse idling out between uses) — all three fixed, so the designed
+noise-suppressed mic path now actually runs (scripts/ensure_aec.sh,
+pipewire masked for oracle, exit-idle-time=-1).
+
 **Notes from the 2026-07-19 session:** device now at radio-oracle.local
 (DHCP moved it off .186); power mode set to 25W (revert:
 `sudo nvpmodel -m 0`); RAG had been silently broken on-device since
