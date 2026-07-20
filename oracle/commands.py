@@ -64,7 +64,8 @@ action must be one of:
   "resume"      — resume music
   "stop"        — stop music
   "read_book"   — read a book aloud; query is the book title or author
-  "none"        — request not a music or book command
+  "question"    — an information question or request for knowledge
+  "none"        — not a command and not a question (fragments, noise)
 
 Examples:
 "play some jazz"         -> {"action":"play","query":"jazz"}
@@ -75,7 +76,9 @@ Examples:
 "hush"                   -> {"action":"pause","query":null}
 "read me Moby Dick"      -> {"action":"read_book","query":"Moby Dick"}
 "read Sherlock Holmes to me" -> {"action":"read_book","query":"Sherlock Holmes"}
-"what time is it"        -> {"action":"none","query":null}
+"why is the sky blue"    -> {"action":"question","query":null}
+"how do I splint a broken arm" -> {"action":"question","query":null}
+"umm never mind"         -> {"action":"none","query":null}
 """
 
 
@@ -117,6 +120,21 @@ def _keyword_match(text: str) -> str | None:
         if rule.pattern.search(norm):
             return rule.action
     return None
+
+
+# Cheap question detector — skips the LLM-intent round trip (~2-3s) for the
+# common "wake word + ask something" flow. Anything interrogative that
+# didn't match a music/book keyword is a question for the oracle.
+_QUESTION_RE = re.compile(
+    r"^(?:who|what|why|when|where|which|how|is|are|was|were|did|does|do|can|"
+    r"could|should|would|will|tell me|explain)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_question(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.endswith("?") or bool(_QUESTION_RE.match(stripped))
 
 
 async def _llm_intent(text: str) -> tuple[str, str | None]:
@@ -223,7 +241,12 @@ async def dispatch_radio_command(
     # 3. Classify.
     action = _keyword_match(text)
     query: str | None = None
-    if action is None:
+    if action is None and _looks_like_question(text):
+        # Interrogative and not a music/book keyword → straight to the
+        # oracle, no LLM-intent round trip.
+        action = "question"
+        logger.info("Question detected (regex)")
+    elif action is None:
         # Falling through to the LLM — free STT RAM first.
         vc.stt_fast.unload()
         action, query = await _llm_intent(text)
@@ -235,6 +258,15 @@ async def dispatch_radio_command(
         logger.info(f"Keyword intent: action={action}")
 
     # 4. Act + ack.
+    if action == "question":
+        # One-shot oracle turn: answer with full RAG + memory + persona,
+        # then drop back to the music. "I have a question" still switches
+        # to librarian mode for multi-turn conversation.
+        from oracle.core import voice_turn
+
+        await voice_turn(vc, leds=leds, should_abort=should_abort, pre_text=text)
+        return DispatchResult("radio", resume_music=True)
+
     if leds is not None:
         leds.set_mode("speaking")
     return _do_action(action, query, player, catalog, vc, should_abort)

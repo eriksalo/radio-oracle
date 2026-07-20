@@ -130,7 +130,9 @@ class ConversationStore:
             "SELECT s.session_id, s.started_at FROM sessions s "
             "WHERE (s.summary IS NULL OR s.summary = '') "
             "AND s.session_id != ? "
-            "AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.session_id) "
+            # ≥2 messages: a real exchange. Lone misheard commands and
+            # restart stubs would otherwise be retried every boot.
+            "AND (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) >= 2 "
             "ORDER BY s.started_at DESC LIMIT ?",
             (exclude or "", limit),
         ).fetchall()

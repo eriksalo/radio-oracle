@@ -62,10 +62,11 @@ class OracleSettings(BaseSettings):
     # every turn feel sluggish; 0.9s tested as a good balance. Raise via env
     # if slow speakers get cut off.
     vad_silence_duration: float = 0.9
-    # Radio commands ("next song", "pause music") are short with no
-    # internal pauses, so a shorter trailing-silence window cuts ~1s
-    # off the perceived wake-to-action latency.
-    vad_silence_duration_radio: float = 0.6
+    # Trailing-silence window after the wake word. 0.6s was tuned for terse
+    # commands ("next song") but truncated real questions at the first
+    # natural pause ("Why… is the weather…" recorded 2.2s → "Why?").
+    # Radio turns now handle questions too, so match the librarian window.
+    vad_silence_duration_radio: float = 0.9
     # PortAudio can't address ALSA `plughw`/`asym` PCMs, so we pin both
     # devices by name and open them at their native rates. Capture is
     # resampled to `audio_sample_rate` for Whisper.

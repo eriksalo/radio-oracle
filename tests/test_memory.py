@@ -70,9 +70,13 @@ def test_unsummarized_and_latest_summarized():
         store = ConversationStore(Path(tmp) / "test.db")
         s1 = store.new_session()
         store.add_message(s1, "user", "hello")
+        store.add_message(s1, "assistant", "hello yourself")
         s2 = store.new_session()
         store.add_message(s2, "user", "hi again")
+        store.add_message(s2, "assistant", "welcome back")
         store.update_summary(s2, "Talked about greetings.")
+        s_noise = store.new_session()  # lone misheard command — never summarized
+        store.add_message(s_noise, "user", "Place a big flight.")
         s3 = store.new_session()  # current, no messages
 
         # s1 has messages but no summary; s3 (current) and empty are excluded.
@@ -120,6 +124,7 @@ async def test_finalize_session_summarizes_and_folds(monkeypatch):
         store = ConversationStore(Path(tmp) / "test.db")
         s = store.new_session()
         store.add_message(s, "user", "hello")
+        store.add_message(s, "assistant", "hi there")
         await ctx_mod.finalize_session(store, s)
         assert store.get_summary(s) == "Summary of the chat."
         assert "Summary of the chat." in store.get_profile()

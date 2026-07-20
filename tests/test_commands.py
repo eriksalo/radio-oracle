@@ -287,3 +287,28 @@ def test_do_action_read_book_without_query(silent_speak):
     out = commands._do_action("read_book", None, None, None, _FakeVC(), None)
     assert out.next_mode == "reader"
     assert out.reader_query is None
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("why is the sky blue", True),
+        ("Why is the weather different in Spain compared to America?", True),
+        ("how do I splint a broken arm", True),
+        ("tell me about the roman empire", True),
+        ("what's the capital of France", True),
+        ("Place a big flight.", False),
+        ("play pink floyd", False),
+        ("umm never mind", False),
+    ],
+)
+def test_looks_like_question(text, expected):
+    assert commands._looks_like_question(text) is expected
+
+
+def test_keywords_win_over_question_detection():
+    # "what music do we have" starts interrogative but keyword rules run
+    # first in dispatch; here just confirm the keyword table's own hits
+    # aren't question-shaped regressions.
+    assert commands._keyword_match("next song") == "next"
+    assert commands._looks_like_question("next song") is False

@@ -120,7 +120,9 @@ class ContextBuilder:
 
 async def finalize_session(store: ConversationStore, session_id: str) -> None:
     """Summarize a finished session and fold it into the long-term profile."""
-    if store.get_summary(session_id) or store.count_messages(session_id) == 0:
+    # <2 messages means no real exchange happened (a lone misheard command,
+    # a restart) — not worth an LLM call or a slot in long-term memory.
+    if store.get_summary(session_id) or store.count_messages(session_id) < 2:
         return
     messages = store.get_messages(session_id)
     summary = await summarize_conversation(messages)
@@ -130,12 +132,20 @@ async def finalize_session(store: ConversationStore, session_id: str) -> None:
     logger.info(f"Session {session_id[:8]} summarized into long-term memory")
 
 
+# Boot-time catch-up waits before touching the LLM: summarization calls were
+# observed competing with the user's first voice commands right after
+# power-on (STT stretched 7→20s under the contention).
+CATCH_UP_DELAY_S = 180.0
+
+
 async def catch_up_summaries(store: ConversationStore, current_session: str) -> None:
     """Summarize recent sessions that ended without a summary (power-off
     usually beats the in-session threshold). Called in the background at boot."""
+    await asyncio.sleep(CATCH_UP_DELAY_S)
     for sess in store.unsummarized_sessions(exclude=current_session):
         try:
             await finalize_session(store, sess["session_id"])
+            await asyncio.sleep(10)  # breathing room between LLM jobs
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Catch-up summarize failed for {sess['session_id'][:8]}: {e}")
 

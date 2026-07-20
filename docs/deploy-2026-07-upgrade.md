@@ -107,7 +107,7 @@ Rollback: ORACLE_STT_BACKEND=faster-whisper.
 | voice_init (STT+TTS+warm retriever) | 2026-07-19 | ~28s one-time at boot |
 | Radio command wake→action | | (manual: needs voice/button) |
 | Rerank cost (deep mode) | | (manual: say "tell me more") |
-| Parakeet RTF vs whisper | | (not yet enabled) |
+| Parakeet RTF vs whisper | 2026-07-20 | **enabled (CPU)**: 0.2-0.7s/utterance, perfect on test phrases; base.en 1.5-1.7s; small.en 4.3-4.7s |
 
 **Notes from the 2026-07-19 session:** device now at radio-oracle.local
 (DHCP moved it off .186); power mode set to 25W (revert:
