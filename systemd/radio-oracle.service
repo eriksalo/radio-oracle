@@ -10,6 +10,8 @@ User=oracle
 Group=oracle
 WorkingDirectory=/opt/radio-oracle
 ExecStartPre=/bin/sleep 2
+# Bring up echo-cancel after USB enumeration (default.pa load races it)
+ExecStartPre=-/bin/bash /opt/radio-oracle/scripts/ensure_aec.sh
 ExecStart=/opt/radio-oracle/.venv/bin/python -m oracle --mode hardware
 Restart=on-failure
 RestartSec=5

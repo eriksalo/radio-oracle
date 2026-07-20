@@ -115,14 +115,26 @@ class WakeWordDetector:
             logger.error(f"Wake word model load failed: {e}")
             return
 
-        # Bypass pulse module-echo-cancel for wakeword: AEC has no reference
-        # signal (aec_sink is suspended because music routes direct) and its
-        # processing mangles custom-trained models' spectral features. Set
-        # PULSE_SOURCE around stream open so this stream alone gets the raw
-        # ReSpeaker; STT recordings opened later still use the pulse default.
-        raw_src = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
+        # Which source feeds wake detection (ORACLE_WAKEWORD_SOURCE):
+        #   raw     — the ReSpeaker directly, bypassing echo-cancel. Right
+        #             when AEC has no playback reference (music routed
+        #             direct): its NS-only processing mangled the custom
+        #             model's spectral features.
+        #   aec     — aec_source. Right for the "mono gambit" topology
+        #             where music/TTS play through aec_sink: the canceller
+        #             subtracts the music, so the wake word works DURING
+        #             playback.
+        #   default — whatever the pulse default source is.
+        # Set PULSE_SOURCE around stream open so this stream alone is
+        # affected; STT recordings opened later still use the pulse default.
+        src_map = {
+            "raw": "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo",
+            "aec": "aec_source",
+        }
+        wanted_src = src_map.get(settings.wakeword_source)
         prev_src = os.environ.get("PULSE_SOURCE")
-        os.environ["PULSE_SOURCE"] = raw_src
+        if wanted_src is not None:
+            os.environ["PULSE_SOURCE"] = wanted_src
 
         logger.debug("Wake word listener started")
         try:
@@ -136,10 +148,11 @@ class WakeWordDetector:
             ) as stream:
                 # Restore env immediately after stream connects so other
                 # threads opening pulse streams aren't affected.
-                if prev_src is None:
-                    os.environ.pop("PULSE_SOURCE", None)
-                else:
-                    os.environ["PULSE_SOURCE"] = prev_src
+                if wanted_src is not None:
+                    if prev_src is None:
+                        os.environ.pop("PULSE_SOURCE", None)
+                    else:
+                        os.environ["PULSE_SOURCE"] = prev_src
                 while not self._stop.is_set():
                     # If muted, drain audio but don't process
                     if not self._muted.is_set():

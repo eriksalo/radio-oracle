@@ -211,6 +211,10 @@ class OracleSettings(BaseSettings):
     wake_chime_peak: float = 0.85
     wake_word: str = "librarian"  # (legacy) spoken keyword checked in STT transcript
     wakeword_model: str = "models/librarian.onnx"  # custom-trained openWakeWord model
+    # Source feeding wake detection: "raw" (ReSpeaker direct — right when
+    # music bypasses AEC), "aec" (aec_source — right for the mono-gambit
+    # topology where music plays through aec_sink), or "default".
+    wakeword_source: Literal["raw", "aec", "default"] = "raw"
     wakeword_threshold: float = 0.7  # detection confidence threshold (0–1)
     long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
     pot_i2c_bus: int = 7  # /dev/i2c-N for the ADS1115 (header pins 3/5)
