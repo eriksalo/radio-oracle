@@ -563,7 +563,13 @@ def hw_inputs() -> dict:
     # both readers (the dashboard pot jumped; the radio's button/switch
     # reads could glitch too). Use the app's published telemetry instead.
     snap = read_state()
-    if snap and time.time() - snap.get("updated_at", 0) < 3 and snap.get("hw"):
+    app_alive = False
+    if snap and snap.get("pid"):
+        try:
+            app_alive = psutil.pid_exists(int(snap["pid"]))
+        except (TypeError, ValueError):
+            app_alive = False
+    if snap and app_alive and snap.get("hw"):
         hw = snap["hw"]
         out: dict = {"available": True, "via_app": True}
         pot = hw.get("pot")
@@ -574,7 +580,19 @@ def hw_inputs() -> dict:
         out["switch"] = {"channel": "-", "on": bool(hw.get("power_on"))}
         lb = snap.get("last_button") or {}
         out["button"] = {"channel": "-", "pressed": False, "last": lb.get("kind")}
+        age = time.time() - snap.get("updated_at", 0)
+        if age > 3:
+            out["stale_s"] = round(age, 1)
         return out
+    if snap and app_alive:
+        # App alive but no telemetry yet — still must not touch the chip.
+        return {
+            "available": True,
+            "via_app": True,
+            "pot": {"available": False, "detail": "waiting for app telemetry"},
+            "switch": {"channel": "-", "on": bool(snap.get("power_on"))},
+            "button": {"channel": "-", "pressed": False},
+        }
 
     inputs = _get_inputs().read()
     pot = _get_pot()

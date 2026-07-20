@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,7 @@ class StateWriter:
     def __init__(self, path: Path | None = None, pid: int | None = None) -> None:
         self._path = path or state_path()
         self._pid = pid if pid is not None else os.getpid()
+        self._lock = threading.Lock()
         self._snapshot: dict[str, Any] = {
             "pid": self._pid,
             "started_at": time.time(),
@@ -102,18 +104,19 @@ class StateWriter:
             logger.debug(f"state clear failed: {e}")
 
     def _write(self) -> None:
-        self._snapshot["updated_at"] = time.time()
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                "w",
-                dir=self._path.parent,
-                prefix=".radio-oracle-state-",
-                suffix=".json",
-                delete=False,
-            ) as tmp:
-                json.dump(self._snapshot, tmp)
-                tmp_name = tmp.name
-            os.replace(tmp_name, self._path)
-        except OSError as e:
-            logger.debug(f"state write failed: {e}")
+        with self._lock:
+            self._snapshot["updated_at"] = time.time()
+            try:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    "w",
+                    dir=self._path.parent,
+                    prefix=".radio-oracle-state-",
+                    suffix=".json",
+                    delete=False,
+                ) as tmp:
+                    json.dump(self._snapshot, tmp)
+                    tmp_name = tmp.name
+                os.replace(tmp_name, self._path)
+            except OSError as e:
+                logger.debug(f"state write failed: {e}")

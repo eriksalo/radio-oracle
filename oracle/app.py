@@ -120,8 +120,13 @@ class OracleApp:
         self.power.start()
         # Publish hardware telemetry from process start: the ADC poller owns
         # the ADS1115 for this process's whole lifetime, so the dashboard
-        # must have app-provided readings the whole time too.
-        self._hw_task = asyncio.create_task(self._publish_hardware())
+        # must have app-provided readings the whole time too. A plain
+        # thread, not an asyncio task — voice turns block the event loop
+        # for seconds and telemetry must keep flowing through them.
+        import threading
+
+        self._hw_stop = threading.Event()
+        threading.Thread(target=self._publish_hardware, name="hw-telemetry", daemon=True).start()
         self.leds.set_mode("off")
 
         voice_ctx: VoiceContext | None = None
@@ -571,10 +576,13 @@ class OracleApp:
         ):
             self._pending_short_press = None
 
-    async def _publish_hardware(self) -> None:
+    def _publish_hardware(self) -> None:
         """Publish pot/power readings into the state file so the dashboard
         never touches the ADS1115 while this process owns it — two processes
-        interleaving on the chip's single mux corrupt each other's reads."""
+        interleaving on the chip's single mux corrupt each other's reads.
+        Runs in its own thread: the asyncio loop blocks during voice turns
+        and telemetry must not gap (the dashboard would fall back to direct
+        chip reads)."""
         from oracle.hardware.volume import get_volume_control
 
         try:
@@ -582,7 +590,7 @@ class OracleApp:
         except Exception as e:  # noqa: BLE001
             logger.debug(f"hw telemetry unavailable: {e}")
             return
-        while True:
+        while not self._hw_stop.is_set():
             hw: dict = {"power_on": self.power.is_on}
             r = ctl.reading()
             if r is not None:
@@ -592,7 +600,7 @@ class OracleApp:
                     "pct": round(r.pct, 1),
                 }
             self._state_writer.update(hw=hw)
-            await asyncio.sleep(0.5)
+            self._hw_stop.wait(0.5)
 
     def _make_turn_abort(self):
         """Abort check for one radio voice turn: power-off, or any button
