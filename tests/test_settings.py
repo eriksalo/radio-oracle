@@ -30,3 +30,14 @@ def test_create_stt_backend_switch(monkeypatch):
     assert isinstance(stt, ParakeetSTT)
     # unload must be a no-op — the single shared model stays resident.
     stt.unload()
+
+
+def test_wake_chirp_is_sane():
+    from oracle.chime import _SAMPLE_RATE, wake_chirp
+
+    chirp = wake_chirp()
+    assert chirp.dtype.name == "float32"
+    dur = len(chirp) / _SAMPLE_RATE
+    assert 0.2 < dur < 0.6  # short enough not to delay listening
+    assert abs(chirp).max() <= 0.35  # modest level → negligible mic leak
+    assert wake_chirp() is chirp  # cached, no re-synthesis per wake

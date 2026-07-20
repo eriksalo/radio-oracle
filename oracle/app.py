@@ -28,6 +28,7 @@ from typing import Literal
 
 from loguru import logger
 
+from config.settings import settings
 from oracle.hardware import ActionButton, ButtonEvent, PowerSwitch, StatusLEDs
 from oracle.state import StateWriter
 
@@ -194,12 +195,15 @@ class OracleApp:
                     self._wakeword.mute()
 
                 self._pause_music()
-                # No chime: when it played sync it cost ~3.4 s before
-                # recording opened; when played async its mic-leakage
-                # tail (peak ~0.01–0.06 after AEC) tripped the radio
-                # VAD energy threshold (0.004) and closed the recording
-                # before the user finished speaking. The blue LED flip
-                # is the wake cue now.
+                # "Ready to listen" chirp — synthesized in memory and
+                # played synchronously, so it neither pays the ~3.4s
+                # subprocess cost of the old MP3 chime nor leaks its
+                # tail into the recording (both killed the previous
+                # attempt; see oracle/chime.py).
+                if settings.wake_chime:
+                    from oracle.chime import play_wake_chirp
+
+                    play_wake_chirp()
 
                 player = self._get_player()
                 catalog = player._catalog if player is not None else None

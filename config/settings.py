@@ -195,6 +195,8 @@ class OracleSettings(BaseSettings):
     led_green_pin: int = 18  # BOARD pin 18
     led_blue_pin: int = 22  # BOARD pin 22
     power_switch_pin: int = 17  # (legacy wiring on BCM 17; now unused for reads)
+    # Play the "ready to listen" chirp after the wake word (oracle/chime.py).
+    wake_chime: bool = True
     wake_word: str = "librarian"  # (legacy) spoken keyword checked in STT transcript
     wakeword_model: str = "models/librarian.onnx"  # custom-trained openWakeWord model
     wakeword_threshold: float = 0.7  # detection confidence threshold (0–1)
