@@ -63,7 +63,14 @@ class KokoroTTS:
             voice=settings.tts_voice,
             speed=settings.tts_speed,
         )
-        return samples.astype(np.float32)
+        audio = samples.astype(np.float32)
+        # Peak-normalize: Kokoro synthesizes well below full scale, so
+        # speech sounded quiet next to loudness-mastered music on the
+        # same sink. 0 disables.
+        peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+        if settings.tts_peak and peak > 1e-4:
+            audio = audio * (settings.tts_peak / peak)
+        return audio
 
     def synthesize_streaming(self, text: str) -> Iterator[np.ndarray]:
         """Yield audio chunks per sentence for low-latency playback."""

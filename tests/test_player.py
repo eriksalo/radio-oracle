@@ -9,7 +9,6 @@ import pytest
 
 from config.settings import settings
 from oracle.music import catalog as catalog_mod
-from oracle.music import player as player_mod
 from oracle.music.catalog import Catalog
 from oracle.music.player import Player
 
@@ -97,7 +96,9 @@ def test_play_and_stop_lifecycle(player, monkeypatch):
     assert player.now_playing is None
 
 
-def test_set_pa_sink_volume_clamps(monkeypatch):
+def test_set_sink_volume_clamps(monkeypatch):
+    from oracle import volume_bridge
+
     calls: list[list[str]] = []
 
     class _Proc:
@@ -105,9 +106,20 @@ def test_set_pa_sink_volume_clamps(monkeypatch):
         stderr = b""
 
     monkeypatch.setattr(
-        player_mod.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or _Proc()
+        volume_bridge.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or _Proc()
     )
-    player_mod._set_pa_sink_volume(1.5)
-    player_mod._set_pa_sink_volume(-0.2)
+    volume_bridge.set_sink_volume(1.5)
+    volume_bridge.set_sink_volume(-0.2)
     assert calls[0][-1] == "100%"
     assert calls[1][-1] == "0%"
+
+
+def test_play_specific_track_honors_album(player, cat, monkeypatch):
+    played: list[str] = []
+    monkeypatch.setattr(Player, "_play_file", lambda self, track: played.append(track.title))
+    target = next(t for t in cat.list_tracks() if t.title == "Two")
+    player._continuous = False
+    player._play_thread(first_track=target, play_intro=False)
+    # Album order is One, Two, Three — starting at Two must play Two
+    # then Three, never a random album.
+    assert played == ["Two", "Three"]

@@ -134,6 +134,13 @@ class Catalog:
         row = self._conn.execute(f"{_TRACK_SELECT} ORDER BY RANDOM() LIMIT 1").fetchone()
         return _row_to_track(row) if row else None
 
+    def album_tracks(self, album: str) -> list[Track]:
+        """All tracks of an album in track order (filenames carry numbers)."""
+        rows = self._conn.execute(
+            f"{_TRACK_SELECT} WHERE album = ? ORDER BY filename", (album,)
+        ).fetchall()
+        return [_row_to_track(r) for r in rows]
+
     def random_album_tracks(self) -> list[Track]:
         """Pick a random album and return all its tracks in order."""
         row = self._conn.execute(

@@ -131,16 +131,12 @@ def _stream_play(
     sample_rate: int,
     should_abort: AbortCheck,
 ) -> None:
-    """Play *audio* via an OutputStream callback that re-reads the pot
-    every block, so turning the volume knob is audible immediately
-    (e.g. mid-paragraph while the librarian is reading).
-
-    The previous implementation pre-scaled the whole buffer once and
-    handed it to sd.play(), which baked the volume in at playback start.
+    """Play *audio* at unity gain. The physical volume knob acts on the
+    PulseAudio *sink* (oracle.volume_bridge), which scales every stream —
+    music, speech, chime — once and live. Applying pot gain here too made
+    speech quieter than music by roughly the knob position squared.
     """
     import sounddevice as sd
-
-    from oracle.hardware.volume import get_volume_control
 
     audio = np.ascontiguousarray(audio, dtype=np.float32)
     if audio.ndim == 1:
@@ -148,7 +144,6 @@ def _stream_play(
     else:
         channels = audio.shape[1]
 
-    vc = get_volume_control()
     cursor = 0
     total = len(audio)
     finished = threading.Event()
@@ -158,13 +153,12 @@ def _stream_play(
         if status:
             logger.debug(f"playback status: {status}")
         take = min(frames, total - cursor)
-        gain = vc.gain
         if take > 0:
             chunk = audio[cursor : cursor + take]
             if channels == 1:
-                outdata[:take, 0] = chunk * gain
+                outdata[:take, 0] = chunk
             else:
-                outdata[:take] = chunk * gain
+                outdata[:take] = chunk
             cursor += take
         if take < frames:
             outdata[take:] = 0

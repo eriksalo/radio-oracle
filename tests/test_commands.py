@@ -434,3 +434,16 @@ def test_describe_music_summary_and_filtered():
     assert "2 tracks match" in text
     text = commands._describe_music(_StatsCatalog(), "zzz")
     assert "Nothing" in text
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("play music", "music_on"),
+        ("play some music.", "music_on"),
+        ("play music by the beatles", "play_qualified"),
+        ("put on some music from pink floyd", "play_qualified"),
+    ],
+)
+def test_play_music_by_artist_is_a_search(text, expected):
+    assert commands._keyword_match(text) == expected

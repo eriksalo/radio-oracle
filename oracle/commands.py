@@ -109,7 +109,11 @@ def _build_keyword_table() -> list[_KeywordRule]:
         (r"\bi'?d\s+like\s+to\s+read\s+a\s+book\b", "mode_reader"),
         (r"\b(?:read|listen\s+to)\s+(?:a|my|the)\s+book\b", "mode_reader"),
         (r"\b(?:continue|resume)\s+(?:my|the)\s+book\b", "mode_reader"),
-        (r"\b(?:play|back\s+to|put\s+on)\s+(?:the\s+|some\s+)?music\b", "music_on"),
+        # "play music by X" is a search, not a resume — route it to play
+        # with the qualifier as the query (resolved in dispatch).
+        (r"\b(?:play|put\s+on)\s+(?:the\s+|some\s+)?music\s+(?:by|from|like)\b", "play_qualified"),
+        # Bare "play music" (utterance ends there) = resume/switch channel.
+        (r"\b(?:play|back\s+to|put\s+on)\s+(?:the\s+|some\s+)?music[.!]?\s*$", "music_on"),
         # Exploration.
         (r"\bwhat\s+music\b|\bwhat\s+(?:songs|albums|artists)\s+(?:do|are)\b", "list_music"),
         (r"\bwhat\s+books?\b|\bwhich\s+books?\b", "list_books"),
@@ -276,10 +280,14 @@ async def _question_turns(
 
 def _play_query(player: Player, catalog: Catalog, query: str) -> str | None:
     """Search and start playback. Returns a short human label on success."""
+    import random
+
     hits = catalog.search(query)
     if not hits:
         return None
-    track = hits[0]
+    # Random hit, not hits[0]: "play Pink Floyd" should feel like tuning
+    # into that artist, not always the alphabetically first song.
+    track = random.choice(hits)
     player.stop()
     player.play(track=track)
     label = track.artist or track.album or track.title
@@ -355,7 +363,9 @@ async def dispatch_radio_command(
         # matched) doesn't pay the reload itself.
         vc.stt_fast.load()
     else:
-        logger.info(f"Keyword intent: action={action}")
+        if action == "play_qualified":
+            action, query = "play", _extract_qualifier(text)
+        logger.info(f"Keyword intent: action={action} query={query!r}")
 
     # 4. Act.
     if action == "question":

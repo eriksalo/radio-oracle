@@ -57,6 +57,10 @@ class OracleSettings(BaseSettings):
     tts_voices_path: Path = Path("models/voices-v1.0.bin")
     tts_voice: str = "am_michael"  # American male, natural
     tts_speed: float = 1.0
+    # Peak level speech is normalized to (0-1; 0 disables). Kokoro output
+    # is well below full scale — unnormalized it sits quiet next to
+    # loudness-mastered music on the same sink.
+    tts_peak: float = 0.9
 
     # Audio
     audio_sample_rate: int = 16000

@@ -128,6 +128,9 @@ class OracleApp:
 
             voice_ctx = await voice_init()
             self._voice_ctx = voice_ctx
+            from oracle import volume_bridge
+
+            volume_bridge.start()  # knob works for speech even without music
             self._start_wakeword(loop)
             self._enter("radio")
 
@@ -586,8 +589,10 @@ class OracleApp:
         return check
 
     async def _shutdown(self, voice_ctx) -> None:
+        from oracle import volume_bridge
         from oracle.hardware.volume import get_volume_control
 
+        volume_bridge.stop()
         self._stop_music()
         if self._player:
             self._player.close()

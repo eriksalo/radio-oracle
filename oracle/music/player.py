@@ -10,9 +10,7 @@ STT thread and the i2c-polled volume knob. mpg123 plays the same file
 through the same PulseAudio sink at ~1% CPU with zero underruns.
 
 Volume: the physical pot drives the speaker sink's PulseAudio volume
-via a background daemon that polls VolumeControl and shells out to
-``pactl set-sink-volume`` when the gain changes. mpg123 itself plays at
-unity; per-stream volume is handled by Pulse.
+via the global oracle.volume_bridge daemon. mpg123 plays at unity.
 
 Album mode: tracks are grouped by album and played in order. An AM
 radio tuning sound plays when the radio first starts and between
@@ -33,40 +31,8 @@ from loguru import logger
 
 from oracle.music.catalog import Catalog, Track
 
-# Speaker sink. We target Pulse's *default* sink rather than hardcoding
-# the USB DAC's full name — the Jieli DAC's profile suffix flips between
-# `.stereo-fallback` and `.analog-stereo` depending on whether PortAudio
-# has opened it for capture/playback yet, so any hardcoded suffix breaks
-# the volume knob the first time STT/TTS runs. The default sink is the
-# USB DAC in our setup (music bypasses aec_sink — see docs/SETUP.md §1.6),
-# and `@DEFAULT_SINK@` follows it through profile changes.
-_SPEAKER_SINK = "@DEFAULT_SINK@"
-
 # AM radio tuning sound — played on first start and between albums.
 _INTRO_MP3 = Path(__file__).resolve().parent.parent.parent / "AMradioSound.mp3"
-
-# Polling period for the pot→PA-volume bridge. 100 ms is well below
-# human perception of knob lag and trivial for pactl.
-_VOLUME_POLL_S = 0.1
-# Don't bother updating Pulse unless gain changed by at least this
-# fraction; avoids pactl spam when the pot wiggles a few mV.
-_VOLUME_DELTA = 0.01
-
-
-def _set_pa_sink_volume(gain: float) -> None:
-    """Set the speaker sink volume in Pulse. gain is 0.0–1.0."""
-    pct = max(0, min(100, int(round(gain * 100))))
-    proc = subprocess.run(
-        ["pactl", "set-sink-volume", _SPEAKER_SINK, f"{pct}%"],
-        check=False,
-        capture_output=True,
-    )
-    if proc.returncode != 0:
-        # Most common cause: the sink name changed (profile flip, USB
-        # reconnect). Log enough to diagnose without spamming on every
-        # poll: the volume_loop only calls us when gain *changed*.
-        err = proc.stderr.decode("utf-8", errors="replace").strip()
-        logger.warning(f"pactl set-sink-volume rc={proc.returncode}: {err[:160]}")
 
 
 class Player:
@@ -90,8 +56,6 @@ class Player:
         self._continuous = True
         self._proc: subprocess.Popen | None = None
         self._proc_lock = threading.Lock()
-        self._volume_thread: threading.Thread | None = None
-        self._volume_stop = threading.Event()
         # Album skip: set to break out of current album in the play thread.
         self._skip_album = threading.Event()
         # Suppress intro: set by next() so a track skip at an album
@@ -192,16 +156,22 @@ class Player:
             is_first_album = True
             while not self._stop_event.is_set():
                 # --- pick the next album ---
-                if is_first_album and first_track and first_track.album:
-                    tracks = self._catalog.random_album_tracks()
-                    # If a specific first track was given, try to honour it
-                    if first_track:
+                if is_first_album and first_track is not None:
+                    # Honour the requested track: play ITS album from that
+                    # track onward. (The previous logic picked a random
+                    # album and only honoured the request if that album
+                    # happened to contain the track — "play Pink Floyd"
+                    # played whatever the RNG felt like.)
+                    if first_track.album:
+                        tracks = self._catalog.album_tracks(first_track.album)
                         for i, t in enumerate(tracks):
                             if t.path == first_track.path:
                                 tracks = tracks[i:]
                                 break
-                        else:
-                            tracks = self._catalog.random_album_tracks()
+                        if not tracks:
+                            tracks = [first_track]
+                    else:
+                        tracks = [first_track]
                 else:
                     tracks = self._catalog.random_album_tracks()
 
@@ -333,39 +303,14 @@ class Player:
     # ---------------------------------------------------------------- volume
 
     def _start_volume_bridge(self) -> None:
-        """Spawn the pot→PA-volume daemon if not already running."""
-        if self._volume_thread is not None and self._volume_thread.is_alive():
-            return
-        self._volume_stop.clear()
-        self._volume_thread = threading.Thread(
-            target=self._volume_loop, name="music-volume", daemon=True
-        )
-        self._volume_thread.start()
+        from oracle import volume_bridge
+
+        volume_bridge.start()  # global + idempotent
 
     def _stop_volume_bridge(self) -> None:
-        self._volume_stop.set()
-        if self._volume_thread is not None and self._volume_thread.is_alive():
-            self._volume_thread.join(timeout=0.5)
-        self._volume_thread = None
-
-    def _volume_loop(self) -> None:
-        """Poll the pot and push the result to Pulse when it changes."""
-        try:
-            from oracle.hardware.volume import get_volume_control
-
-            ctl = get_volume_control()
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Volume bridge unavailable: {e}")
-            return
-        logger.debug(f"Music volume bridge started (initial gain={ctl.gain:.2f})")
-        last_applied = -1.0
-        while not self._volume_stop.is_set():
-            gain = ctl.gain
-            if abs(gain - last_applied) >= _VOLUME_DELTA:
-                _set_pa_sink_volume(gain)
-                last_applied = gain
-            self._volume_stop.wait(_VOLUME_POLL_S)
-        logger.debug("Music volume bridge stopped")
+        # Bridge is global now — the knob must keep working for TTS and
+        # the reader when music is stopped. app shutdown stops it.
+        pass
 
     def close(self) -> None:
         self.stop()
