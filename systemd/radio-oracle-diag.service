@@ -20,6 +20,9 @@ StandardError=journal
 # Environment
 EnvironmentFile=-/opt/radio-oracle/.env
 Environment=ORACLE_LOG_LEVEL=INFO
+# Same runtime dir as the main service so the state + activity files
+# written by radio-oracle are found.
+Environment=XDG_RUNTIME_DIR=/run/user/999
 
 # Resource limits
 MemoryMax=7G
