@@ -118,6 +118,10 @@ class OracleApp:
 
         self.button.start()
         self.power.start()
+        # Publish hardware telemetry from process start: the ADC poller owns
+        # the ADS1115 for this process's whole lifetime, so the dashboard
+        # must have app-provided readings the whole time too.
+        self._hw_task = asyncio.create_task(self._publish_hardware())
         self.leds.set_mode("off")
 
         voice_ctx: VoiceContext | None = None
@@ -134,7 +138,6 @@ class OracleApp:
             from oracle import volume_bridge
 
             volume_bridge.start()  # knob works for speech even without music
-            self._hw_task = asyncio.create_task(self._publish_hardware())
             self._start_wakeword(loop)
             self._enter("radio")
 
