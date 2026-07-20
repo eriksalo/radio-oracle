@@ -38,6 +38,13 @@ class VolumeControl:
     def available(self) -> bool:
         return self._pot.available
 
+    def reading(self):
+        """Full pot reading (raw/voltage/pct) or None — for telemetry."""
+        try:
+            return self._pot.read()
+        except Exception:  # noqa: BLE001
+            return None
+
     @property
     def gain(self) -> float:
         """Current volume as 0.0–1.0, read from the poller cache."""

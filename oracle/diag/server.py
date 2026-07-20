@@ -558,6 +558,24 @@ class LEDRequest(BaseModel):
 
 @app.get("/api/hardware/inputs")
 def hw_inputs() -> dict:
+    # While radio-oracle runs, it owns the ADS1115 — reading the chip from
+    # a second process interleaves on its single mux register and corrupts
+    # both readers (the dashboard pot jumped; the radio's button/switch
+    # reads could glitch too). Use the app's published telemetry instead.
+    snap = read_state()
+    if snap and time.time() - snap.get("updated_at", 0) < 3 and snap.get("hw"):
+        hw = snap["hw"]
+        out: dict = {"available": True, "via_app": True}
+        pot = hw.get("pot")
+        if pot:
+            out["pot"] = {"available": True, **pot}
+        else:
+            out["pot"] = {"available": False, "detail": "no pot telemetry"}
+        out["switch"] = {"channel": "-", "on": bool(hw.get("power_on"))}
+        lb = snap.get("last_button") or {}
+        out["button"] = {"channel": "-", "pressed": False, "last": lb.get("kind")}
+        return out
+
     inputs = _get_inputs().read()
     pot = _get_pot()
     if not pot.available:
@@ -1606,23 +1624,24 @@ async function pollHwInputs() {
   const st = $('hwInputsStatus');
   try {
     const r = await fetch('/api/hardware/inputs'); const j = await r.json();
+    const volt = v => (v == null ? '\u2014' : v.toFixed(3) + ' V');
     if (j.button) {
       $('hwBtnPin').textContent = j.button.channel;
-      $('hwBtnLevel').textContent = j.button.level;
-      $('hwBtnState').textContent = j.button.pressed ? 'PRESSED' : 'released';
-      $('hwBtnVolt').textContent = j.button.voltage.toFixed(3) + ' V';
+      $('hwBtnLevel').textContent = j.button.level ?? '\u2014';
+      $('hwBtnState').textContent = j.button.pressed ? 'PRESSED' : (j.button.last ? 'last: ' + j.button.last : 'released');
+      $('hwBtnVolt').textContent = volt(j.button.voltage);
     }
     if (j.switch) {
       $('hwSwPin').textContent = j.switch.channel;
-      $('hwSwLevel').textContent = j.switch.level;
+      $('hwSwLevel').textContent = j.switch.level ?? '\u2014';
       $('hwSwState').textContent = j.switch.on ? 'ON' : 'OFF';
-      $('hwSwVolt').textContent = j.switch.voltage.toFixed(3) + ' V';
+      $('hwSwVolt').textContent = volt(j.switch.voltage);
     }
     if (j.pot && j.pot.available) {
       $('hwPotPct').textContent = j.pot.pct.toFixed(1) + '%';
       $('hwPotBar').style.width = j.pot.pct + '%';
       $('hwPotRaw').textContent = j.pot.raw;
-      $('hwPotV').textContent = j.pot.voltage.toFixed(3) + ' V';
+      $('hwPotV').textContent = volt(j.pot.voltage);
     } else {
       $('hwPotPct').textContent = '—';
       $('hwPotBar').style.width = '0%';
@@ -1631,6 +1650,8 @@ async function pollHwInputs() {
     }
     if (j.available === false) {
       setStatus(st, 'GPIO unavailable: ' + (j.detail || ''), 'err');
+    } else if (j.via_app) {
+      setStatus(st, 'live via radio-oracle telemetry (direct chip access paused)');
     } else {
       setStatus(st, '');
     }

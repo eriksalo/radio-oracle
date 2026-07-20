@@ -134,6 +134,7 @@ class OracleApp:
             from oracle import volume_bridge
 
             volume_bridge.start()  # knob works for speech even without music
+            self._hw_task = asyncio.create_task(self._publish_hardware())
             self._start_wakeword(loop)
             self._enter("radio")
 
@@ -566,6 +567,29 @@ class OracleApp:
             and now - self._pending_short_press >= self._double_press_window
         ):
             self._pending_short_press = None
+
+    async def _publish_hardware(self) -> None:
+        """Publish pot/power readings into the state file so the dashboard
+        never touches the ADS1115 while this process owns it — two processes
+        interleaving on the chip's single mux corrupt each other's reads."""
+        from oracle.hardware.volume import get_volume_control
+
+        try:
+            ctl = get_volume_control()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"hw telemetry unavailable: {e}")
+            return
+        while True:
+            hw: dict = {"power_on": self.power.is_on}
+            r = ctl.reading()
+            if r is not None:
+                hw["pot"] = {
+                    "raw": r.raw,
+                    "voltage": round(r.voltage, 3),
+                    "pct": round(r.pct, 1),
+                }
+            self._state_writer.update(hw=hw)
+            await asyncio.sleep(0.5)
 
     def _make_turn_abort(self):
         """Abort check for one radio voice turn: power-off, or any button
