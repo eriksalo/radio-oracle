@@ -16,9 +16,11 @@ _V_MAX = 3.01
 class VolumeControl:
     """Reads the physical pot and exposes a 0.0–1.0 gain value.
 
-    Uses quadratic scaling so the knob feels more natural (linear pots
-    have most of their perceptual loudness change crammed into the first
-    quarter of rotation with linear mapping).
+    The mapping is LINEAR: gain feeds ``pactl set-sink-volume N%``, and
+    PulseAudio's volume percentage is already perceptually (cubically)
+    mapped. The previous quadratic here stacked onto that — a ~6th-power
+    curve end to end, leaving most of the knob's travel inaudible and all
+    the loudness crammed into the last few degrees.
 
     Pulls voltage from the SharedAdcPoller cache (no i2c on the read
     path), so .gain is cheap enough to call freely.
@@ -51,9 +53,9 @@ class VolumeControl:
         reading = self._pot.read()
         if reading is None:
             return self._last_gain
-        # Map calibrated voltage range to 0.0–1.0, then apply quadratic curve
-        linear = max(0.0, min(1.0, (reading.voltage - _V_MIN) / (_V_MAX - _V_MIN)))
-        g = linear * linear
+        # Map calibrated voltage range to 0.0–1.0; Pulse's cubic volume
+        # scale provides the perceptual shaping.
+        g = max(0.0, min(1.0, (reading.voltage - _V_MIN) / (_V_MAX - _V_MIN)))
         self._last_gain = g
         return g
 
