@@ -607,6 +607,30 @@ class LEDRequest(BaseModel):
     b: bool = False
 
 
+_proc_check: dict = {"ts": 0.0, "alive": False}
+
+
+def _radio_process_running() -> bool:
+    """Is the radio app itself running? Decided from the process table, not
+    only the state file's pid: a direct ADC read from here while the app
+    owns the ADS1115 interleaves on the chip's mux and produces phantom
+    button presses / pot jumps in the radio (2026-09-28). Cached 2 s."""
+    now = time.time()
+    if now - _proc_check["ts"] < 2.0:
+        return _proc_check["alive"]
+    alive = False
+    try:
+        for proc in psutil.process_iter(["cmdline"]):
+            cmd = " ".join(proc.info.get("cmdline") or [])
+            if "-m oracle" in cmd and "--mode hardware" in cmd:
+                alive = True
+                break
+    except Exception:  # noqa: BLE001
+        alive = True  # unknown → assume alive, hands off the chip
+    _proc_check.update(ts=now, alive=alive)
+    return alive
+
+
 @app.get("/api/hardware/inputs")
 def hw_inputs() -> dict:
     # While radio-oracle runs, it owns the ADS1115 — reading the chip from
@@ -614,12 +638,21 @@ def hw_inputs() -> dict:
     # both readers (the dashboard pot jumped; the radio's button/switch
     # reads could glitch too). Use the app's published telemetry instead.
     snap = read_state()
-    app_alive = False
+    app_alive = _radio_process_running()
     if snap and snap.get("pid"):
         try:
-            app_alive = psutil.pid_exists(int(snap["pid"]))
+            app_alive = app_alive or psutil.pid_exists(int(snap["pid"]))
         except (TypeError, ValueError):
-            app_alive = False
+            pass
+    if app_alive and not snap:
+        # Alive but no readable snapshot (e.g. just starting): never touch the chip.
+        return {
+            "available": True,
+            "via_app": True,
+            "pot": {"available": False, "detail": "waiting for app telemetry"},
+            "switch": {"channel": "-", "on": None},
+            "button": {"channel": "-", "pressed": False},
+        }
     if snap and app_alive and snap.get("hw"):
         hw = snap["hw"]
         out: dict = {"available": True, "via_app": True}
