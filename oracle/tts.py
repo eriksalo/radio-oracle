@@ -36,10 +36,15 @@ def speech_units(text: str, max_words: int | None = None) -> list[str]:
     limit = settings.reading_unit_max_words if max_words is None else max_words
     sentences = [_LEADING_PUNCT_RE.sub("", x).strip() for x in _SENTENCE_KEEP_RE.split(text)]
     sentences = [x for x in sentences if re.search(r"[A-Za-z0-9]", x)]
+    # A sentence longer than the limit is cut at clause boundaries (, ; :)
+    # and, failing that, at the limit: the sidecar fails on ~10 s of speech.
+    pieces: list[str] = []
+    for sent in sentences:
+        pieces.extend(_split_long(sent, limit))
     units: list[str] = []
     cur: list[str] = []
     n = 0
-    for sent in sentences:
+    for sent in pieces:
         w = len(sent.split())
         if cur and n + w > limit:
             units.append(" ".join(cur))
@@ -49,6 +54,32 @@ def speech_units(text: str, max_words: int | None = None) -> list[str]:
     if cur:
         units.append(" ".join(cur))
     return units
+
+
+_CLAUSE_KEEP_RE = re.compile(r"(?<=[,;:—])\s+")
+
+
+def _split_long(sentence: str, limit: int) -> list[str]:
+    if len(sentence.split()) <= limit:
+        return [sentence]
+    out: list[str] = []
+    cur: list[str] = []
+    n = 0
+    for clause in _CLAUSE_KEEP_RE.split(sentence):
+        w = len(clause.split())
+        if cur and n + w > limit:
+            out.append(" ".join(cur))
+            cur, n = [], 0
+        if w > limit:  # no punctuation to cut at: hard-split
+            words = clause.split()
+            for i in range(0, len(words), limit):
+                out.append(" ".join(words[i : i + limit]))
+            continue
+        cur.append(clause)
+        n += w
+    if cur:
+        out.append(" ".join(cur))
+    return out
 
 
 def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = None) -> None:
@@ -64,6 +95,7 @@ def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = Non
         return
     q: queue.Queue = queue.Queue(maxsize=prefetch or settings.reading_prefetch_units)
     stop = threading.Event()
+    done = object()  # distinct sentinel: a stubbed synthesize() may return None
 
     def aborted() -> bool:
         return stop.is_set() or bool(should_abort and should_abort())
@@ -78,14 +110,14 @@ def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = Non
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"TTS failed on a unit: {e}")
         finally:
-            q.put(None)
+            q.put(done)
 
     worker = threading.Thread(target=produce, name="say-tts", daemon=True)
     worker.start()
     try:
         while True:
             audio = q.get()
-            if audio is None:
+            if audio is done:
                 break
             if aborted():
                 break
@@ -93,7 +125,7 @@ def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = Non
     finally:
         stop.set()
         try:
-            while q.get_nowait() is not None:
+            while q.get_nowait() is not done:
                 pass
         except queue.Empty:
             pass

@@ -133,8 +133,8 @@ def test_speech_units_chunks_and_sanitizes(monkeypatch):
     text = ". LOOMINGS. Call me Ishmael. Some years ago, never mind how long precisely, I sailed. — Yes!"
     units = speech_units(text)
     assert units[0] == "LOOMINGS. Call me Ishmael."
-    assert all(len(u.split()) <= 8 or "," in u for u in units)  # long sentence stays whole
-    assert units[-1] == "Yes!"
+    assert all(len(u.split()) <= 8 for u in units)  # long sentences are cut at clauses
+    assert units[-1] == "I sailed. Yes!"  # the 10-word sentence was cut at its clauses
     assert speech_units("... — .") == []
 
 
@@ -156,8 +156,8 @@ def test_say_pipelines_units_in_order(monkeypatch):
             T.calls.append(text)
             return np.array([len(T.calls)], dtype=np.float32)
 
-    say(T(), "One two three four five six seven. Eight nine ten. Eleven twelve.")
-    assert T.calls == ["One two three four five six seven.", "Eight nine ten. Eleven twelve."]
+    say(T(), "One two three four five six. Eight nine ten. Eleven twelve.")
+    assert T.calls == ["One two three four five six.", "Eight nine ten. Eleven twelve."]
     assert played == [1, 2]
 
 
@@ -180,3 +180,15 @@ def test_say_aborts_between_units(monkeypatch):
 
     say(T(), "A b c. D e f. G h i.", should_abort=lambda: next(flags))
     assert len(played) <= 1
+
+
+def test_speech_units_never_exceed_limit(monkeypatch):
+    from oracle.tts import speech_units
+
+    monkeypatch.setattr(settings, "reading_unit_max_words", 6)
+    long = "The knowledge base has about eleven million passages from Wikipedia, about ten million from Gutenberg, plus WikiMed and iFixit repair guides for everyone."
+    units = speech_units(long)
+    assert all(len(u.split()) <= 6 for u in units)
+    assert " ".join(units).split() == long.split()
+    nopunct = " ".join(f"w{i}" for i in range(15))
+    assert [len(u.split()) for u in speech_units(nopunct)] == [6, 6, 3]
