@@ -25,6 +25,7 @@ from oracle.hardware.switch_adc import make_action_button_switch
 
 PressKind = Literal["short", "long"]
 _DEBOUNCE_S = 0.03
+_SETTLE_S = 2.0  # ignore presses that begin this soon after the poller starts
 _POLL_S = 0.04  # ADS1115 double-read ~10 ms; 40 ms gap ≈ 20 Hz, fine for press timing
 
 
@@ -82,6 +83,11 @@ class ActionButton:
     def _adc_loop(self) -> None:
         prev = self._switch.is_closed() or False  # treat unknown as released
         press_start: float | None = None
+        # The first ADC samples after power-up can read "pressed" until the
+        # pull-up settles; a phantom long press at boot toggled the radio
+        # into reader mode and back (2026-09-28). Ignore presses that began
+        # within the settle window.
+        started = time.monotonic()
         while not self._stop.is_set():
             level = self._switch.is_closed()
             if level is None:
@@ -94,8 +100,11 @@ class ActionButton:
             elif prev and not level and press_start is not None:
                 # pressed → released
                 duration = time.monotonic() - press_start
+                began = press_start
                 press_start = None
-                if duration >= _DEBOUNCE_S:
+                if began - started < _SETTLE_S:
+                    logger.debug(f"Ignoring button press during startup settle ({duration:.2f}s)")
+                elif duration >= _DEBOUNCE_S:
                     kind = self.classify(duration)
                     logger.debug(f"Button {kind} press ({duration:.2f}s)")
                     self.events.put(ButtonEvent(kind=kind, duration=duration))

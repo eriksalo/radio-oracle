@@ -146,6 +146,8 @@ class OracleApp:
 
             volume_bridge.start()  # knob works for speech even without music
             self._start_wakeword(loop)
+            # Presses queued while the models loaded (~10 s) are stale.
+            self._drain_events()
             self._enter("radio")
 
             while True:
