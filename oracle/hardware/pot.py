@@ -121,6 +121,20 @@ class ADS1115:
             try:
                 self._bus.write_i2c_block_data(self._addr, _REG_CONFIG, cfg_bytes)
                 time.sleep(_CONV_WAIT_S)
+                # Don't trust the sleep alone: read the config register and
+                # wait for OS=1 (conversion complete). Reading the result
+                # early returns the *previous* conversion — another channel's
+                # voltage. Seen 2026-09-28 as the pot channel reporting the
+                # switches' 3.27 V and, the other way round, the button
+                # channel reporting the pot's 0 V: phantom presses.
+                for _ in range(4):
+                    c_hi, _c_lo = self._bus.read_i2c_block_data(self._addr, _REG_CONFIG, 2)
+                    if c_hi & 0x80:
+                        break
+                    time.sleep(0.005)
+                else:
+                    logger.debug(f"ADS1115 ch{channel}: conversion not ready; sample dropped")
+                    return None
                 hi, lo = self._bus.read_i2c_block_data(self._addr, _REG_CONVERSION, 2)
             except OSError as e:
                 self._error = repr(e)

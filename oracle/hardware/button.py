@@ -25,6 +25,10 @@ from oracle.hardware.switch_adc import make_action_button_switch
 
 PressKind = Literal["short", "long"]
 _DEBOUNCE_S = 0.03
+# Shortest press that counts. The button reads the shared ADC poller's
+# cache (100 ms cycle): one bad sample lives for a whole cycle and looked
+# like a ~100 ms tap. A real tap is longer.
+_MIN_PRESS_S = 0.15
 _SETTLE_S = 2.0  # ignore presses that begin this soon after the poller starts
 _POLL_S = 0.04  # ADS1115 double-read ~10 ms; 40 ms gap ≈ 20 Hz, fine for press timing
 
@@ -104,6 +108,8 @@ class ActionButton:
                 press_start = None
                 if began - started < _SETTLE_S:
                     logger.debug(f"Ignoring button press during startup settle ({duration:.2f}s)")
+                elif duration < _MIN_PRESS_S:
+                    logger.debug(f"Ignoring {duration * 1000:.0f} ms blip on the button channel")
                 elif duration >= _DEBOUNCE_S:
                     kind = self.classify(duration)
                     logger.debug(f"Button {kind} press ({duration:.2f}s)")
