@@ -7,6 +7,12 @@ from pydantic_settings import BaseSettings
 class OracleSettings(BaseSettings):
     model_config = {"env_prefix": "ORACLE_"}
 
+    # LLM server. "ollama" (default) or "llama-server" — llama.cpp's own
+    # server (NVIDIA's JP6 container, systemd/llama-server.service) with
+    # the same GGUF Ollama pulled; see docs/deploy-2026-09-latency.md §4.
+    llm_backend: Literal["ollama", "llama-server"] = "ollama"
+    llama_server_url: str = "http://127.0.0.1:8080"
+    llama_server_model: str = "qwen3-4b"  # --alias in the unit; informational
     # Ollama
     ollama_host: str = "http://localhost:11434"
     # Qwen3-4B-Instruct-2507 (Q4_K_M, ~2.5GB): best-in-class instruction
@@ -23,19 +29,43 @@ class OracleSettings(BaseSettings):
     # Factuality-leaning sampling for a RAG-grounded archive persona.
     ollama_temperature: float = 0.6
     ollama_top_p: float = 0.9
-    # Hard cap on streamed (spoken) replies. ~220 tokens ≈ 4-6 sentences ≈
-    # 15s of speech; uncapped replies measured ~1500 chars ≈ 30s+ spoken.
-    # Applies to stream_chat only — summarizer/intent calls stay uncapped.
-    ollama_num_predict: int = 220
+    # Hard cap on streamed (spoken) replies. Baseline 2026-09-27: replies
+    # ran 136-178 tokens ≈ 40 s of speech despite the persona's "two to
+    # four sentences"; 140 ≈ 10 s of generation at 14 tok/s ≈ 100 words,
+    # and the user can always ask for more. A reply that hits the cap has
+    # its unfinished last sentence dropped rather than spoken. Applies to
+    # stream_chat only — summarizer/intent calls stay uncapped.
+    ollama_num_predict: int = 140
+    # Follow-up query rewrite: model (None = main model; a small resident
+    # model would avoid evicting the main model's prefix cache) and output
+    # cap — a search query is a dozen tokens.
+    ollama_rewrite_model: str | None = None
+    ollama_rewrite_num_predict: int = 32
 
     # STT
     # "parakeet" (NVIDIA Parakeet-TDT-0.6B via sherpa-onnx) replaces both
     # whisper models with one better/faster recognizer; whisper backends
     # remain the fallback. See oracle/stt_parakeet.py.
-    stt_backend: Literal["faster-whisper", "pywhispercpp", "parakeet"] = "faster-whisper"
+    # "nemotron-streaming" (NVIDIA Nemotron-speech-streaming-en-0.6b via
+    # sherpa-onnx OnlineRecognizer) decodes while the user talks so the
+    # transcript is final ~one chunk after the endpoint. See
+    # oracle/stt_streaming.py. Replaces Parakeet (don't keep both resident).
+    stt_backend: Literal["faster-whisper", "pywhispercpp", "parakeet", "nemotron-streaming"] = (
+        "faster-whisper"
+    )
     parakeet_model_dir: Path = Path("models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8")
     parakeet_provider: str = "cpu"  # "cuda" on the Jetson (JetPack 6.2 build)
     parakeet_num_threads: int = 4
+    streaming_stt_model_dir: Path = Path(
+        "models/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"
+    )
+    streaming_stt_provider: str = "cpu"
+    # 3 of the 6 cores: decoding runs on the capture thread while the
+    # wake-word detector and (soon) Kokoro synthesis share the rest.
+    streaming_stt_num_threads: int = 3
+    # Gain on blocks fed to the streaming recognizer (the finished-buffer
+    # path applies its own peak normalisation instead).
+    stt_input_gain: float = 8.0
     # faster-whisper: HuggingFace model name (downloaded on first use)
     faster_whisper_model: str = "small.en"
     # Radio-dispatcher path uses a smaller model — vocab is a handful of
@@ -52,7 +82,13 @@ class OracleSettings(BaseSettings):
     whisper_force_cpu: bool = True
     whisper_language: str = "en"
 
-    # Kokoro TTS
+    # Kokoro TTS. "server" delegates synthesis to the GPU sidecar
+    # (oracle/tts_server.py, systemd radio-oracle-tts.service) and falls
+    # back to in-process CPU Kokoro if it isn't reachable.
+    tts_backend: Literal["local", "server"] = "local"
+    tts_server_url: str = "http://127.0.0.1:8781"
+    tts_server_connect_timeout: float = 2.0
+    tts_server_timeout: float = 30.0
     tts_model_path: Path = Path("models/kokoro-v1.0.onnx")
     tts_voices_path: Path = Path("models/voices-v1.0.bin")
     tts_voice: str = "am_michael"  # American male, natural
@@ -61,6 +97,16 @@ class OracleSettings(BaseSettings):
     # is well below full scale — unnormalized it sits quiet next to
     # loudness-mastered music on the same sink.
     tts_peak: float = 0.9
+    # Streaming replies are cut into TTS units as they arrive (see
+    # oracle.core.SpeechSplitter). Kokoro on the Jetson CPU is ~0.8× real
+    # time, so units are kept short: a clause (, ; : —) closes a unit once
+    # it has tts_clause_min_words; with no punctuation a unit is cut before
+    # a conjunction/preposition after tts_soft_cut_words or anywhere after
+    # tts_hard_cut_words. tts_clause_min_words=0 → whole sentences only
+    # (right once TTS runs on the GPU).
+    tts_clause_min_words: int = 3
+    tts_soft_cut_words: int = 8
+    tts_hard_cut_words: int = 12
 
     # Audio
     audio_sample_rate: int = 16000
@@ -75,6 +121,25 @@ class OracleSettings(BaseSettings):
     # natural pause ("Why… is the weather…" recorded 2.2s → "Why?").
     # Radio turns now handle questions too, so match the librarian window.
     vad_silence_duration_radio: float = 0.9
+    # End-of-utterance detection (oracle/endpoint.py). "energy" is the
+    # legacy RMS threshold + fixed trailing silence (vad_silence_duration*).
+    # "silero" ends the turn vad_silence_min after Silero VAD last heard
+    # speech; "silero+smartturn" additionally asks Smart Turn v3 whether the
+    # speaker sounds finished at each checkpoint and keeps listening (up to
+    # vad_silence_max) when they don't.
+    vad_backend: Literal["energy", "silero", "silero+smartturn"] = "energy"
+    silero_vad_model: Path = Path("models/silero_vad.onnx")
+    silero_vad_threshold: float = 0.5
+    smart_turn_model: Path = Path("models/smart-turn-v3.2-cpu.onnx")
+    smart_turn_threshold: float = 0.5
+    smart_turn_interval: float = 0.2  # seconds of extra silence between checks
+    # Gain applied to the copy of each block the VAD / Smart Turn see (the
+    # recording itself is untouched — STT gets its own post-gain). The
+    # ReSpeaker path is quiet enough that the energy threshold sits at
+    # 0.004 RMS; Silero was trained on normal-level speech.
+    vad_input_gain: float = 8.0
+    vad_silence_min: float = 0.25
+    vad_silence_max: float = 2.0
     # After the oracle answers a question, the mic stays open this many
     # seconds for a follow-up (no wake word needed). Silence resumes the
     # music. 0 disables.
@@ -93,6 +158,21 @@ class OracleSettings(BaseSettings):
     embedding_device: str = "auto"  # auto | cpu | cuda | cuda:N
     embedding_fp16: bool = True  # only honored on CUDA
     embedding_batch_size: int = 256
+    # Query-side runtime (oracle/rag/embedder.py). "onnx" runs the encoder
+    # through onnxruntime + tokenizers with no torch in the process — on
+    # the Jetson that is ~1 GB less RSS and ~10 s less boot than
+    # sentence-transformers. Vectors are identical up to int8 noise, so the
+    # FAISS indices (built with sentence-transformers) are unchanged.
+    embedding_runtime: Literal["sentence-transformers", "onnx"] = "sentence-transformers"
+    onnx_embedding_dirs: dict[str, str] = {
+        "nomic-ai/nomic-embed-text-v1.5": "models/nomic-embed-text-v1.5-onnx",
+    }
+    # fp32: cosine 1.0000 vs sentence-transformers, 64 ms/query, ~600 MB
+    # (Jetson 2026-09-27). model_int8.onnx: 23 ms but cos 0.97 — retrieval
+    # recall risk, and dynamic int8 is batch-dependent.
+    onnx_embedding_file: str = "model.onnx"
+    onnx_embedding_threads: int = 4
+    onnx_embedding_max_tokens: int = 512  # queries are a sentence; caps padding cost
     rag_top_k: int = 5
     chunk_size: int = 512
     chunk_overlap: int = 64
@@ -104,9 +184,11 @@ class OracleSettings(BaseSettings):
     rag_max_distance: float = 0.32
     # Per-chunk character cap at injection time. Full 512-word chunks are
     # ~3.3KB; five uncapped chunks cost ~10s of prompt prefill per turn on
-    # the Jetson. 1200 chars keeps the answer-bearing lead of each chunk.
+    # the Jetson. Measured 2026-09-27: 5 × 1200 chars = ~6.3 KB ≈ 1500
+    # tokens ≈ 2.5 s of prefill at ~600 tok/s — the largest per-turn cost
+    # once the persona prefix is cached. 700 keeps the answer-bearing lead.
     # 0 disables.
-    rag_chunk_char_limit: int = 1200
+    rag_chunk_char_limit: int = 700
     # Rewrite short/pronoun-heavy follow-ups ("where did he die?") into
     # self-contained queries using recent turns, via a quick LLM call.
     rag_query_rewrite: bool = True
@@ -123,7 +205,7 @@ class OracleSettings(BaseSettings):
     rag_collections: str | None = None
 
     # Two-tier retrieval (snappy first answer + optional deep cross-encoder rerank)
-    tier1_top_k: int = 5  # results per collection in snappy mode
+    tier1_top_k: int = 3  # results per collection in snappy mode (5 → 3: prefill cost, 2026-09)
     tier2_top_k: int = 10  # results per collection in deep mode (pre-rerank)
     tier2_rerank_pool: int = 30  # max candidates fed to the cross-encoder
     tier2_final_top_k: int = 10  # results returned to the LLM after rerank

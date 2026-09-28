@@ -108,6 +108,47 @@ async def test_context_builder_injects_long_term_memory():
         store.close()
 
 
+async def test_context_builder_puts_rag_last_and_question_once():
+    """Prefix-cache layout: persona/memory/history first, RAG block after
+    the history, the current question exactly once at the very end."""
+    from oracle.memory.context import ContextBuilder
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = ConversationStore(Path(tmp) / "test.db")
+        store.update_profile("Erik is restoring a vintage radio.")
+        s = store.new_session()
+        store.add_message(s, "user", "Who was Tesla?")
+        store.add_message(s, "assistant", "An inventor.")
+        store.add_message(s, "user", "Where did he die?")  # stored before build()
+
+        ctx = ContextBuilder(store, s)
+        messages = await ctx.build("PERSONA", "=== Retrieved ===", user_text="Where did he die?")
+
+        roles = [m["role"] for m in messages]
+        assert messages[0] == {"role": "system", "content": "PERSONA"}
+        assert "vintage radio" in messages[1]["content"]
+        assert roles[2:] == ["user", "assistant", "system", "user"]
+        assert messages[-2]["content"] == "=== Retrieved ==="
+        assert messages[-1]["content"] == "Where did he die?"
+        assert sum(m["content"] == "Where did he die?" for m in messages) == 1
+        # The persona message never carries the retrieved text.
+        assert "Retrieved" not in messages[0]["content"]
+        store.close()
+
+
+async def test_context_builder_legacy_call_without_user_text():
+    from oracle.memory.context import ContextBuilder
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = ConversationStore(Path(tmp) / "test.db")
+        s = store.new_session()
+        store.add_message(s, "user", "hi")
+        messages = await ContextBuilder(store, s).build("P", "RAG")
+        assert [m["role"] for m in messages] == ["system", "user", "system"]
+        assert messages[-1]["content"] == "RAG"
+        store.close()
+
+
 async def test_finalize_session_summarizes_and_folds(monkeypatch):
     from oracle.memory import context as ctx_mod
 

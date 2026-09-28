@@ -1,0 +1,23 @@
+[Unit]
+Description=Radio Oracle - llama.cpp server (native CUDA build)
+# Built by scripts/build_llama_cpp.sh; same GGUF Ollama pulled. Only one
+# of ollama / llama-server may hold the model.
+Conflicts=ollama.service
+After=network.target
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+SupplementaryGroups=video render
+Restart=on-failure
+RestartSec=5
+Environment=LD_LIBRARY_PATH=/opt/llama.cpp/lib:/usr/local/cuda/lib64
+ExecStart=/opt/llama.cpp/bin/llama-server \
+    -m /opt/radio-oracle/models/qwen3-4b-instruct-2507-q4_K_M.gguf \
+    --alias qwen3-4b --host 127.0.0.1 --port 8080 \
+    -ngl 99 -c 3584 -np 1 -fa on -ctk q8_0 -ctv q8_0 \
+    --cache-ram 256 --cache-reuse 256 --jinja -t 4
+
+[Install]
+WantedBy=multi-user.target

@@ -23,6 +23,7 @@ def record_until_silence(
     silence_duration: float | None = None,
     should_abort: AbortCheck = None,
     onset_timeout: float | None = None,
+    on_block: Callable[[np.ndarray], None] | None = None,
 ) -> np.ndarray:
     """Record audio from default mic until silence is detected.
 
@@ -31,9 +32,13 @@ def record_until_silence(
     (may be empty). If *onset_timeout* is set and no speech starts within
     that many seconds, returns empty — used for the post-answer follow-up
     window, where silence means "no follow-up, resume the music".
+    *on_block* receives each raw mono block (capture rate) from speech
+    onset on — the streaming STT decodes as the user talks.
     """
     import sounddevice as sd
     from scipy.signal import resample_poly
+
+    from oracle.endpoint import VadEndpointer, build_endpointer
 
     out_sr = sample_rate or settings.audio_sample_rate
     capture_sr = settings.audio_capture_sample_rate
@@ -44,15 +49,19 @@ def record_until_silence(
 
     block_duration = 0.1  # 100ms blocks
     block_size = int(capture_sr * block_duration)
-    silence_blocks = 0
-    max_silence_blocks = int(max_silence / block_duration)
+    silence_s = 0.0
     onset_blocks_left = int(onset_timeout / block_duration) if onset_timeout else None
     started = False
     frames: list[np.ndarray] = []
+    # The VAD endpointers classify 16 kHz mono; capture is 16 kHz today
+    # (audio_capture_sample_rate) so blocks pass straight through.
+    endpointer = build_endpointer(threshold, max_silence)
+    endpointer.start()
+    vad_gain = 1.0 if settings.vad_backend == "energy" else settings.vad_input_gain
 
     logger.debug(
         f"Recording: device={device} capture_sr={capture_sr} out_sr={out_sr} "
-        f"threshold={threshold} silence={max_silence}s"
+        f"endpoint={settings.vad_backend} threshold={threshold} silence={max_silence}s"
     )
 
     stream_opts = dict(
@@ -61,6 +70,9 @@ def record_until_silence(
         dtype="float32",
         blocksize=block_size,
         device=device,
+        # Smart Turn can take a few hundred ms at a checkpoint; a deeper
+        # input buffer keeps PortAudio from dropping samples meanwhile.
+        latency="high",
     )
     with sd.InputStream(**stream_opts) as stream:
         while True:
@@ -68,16 +80,28 @@ def record_until_silence(
                 logger.debug("Recording aborted")
                 break
             data, _ = stream.read(block_size)
-            energy = np.sqrt(np.mean(data**2))
+            mono = data[:, 0] if data.ndim > 1 else data
+            # The VAD models see a gain-boosted copy (quiet USB mic); the
+            # energy endpointer's threshold is tuned to the raw level.
+            vad_view = mono if vad_gain == 1.0 else np.clip(mono * vad_gain, -1.0, 1.0)
 
-            if energy > threshold:
+            if endpointer.is_speech(vad_view):
                 started = True
-                silence_blocks = 0
+                silence_s = 0.0
                 frames.append(data.copy())
+                if on_block is not None:
+                    on_block(mono)
             elif started:
-                silence_blocks += 1
+                silence_s += block_duration
                 frames.append(data.copy())
-                if silence_blocks >= max_silence_blocks:
+                if on_block is not None:
+                    on_block(mono)
+                so_far = np.concatenate(frames)[:, 0]
+                if vad_gain != 1.0:
+                    so_far = np.clip(so_far * vad_gain, -1.0, 1.0)
+                if endpointer.turn_complete(so_far, silence_s):
+                    if isinstance(endpointer, VadEndpointer):
+                        logger.debug(f"Endpoint: {endpointer.last_decision} after {silence_s:.2f}s")
                     break
             elif onset_blocks_left is not None:
                 onset_blocks_left -= 1
@@ -223,15 +247,22 @@ def _get_output_device() -> int | None:
     return _output_device_id
 
 
+# One speaker: the "checking the archives" ack runs in its own thread and
+# the answer's first audio can now land while it is still playing. Two
+# concurrent OutputStreams mix; serialize instead.
+_speaker_lock = threading.Lock()
+
+
 def play_audio(
     audio: np.ndarray,
     sample_rate: int | None = None,
     should_abort: AbortCheck = None,
 ) -> None:
-    """Play audio through configured output device."""
+    """Play audio through configured output device (one clip at a time)."""
     src_sr = sample_rate or settings.audio_sample_rate
     out, dst_sr = _resample_to_playback(audio, src_sr)
-    _stream_play(out, dst_sr, should_abort)
+    with _speaker_lock:
+        _stream_play(out, dst_sr, should_abort)
 
 
 def play_wav_bytes(wav_bytes: bytes, should_abort: AbortCheck = None) -> None:

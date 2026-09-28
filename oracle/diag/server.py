@@ -1596,6 +1596,7 @@ const ACT_LABELS = {
   phase: 'PHASE', wake: 'WAKE', heard: 'HEARD', decided: 'DECIDED',
   spoke: 'SPOKE', asked: 'ASKED', answered: 'ANSWERED',
   consulted: 'ARCHIVES', playing: 'PLAYING', reading: 'READING', error: 'ERROR',
+  timing: 'TIMING',
 };
 const PHASE_TEXT = {
   radio: 'playing music', librarian: 'listening', thinking: 'thinking',
@@ -1610,6 +1611,13 @@ function actLine(ev) {
   else if (ev.kind === 'consulted') detail = (ev.sources || []).join(' / ') + ' (' + ev.hits + ' hits)';
   else if (ev.kind === 'playing') detail = (ev.artist ? ev.artist + ' \u2014 ' : '') + ev.title;
   else if (ev.kind === 'reading') detail = (ev.book ? ev.book + ', ' : '') + 'chapter ' + ev.chapter + (ev.chapter_title ? ': ' + ev.chapter_title : '');
+  else if (ev.kind === 'timing') {
+    // Per-stage seconds for one turn; ttfa = end of speech → first audio.
+    const order = ['ttfa', 'record', 'stt', 'rewrite', 'retrieve', 'prefill', 'first_token', 'total'];
+    detail = ev.label + ' ' + order.filter(k => ev[k] !== undefined).map(k => k + '=' + ev[k].toFixed(2) + 's').join(' ')
+      + (ev.decode_tps ? ' ' + ev.decode_tps + ' tok/s' : '')
+      + (ev.prompt_tokens ? ' ' + ev.prompt_tokens + ' tok' : '');
+  }
   else detail = JSON.stringify(ev);
   const label = ACT_LABELS[ev.kind] || ev.kind.toUpperCase();
   return '<div><span style="color:var(--grn-dim)">' + t + '</span> ' +

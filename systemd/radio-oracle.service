@@ -1,7 +1,9 @@
 [Unit]
 Description=Radio Oracle - Offline Voice Assistant
-After=network.target ollama.service user@999.service
-Wants=ollama.service
+# No Wants=ollama.service: the LLM server is whichever of ollama /
+# llama-server is enabled (they Conflict); Wants= would drag Ollama back up
+# on every restart and kill llama-server (2026-09-27).
+After=network.target ollama.service llama-server.service user@999.service
 Requires=user@999.service
 
 [Service]

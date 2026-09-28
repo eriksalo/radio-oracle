@@ -65,7 +65,9 @@ def test_retriever_deep_mode_invokes_reranker(monkeypatch):
     # Bypass list_collections by passing names explicitly
     snappy = r.query("q", collection_names=["x"], mode="snappy")
     assert fake_reranker.rerank.call_count == 0
-    assert len(snappy) == 5  # tier1_top_k default
+    from config.settings import settings
+
+    assert len(snappy) == settings.tier1_top_k
 
     deep = r.query("q", collection_names=["x"], mode="deep")
     assert fake_reranker.rerank.call_count == 1

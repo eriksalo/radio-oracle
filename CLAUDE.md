@@ -17,9 +17,11 @@ make test       # pytest
 - `oracle/app.py` — hardware-driven state machine (Standby/Radio/Librarian)
 - `oracle/core.py` — text REPL + per-turn voice helper (`voice_init`/`voice_turn`/`voice_close`)
 - `oracle/llm.py` — async Ollama streaming client
-- `oracle/stt.py` — Whisper STT (faster-whisper, CPU int8)
-- `oracle/tts.py` — Kokoro TTS (CPU, ONNX)
-- `oracle/audio.py` — mic capture, speaker playback, VAD, AM-radio filter
+- `oracle/stt.py` — STT factory + `listen()` (the one record→transcribe path); backends: `stt_parakeet.py` (default on the Jetson), `stt_streaming.py` (Nemotron, opt-in), Whisper
+- `oracle/tts.py` — Kokoro TTS client (in-process CPU, or the GPU sidecar `oracle/tts_server.py` when `ORACLE_TTS_BACKEND=server`)
+- `oracle/audio.py` — mic capture, speaker playback (serialized), AM-radio filter
+- `oracle/endpoint.py` — end-of-utterance: energy (default) / Silero VAD / Silero + Smart Turn v3 (`ORACLE_VAD_BACKEND`)
+- `oracle/timing.py` — per-turn stage timer (`TURN …` log line + `timing` activity event; `ttfa` = end of speech → first audio)
 - `oracle/rag/` — FAISS IVF-PQ retrieval (nomic-v1.5), pluggable backends, tiered modes, cross-encoder rerank, query router
 - `oracle/memory/` — conversation persistence (SQLite + summarization)
 - `oracle/persona.py` — system prompt builder from persona config
@@ -31,16 +33,18 @@ make test       # pytest
 
 ## Key Design Decisions
 
-- LLM: Ollama + Qwen3-4B-Instruct-2507 Q4_K_M (~2.5GB VRAM; llama3.2:3b is the rollback)
+- LLM: Qwen3-4B-Instruct-2507 Q4_K_M via Ollama (default) or llama.cpp's `llama-server` in NVIDIA's JP6 container (`ORACLE_LLM_BACKEND=llama-server`, `systemd/llama-server.service`, same GGUF blob); llama3.2:3b is the rollback model
 - STT and LLM are sequential (never concurrent) to fit in 8GB unified memory
 - LLM calls always set num_ctx (8192) — Ollama's 2048 default silently truncates
 - Memory: sessions are summarized at close (or caught up at next boot) and folded
   into a rolling profile row; both are injected into every turn's context
-- TTS runs on CPU to avoid GPU contention
+- TTS: Kokoro on the Orin CPU is RTF ~0.8 (measured 2026-09-27) — too slow for a snappy first word — so on the Jetson it runs on the GPU in a cp310 sidecar venv (`.venv-tts`, onnxruntime-gpu from pypi.jetson-ai-lab.io; the app venv is cp311 and has no CUDA onnxruntime). Replies are cut into short units (`oracle.core.SpeechSplitter`) and synthesized/played in a 3-stage pipeline.
+- Prompt layout is prefix-cache friendly: persona, memory, summary, history, *then* the RAG block, then the question once (`oracle/memory/context.py`). Keep anything that changes per turn at the end.
+- Latency regression harness: `sudo /opt/radio-oracle/scripts/sim_turn.sh` on the Jetson (stops/starts the service; `docs/golden_questions.txt`); results in `docs/deploy-2026-09-latency.md`.
 - RAG: FAISS IVF-PQ (PQ-64, METRIC_INNER_PRODUCT, score_scale=20.0) per collection, queried with `nomic-embed-text-v1.5` (768-d). Backend is pluggable per collection via `collection_backends` so old ChromaDB collections still work if needed.
 - Tiered retrieval: snappy first-pass (`tier1_top_k`) returns immediately; deep mode adds a cross-encoder rerank on a larger candidate pool (workstation/CPU). See `oracle/rag/modes.py`.
 - Workstation builds FAISS indices from ChromaDB-staged chunks; only `data/faiss/` rsyncs to the Jetson. ChromaDB is workstation-only after the FAISS cutover (2026-05-19).
-- Embedder runs on CPU on the Jetson today (~1.2 s warm). cp311 CUDA torch wheels for JetPack 6.2 don't exist; see `docs/rag-migration-runbook.md` §"Known follow-up" for the three fix paths.
+- Query embedder on the Jetson is nomic-v1.5 fp32 ONNX via onnxruntime (`ORACLE_EMBEDDING_RUNTIME=onnx`, ~64 ms/query, no torch in the process); sentence-transformers stays the workstation/ingest path. The vectors are **un-normalized** mean-pooled outputs — the FAISS `score_scale`/distance gate are calibrated on that; never L2-normalize query vectors.
 - Audio architecture (see `docs/SETUP.md` §1.6): **asymmetric routing.** Mic capture goes through PulseAudio's `module-echo-cancel` (`aec_source`) for NS/AGC; music + TTS go *direct* to the real USB speaker sink at 48 kHz, bypassing AEC. Music is decoded by an `mpg123` subprocess at ~1 % CPU (the prior in-process miniaudio+scipy+sounddevice pipeline pegged 100 %+ and underran constantly). Trade-off: wake-word reliability degrades during music since AEC has no music reference; the action button is the reliable wake during playback. On-chip AEC on the XU316 doesn't apply either — separate USB devices, no shared reference. IC/NS/AGC/VNR on the XU316 still help (mic-input-only DSP). Pulse config tracked at `systemd/pulse-default.pa`; firmware bin + DFU procedure in `firmware/`.
 - Config via env vars with `ORACLE_` prefix (direnv-compatible). The Jetson's `/opt/radio-oracle/.env` sets `ORACLE_COLLECTION_BACKENDS` to route every collection to FAISS.
 

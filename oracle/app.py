@@ -448,24 +448,21 @@ class OracleApp:
 
     async def _ask_which_book(self, voice_ctx, session):
         """Prompt for a title/author by voice and search the library."""
-        from oracle.audio import record_until_silence
         from oracle.core import speak_text
+        from oracle.stt import listen
 
         await speak_text(voice_ctx, "Which book? Say a title or an author.")
         try:
-            audio = record_until_silence(should_abort=lambda: not self.power.is_on)
+            _audio, text = listen(voice_ctx.stt, should_abort=lambda: not self.power.is_on)
         except (ValueError, OSError) as e:
             logger.warning(f"Mic unavailable for book choice: {e}")
             return None
-        if len(audio) == 0 or not self.power.is_on:
+        finally:
+            voice_ctx.stt.unload()
+        if not self.power.is_on:
             return None
 
         self.leds.set_mode("thinking")
-        voice_ctx.stt.load()
-        try:
-            text = voice_ctx.stt.transcribe(audio)
-        finally:
-            voice_ctx.stt.unload()
         if not text.strip():
             await speak_text(voice_ctx, "I didn't catch that.")
             return None

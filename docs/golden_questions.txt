@@ -1,0 +1,14 @@
+# One question per line; blank lines and # comments ignored.
+# Lines starting with "+" are follow-ups to the previous question (they
+# exercise the rewrite path). Keep this list stable — it is the latency
+# regression set for docs/deploy-2026-09-latency.md.
+Who was Nikola Tesla?
++ Where did he die?
+How does a vacuum tube amplify a signal?
+What is the boiling point of water at high altitude?
++ Why is that?
+Tell me about the whaling ship in Moby Dick.
+How do I treat a second-degree burn?
+What causes the northern lights?
++ Can you see them from Colorado?
+Who wrote Pride and Prejudice?

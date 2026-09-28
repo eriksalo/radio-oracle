@@ -9,9 +9,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
 from loguru import logger
 
 from config.settings import settings
+from oracle import timing
 from oracle.llm import chat, check_ollama, stream_chat
 from oracle.memory.context import ContextBuilder, catch_up_summaries
 from oracle.memory.store import ConversationStore
@@ -24,6 +26,91 @@ if TYPE_CHECKING:
     from oracle.tts import KokoroTTS
 
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
+# Clause boundary for the first TTS unit only: punctuation followed by
+# whitespace, so "1,000" and "e.g." don't split.
+_CLAUSE_END_RE = re.compile(r"(?<=[,;:—])\s+")
+
+
+# Words before which a unit may be cut mid-sentence when no punctuation
+# has shown up: conjunctions, relative pronouns and prepositions start a
+# new prosodic phrase, so the join is least audible there.
+_SOFT_CUT_WORDS = frozenset(
+    {
+        "and", "but", "or", "which", "that", "because", "so", "while", "although",
+        "though", "where", "when", "as", "to", "into", "from", "with", "by", "for",
+        "through", "than", "after", "before", "until", "if",
+    }
+)  # fmt: skip
+
+
+class SpeechSplitter:
+    """Cuts a token stream into units for TTS as soon as they are speakable.
+
+    Kokoro on this CPU synthesizes at ~0.8× real time, so a 20-word
+    sentence is ~6 s of dead air before it can start playing, and a long
+    unit after a short one leaves a gap while it renders. Units are
+    therefore kept short throughout: a sentence end (. ! ?) always closes
+    a unit; a clause boundary (, ; : —) closes one once it holds
+    ``clause_min_words``; without punctuation a unit is cut before a
+    conjunction/preposition after ``soft_cut_words`` words, or at any word
+    boundary after ``hard_cut_words``. Kokoro renders comma-terminated
+    fragments naturally; the mid-phrase cuts are the price of a fast
+    first word. ``clause_min_words=0`` disables the clause/soft/hard cuts
+    (sentences only).
+    """
+
+    def __init__(
+        self,
+        clause_min_words: int | None = None,
+        soft_cut_words: int | None = None,
+        hard_cut_words: int | None = None,
+    ) -> None:
+        self._buf = ""
+        self._min_words = (
+            settings.tts_clause_min_words if clause_min_words is None else clause_min_words
+        )
+        self._soft = settings.tts_soft_cut_words if soft_cut_words is None else soft_cut_words
+        self._hard = settings.tts_hard_cut_words if hard_cut_words is None else hard_cut_words
+
+    def feed(self, token: str) -> list[str]:
+        self._buf += token
+        out: list[str] = []
+        parts = _SENTENCE_END_RE.split(self._buf)
+        if len(parts) > 1:
+            out.extend(p.strip() for p in parts[:-1] if p.strip())
+            self._buf = parts[-1]
+        if self._min_words > 0:
+            # The remainder may itself already be long enough to cut.
+            while True:
+                clause = _CLAUSE_END_RE.split(self._buf, maxsplit=1)
+                if len(clause) > 1 and len(clause[0].split()) >= self._min_words:
+                    out.append(clause[0].strip())
+                    self._buf = clause[1]
+                    continue
+                cut = self._unit_cut()
+                if cut is None:
+                    break
+                out.append(self._buf[:cut].strip())
+                self._buf = self._buf[cut:]
+        return out
+
+    def _unit_cut(self) -> int | None:
+        """Character offset to cut an over-long unit at, or None."""
+        # Only complete words count: the last token may be mid-word.
+        words = self._buf.split(" ")
+        complete = words[:-1]
+        if len(complete) < self._soft:
+            return None
+        for i in range(self._soft, len(complete)):
+            if complete[i].lower().strip(",.;:") in _SOFT_CUT_WORDS:
+                return len(" ".join(complete[:i])) + 1
+        if len(complete) >= self._hard:
+            return len(" ".join(complete[: self._hard])) + 1
+        return None
+
+    def flush(self) -> str:
+        tail, self._buf = self._buf.strip(), ""
+        return tail
 
 
 async def _init_common() -> tuple[str, ConversationStore, str]:
@@ -97,11 +184,22 @@ def _try_rag_query(user_input: str) -> str:
 # Follow-ups like "where did he die?" embed uselessly on their own — the
 # pronoun refers to the previous turn. Detect them and rewrite into a
 # self-contained query with a quick LLM call before retrieval.
-_FOLLOWUP_RE = re.compile(
-    r"\b(he|she|it|they|him|her|them|his|hers|its|their|theirs|"
-    r"that|this|those|these|there|one)\b",
+#
+# The rewrite costs ~2 s on the Jetson *and* evicts the main prompt's
+# prefix cache (single Ollama slot), so it must fire only on real
+# follow-ups. The old rule (any of it/that/this/there/one, or ≤5 words)
+# fired on "Who wrote Pride and Prejudice?". Now: a third-person pronoun,
+# a deictic phrase, a follow-up opener, or a bare short wh-question —
+# and only when there is a previous answer to refer back to.
+_PRONOUN_RE = re.compile(
+    r"\b(he|she|they|him|her|them|his|hers|their|theirs|it|its)\b", re.IGNORECASE
+)
+_DEICTIC_RE = re.compile(r"\b(that one|the same|the other|those|these)\b", re.IGNORECASE)
+_CUE_RE = re.compile(
+    r"^\W*(and|what about|how about|tell me more|more about|anything else|how come)\b",
     re.IGNORECASE,
 )
+_WH_RE = re.compile(r"^\W*(why|where|when|how|who|which|what)\b", re.IGNORECASE)
 
 _REWRITE_PROMPT = (
     "Rewrite the user's latest message as one short, self-contained search "
@@ -110,26 +208,26 @@ _REWRITE_PROMPT = (
 )
 
 
-def _needs_rewrite(text: str) -> bool:
-    return bool(_FOLLOWUP_RE.search(text)) or len(text.split()) <= 5
+def _needs_rewrite(text: str, has_prior_answer: bool = True) -> bool:
+    if not has_prior_answer:
+        return False
+    if _PRONOUN_RE.search(text) or _DEICTIC_RE.search(text) or _CUE_RE.search(text):
+        return True
+    # "Why is that?", "Where exactly?" — short wh-questions lean on context.
+    return bool(_WH_RE.search(text)) and len(text.split()) <= 4
 
 
-async def _retrieval_query(store: ConversationStore, session_id: str, text: str) -> str:
-    """The text to embed for retrieval — rewritten if it's a follow-up."""
-    if not settings.rag_query_rewrite or not _needs_rewrite(text):
-        return text
-    # The current user message was already stored; history is everything before.
-    recent = store.get_messages(session_id, limit=5)
-    prior = recent[:-1] if recent else []
-    if not prior:
-        return text
-    history = "\n".join(f"{m['role']}: {m['content']}" for m in prior)
+async def _rewrite_query(history: list[dict[str, str]], text: str) -> str:
+    """Ask the LLM for a self-contained query; falls back to *text*."""
+    hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
     try:
         out = await chat(
             [
                 {"role": "system", "content": _REWRITE_PROMPT},
-                {"role": "user", "content": f"Conversation:\n{history}\n\nLatest message: {text}"},
-            ]
+                {"role": "user", "content": f"Conversation:\n{hist}\n\nLatest message: {text}"},
+            ],
+            model=settings.ollama_rewrite_model,
+            num_predict=settings.ollama_rewrite_num_predict,
         )
         out = out.strip().strip('"')
         if 0 < len(out) <= 200 and "\n" not in out:
@@ -138,6 +236,46 @@ async def _retrieval_query(store: ConversationStore, session_id: str, text: str)
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Query rewrite failed, using raw text: {e}")
     return text
+
+
+def _token_overlap(a: str, b: str) -> float:
+    """Jaccard overlap of lowercase word sets — 1.0 means the rewrite
+    added nothing worth a second retrieval."""
+    wa = set(re.findall(r"\w+", a.lower()))
+    wb = set(re.findall(r"\w+", b.lower()))
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+async def _retrieve_for_turn(store: ConversationStore, session_id: str, text: str) -> str:
+    """RAG context for *text*, rewriting follow-ups off the critical path.
+
+    When a rewrite is needed, retrieval on the raw text runs concurrently
+    with the LLM rewrite; the rewritten query only triggers a second
+    retrieval if it actually differs (a pronoun resolved to a name).
+    Returns the formatted context ("" when nothing relevant).
+    """
+    if not settings.rag_query_rewrite:
+        return await asyncio.to_thread(_try_rag_query, text)
+    # The current user message was already stored; history is everything before.
+    recent = store.get_messages(session_id, limit=5)
+    prior = recent[:-1] if recent else []
+    has_prior_answer = any(m["role"] == "assistant" for m in prior)
+    if not _needs_rewrite(text, has_prior_answer):
+        return await asyncio.to_thread(_try_rag_query, text)
+
+    rewritten, raw_context = await asyncio.gather(
+        _rewrite_query(prior, text),
+        asyncio.to_thread(_try_rag_query, text),
+    )
+    t = timing.current()
+    if t is not None:
+        t.note(rewrite=1)
+    if rewritten == text or _token_overlap(rewritten, text) >= 0.8:
+        return raw_context
+    logger.debug("Rewrite changed the query — retrieving again")
+    return await asyncio.to_thread(_try_rag_query, rewritten)
 
 
 # ---------------------------------------------------------------------------
@@ -168,10 +306,8 @@ async def text_repl() -> None:
             break
 
         store.add_message(session_id, "user", user_input)
-        retrieval_text = await _retrieval_query(store, session_id, user_input)
-        rag_context = _try_rag_query(retrieval_text)
-        messages = await ctx.build(system_prompt, rag_context)
-        messages.append({"role": "user", "content": user_input})
+        rag_context = await _retrieve_for_turn(store, session_id, user_input)
+        messages = await ctx.build(system_prompt, rag_context, user_text=user_input)
 
         print("Oracle: ", end="", flush=True)
         full_response: list[str] = []
@@ -247,11 +383,29 @@ async def voice_init() -> VoiceContext:
     # the radio STT model (radio is the mode the user lands in), Kokoro
     # (first spoken reply otherwise pays a cold model load), and the RAG
     # retriever (embedder + FAISS indices — seconds of disk I/O).
+    from oracle.endpoint import warm as warm_endpoint
+
     await asyncio.gather(
         asyncio.to_thread(stt_fast.load),
         asyncio.to_thread(tts.load),
         asyncio.to_thread(_get_retriever),
+        asyncio.to_thread(warm_endpoint),
     )
+
+    vc_stub = VoiceContext(
+        stt=stt,
+        stt_fast=stt_fast,
+        tts=tts,
+        store=store,
+        ctx_builder=ctx_builder,
+        system_prompt=system_prompt,
+        session_id=session_id,
+    )
+    # The "checking the archives" clips: synthesize now (~4 s of Kokoro on
+    # this CPU) rather than in front of the first question.
+    from oracle.commands import warm_thinking_acks
+
+    await asyncio.to_thread(warm_thinking_acks, vc_stub)
 
     return VoiceContext(
         stt=stt,
@@ -363,36 +517,47 @@ async def voice_turn(
     If *pre_text* is provided, skip recording/transcription and use it directly.
     Returns True if a turn completed, False if aborted or skipped (silence).
     """
-    from oracle.audio import play_audio, record_until_silence
+    # The dispatcher may already own a timer (it did the record + STT);
+    # otherwise this turn is the whole story. Always cleared on exit so
+    # an aborted turn's timer never bleeds into the next one.
+    timer = timing.get_or_start("librarian")
+    try:
+        return await _voice_turn(vc, leds, should_abort, pre_text, timer)
+    finally:
+        timing.clear()
+
+
+async def _voice_turn(
+    vc: VoiceContext,
+    leds: StatusLEDs | None,
+    should_abort: Callable[[], bool] | None,
+    pre_text: str | None,
+    timer: timing.TurnTimer,
+) -> bool:
+    from oracle.audio import play_audio
+    from oracle.stt import listen
 
     def aborted() -> bool:
         return should_abort() if should_abort is not None else False
 
     if pre_text is not None:
         text = pre_text
+        timer.speech_ended()
         if leds is not None:
             leds.set_mode("thinking")
     else:
-        # Listening
+        # Listening (+ transcribing as we go with a streaming backend)
         if leds is not None:
             leds.set_mode("librarian")
         logger.info("Listening...")
         try:
-            audio = await asyncio.to_thread(record_until_silence, should_abort=should_abort)
+            _audio, text = await asyncio.to_thread(listen, vc.stt, should_abort=should_abort)
         except (ValueError, OSError) as e:
             logger.warning(f"Mic unavailable for voice turn: {e}")
             return False
-        if aborted() or len(audio) == 0:
-            return False
-
-        # Thinking (transcribe + LLM)
+        vc.stt.unload()
         if leds is not None:
             leds.set_mode("thinking")
-        if aborted():
-            return False
-        vc.stt.load()
-        text = await asyncio.to_thread(vc.stt.transcribe, audio)
-        vc.stt.unload()
         if aborted():
             return False
 
@@ -406,61 +571,78 @@ async def voice_turn(
     emit("asked", text=text)
     vc.store.add_message(vc.session_id, "user", text)
 
-    retrieval_text = await _retrieval_query(vc.store, vc.session_id, text)
-    rag_context = await asyncio.to_thread(_try_rag_query, retrieval_text)
-    messages = await vc.ctx_builder.build(vc.system_prompt, rag_context)
-    messages.append({"role": "user", "content": text})
+    rag_context = await _retrieve_for_turn(vc.store, vc.session_id, text)
+    timer.mark("retrieve")
+    messages = await vc.ctx_builder.build(vc.system_prompt, rag_context, user_text=text)
+    timer.mark("build")
+    timer.note(rag_chars=len(rag_context))
 
     response_parts: list[str] = []
-    sentence_buffer = ""
 
     if leds is not None:
         leds.set_mode("speaking")
 
-    # Pipeline TTS with generation: completed sentences go onto a queue and
-    # a worker synthesizes/plays them in a thread, so the token stream keeps
-    # flowing while earlier sentences are being spoken. Previously synthesis
-    # + playback blocked the event loop and stalled the stream per sentence.
-    tts_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=8)
+    # Three-stage pipeline: token stream → text units → synthesis → playback.
+    # Synthesis and playback are separate workers so sentence N+1 is being
+    # synthesized while N plays (Kokoro on this CPU is RTF ~0.8 — a single
+    # synth-then-play worker left a synthesis-length gap between every
+    # sentence). The first unit may be a clause so the first audio doesn't
+    # wait for a whole sentence.
+    text_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=8)
+    audio_q: asyncio.Queue[np.ndarray | None] = asyncio.Queue(maxsize=3)
 
-    async def _tts_worker() -> None:
+    async def _synth_worker() -> None:
         while True:
-            sentence = await tts_queue.get()
-            if sentence is None:
+            unit = await text_q.get()
+            if unit is None:
+                await audio_q.put(None)
                 return
             if aborted():
                 continue  # keep draining so the producer never blocks
-            audio_out = await asyncio.to_thread(vc.tts.synthesize, sentence)
+            await audio_q.put(await asyncio.to_thread(vc.tts.synthesize, unit))
+
+    async def _play_worker() -> None:
+        while True:
+            audio_out = await audio_q.get()
+            if audio_out is None:
+                return
             if aborted():
                 continue
+            timer.mark_once("first_audio")
             await asyncio.to_thread(play_audio, audio_out, vc.tts.sample_rate, should_abort)
 
-    worker = asyncio.create_task(_tts_worker())
+    synth = asyncio.create_task(_synth_worker())
+    play = asyncio.create_task(_play_worker())
+    splitter = SpeechSplitter()
+    stats: dict = {}
     try:
-        async for token in stream_chat(messages):
+        async for token in stream_chat(messages, stats=stats):
             if aborted():
                 break
             response_parts.append(token)
-            sentence_buffer += token
-            sentences = _SENTENCE_END_RE.split(sentence_buffer)
-            if len(sentences) > 1:
-                for sentence in sentences[:-1]:
-                    sentence = sentence.strip()
-                    if sentence:
-                        await tts_queue.put(sentence)
-                sentence_buffer = sentences[-1]
-
-        if sentence_buffer.strip() and not aborted():
-            await tts_queue.put(sentence_buffer.strip())
+            for unit in splitter.feed(token):
+                await text_q.put(unit)
+        if not aborted():
+            tail = splitter.flush()
+            if tail and stats.get("done_reason") == "length" and _SENTENCE_END_RE.split(tail):
+                # Hit the token cap mid-sentence: don't speak a fragment
+                # that trails off; the stored reply keeps only what was said.
+                logger.info(f"Reply hit num_predict; dropping unfinished tail {tail[:40]!r}…")
+                spoken = "".join(response_parts)
+                response_parts[:] = [spoken[: len(spoken) - len(tail)].rstrip()]
+            elif tail:
+                await text_q.put(tail)
     finally:
-        await tts_queue.put(None)
-        await worker
+        await text_q.put(None)
+        await synth
+        await play
 
     response_text = "".join(response_parts)
     logger.info(f"Oracle: {response_text}")
     emit("answered", text=response_text)
     vc.store.add_message(vc.session_id, "assistant", response_text)
     vc.ctx_builder.schedule_summarize()
+    timer.finish()
     return True
 
 

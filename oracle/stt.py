@@ -25,15 +25,56 @@ def create_stt(model_name: str | None = None):
     """Build the configured STT backend.
 
     Whisper backends take a per-role model name (base.en radio /
-    small.en librarian); parakeet has a single model and ignores it —
-    callers wanting one shared instance should reuse the first object
-    they create (see oracle.core.voice_init).
+    small.en librarian); parakeet and nemotron-streaming have a single
+    model and ignore it — callers wanting one shared instance should reuse
+    the first object they create (see oracle.core.voice_init).
     """
     if settings.stt_backend == "parakeet":
         from oracle.stt_parakeet import ParakeetSTT
 
         return ParakeetSTT(model_name=model_name)
+    if settings.stt_backend == "nemotron-streaming":
+        from oracle.stt_streaming import StreamingSTT
+
+        return StreamingSTT(model_name=model_name)
     return WhisperSTT(model_name=model_name)
+
+
+def listen(
+    stt,
+    *,
+    silence_duration: float | None = None,
+    onset_timeout: float | None = None,
+    should_abort=None,
+) -> tuple[np.ndarray, str]:
+    """Record one utterance and transcribe it: ``(audio, text)``.
+
+    The single record→STT path for every voice surface. With a streaming
+    backend (``open_stream()``) each capture block is decoded as it
+    arrives and only the flush remains after the endpoint; batch backends
+    transcribe the finished buffer. ``text`` is "" on silence/abort.
+    Marks the ``record`` and ``stt`` stages on the current turn timer.
+    """
+    from oracle import timing
+    from oracle.audio import record_until_silence
+
+    session = stt.open_stream() if hasattr(stt, "open_stream") else None
+    audio = record_until_silence(
+        silence_duration=silence_duration,
+        onset_timeout=onset_timeout,
+        should_abort=should_abort,
+        on_block=session.feed if session is not None else None,
+    )
+    timing.mark("record")
+    if len(audio) == 0 or (should_abort is not None and should_abort()):
+        return audio, ""
+    if session is not None:
+        text = session.finish()
+    else:
+        stt.load()
+        text = stt.transcribe(audio)
+    timing.mark("stt")
+    return audio, text
 
 
 class WhisperSTT:

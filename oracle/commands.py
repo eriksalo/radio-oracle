@@ -23,8 +23,10 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from config.settings import settings
-from oracle.audio import play_audio, record_until_silence
+from oracle import timing
+from oracle.audio import play_audio
 from oracle.llm import chat
+from oracle.stt import listen
 
 if TYPE_CHECKING:
     from oracle.core import VoiceContext
@@ -205,26 +207,47 @@ def _speak(vc: VoiceContext, text: str, should_abort: AbortCheck = None) -> None
     play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
 
 
-# Pre-synthesized "thinking" acknowledgments. A question turn takes ~6-10s
-# to first spoken audio (retrieval + prompt processing + generation); an
-# instant canned ack over that window converts dead air into feedback.
+# Pre-synthesized "thinking" acknowledgments. A question turn takes several
+# seconds to first spoken audio (retrieval + prompt processing +
+# generation); an instant canned ack over that window converts dead air
+# into feedback. Only worth it when the archives are actually consulted.
 _ACK_PHRASES = ("Checking the archives.", "Consulting the archives.", "One moment.")
 _ack_cache: list = []
 
 
-def _play_thinking_ack(vc: VoiceContext, should_abort: AbortCheck = None) -> None:
-    """Play a canned ack (synthesized once, then cached). Blocking ~1.5s —
-    run via a thread alongside the turn, not in front of it."""
-    import random
-
+def warm_thinking_acks(vc: VoiceContext) -> None:
+    """Synthesize the ack clips once, at boot, so the first question
+    doesn't pay ~1.5 s of Kokoro before the ack can even start."""
     try:
         if not _ack_cache:
             for phrase in _ACK_PHRASES:
                 _ack_cache.append(vc.tts.synthesize(phrase))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Thinking ack warm-up failed: {e}")
+
+
+def _play_thinking_ack(vc: VoiceContext, should_abort: AbortCheck = None) -> None:
+    """Play a canned ack (synthesized once, then cached). Blocking ~1.5s —
+    run via a thread alongside the turn, not in front of it. Playback is
+    serialized with the answer by oracle.audio's speaker lock."""
+    import random
+
+    try:
+        warm_thinking_acks(vc)
         audio = random.choice(_ack_cache)
         play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Thinking ack failed: {e}")
+
+
+def _archives_available() -> bool:
+    """Whether a question turn will actually run retrieval."""
+    from oracle.core import _get_retriever
+
+    try:
+        return bool(_get_retriever())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 async def _question_turns(
@@ -251,33 +274,41 @@ async def _question_turns(
     def aborted() -> bool:
         return bool(should_abort and should_abort())
 
+    use_ack = _archives_available()
     while True:
-        ack = asyncio.create_task(asyncio.to_thread(_play_thinking_ack, vc, should_abort))
+        ack = (
+            asyncio.create_task(asyncio.to_thread(_play_thinking_ack, vc, should_abort))
+            if use_ack
+            else None
+        )
         try:
             await voice_turn(vc, leds=leds, should_abort=should_abort, pre_text=text)
         finally:
-            await ack
+            if ack is not None:
+                await ack
 
         if window <= 0 or aborted():
             return
         if leds is not None:
             leds.set_mode("librarian")  # solid blue: still listening
+        # A follow-up is a turn of its own for timing purposes: the
+        # previous timer was finished by voice_turn.
+        timing.start("followup")
         try:
-            audio = await asyncio.to_thread(
-                record_until_silence,
+            _audio, text = await asyncio.to_thread(
+                listen,
+                vc.stt_fast,
                 silence_duration=settings.vad_silence_duration_radio,
                 onset_timeout=window,
                 should_abort=should_abort,
             )
         except (ValueError, OSError) as e:
             logger.warning(f"Mic unavailable for follow-up: {e}")
+            timing.clear()
             return
-        if aborted() or len(audio) == 0:
+        if aborted() or not text.strip():
+            timing.clear()
             return  # no follow-up — the channel resumes
-        vc.stt_fast.load()
-        text = await asyncio.to_thread(vc.stt_fast.transcribe, audio)
-        if not text.strip():
-            return
         logger.info(f"Follow-up: {text!r}")
 
 
@@ -323,28 +354,25 @@ async def dispatch_radio_command(
         return bool(should_abort and should_abort())
 
     here = "radio" if context == "music" else "reader"
+    timer = timing.start("command")
 
-    # 1. Capture user utterance.
+    # 1+2. Capture the utterance and transcribe it (streaming backends
+    # decode during capture). ``stt_fast`` is kept resident across calls
+    # (with parakeet/nemotron it's the same object as ``stt``) and only
+    # unloaded around LLM-intent calls on the whisper backends.
     if leds is not None:
         leds.set_mode("librarian")  # solid blue while listening
     try:
-        audio = record_until_silence(
+        _audio, text = listen(
+            vc.stt_fast,
             silence_duration=settings.vad_silence_duration_radio,
             should_abort=should_abort,
         )
     except (ValueError, OSError) as e:
         logger.warning(f"Mic unavailable: {e}")
         return DispatchResult(here)
-    if aborted() or len(audio) == 0:
-        return DispatchResult(here)
-
-    # 2. STT — blink blue while we think. ``stt_fast`` is kept resident
-    # across calls (with parakeet it's the same object as ``stt``) and
-    # only unloaded around LLM-intent calls on the whisper backends.
     if leds is not None:
         leds.set_mode("thinking")
-    vc.stt_fast.load()
-    text = vc.stt_fast.transcribe(audio)
     if aborted() or not text.strip():
         return DispatchResult(here)
     logger.info(f"Voice command ({context}): {text!r}")
@@ -373,12 +401,15 @@ async def dispatch_radio_command(
     from oracle.activity import emit
 
     emit("decided", action=action, query=query)
+    timer.mark("decide")
+    timer.note(action=action)
 
     # 4. Act.
     if action == "question":
         # Oracle turn(s): answer with full RAG + memory + persona, hold
         # the mic open for wake-word-free follow-ups, then let the
-        # channel resume.
+        # channel resume. voice_turn inherits this timer and finishes it.
+        timer.label = "question"
         await _question_turns(vc, text, leds, should_abort)
         return DispatchResult(here)
 
@@ -399,17 +430,22 @@ async def dispatch_radio_command(
 
     if leds is not None:
         leds.set_mode("speaking")
-    return _do_action(
-        action,
-        query,
-        player,
-        catalog,
-        vc,
-        should_abort,
-        context=context,
-        reader=reader,
-        raw_text=text,
-    )
+    try:
+        return _do_action(
+            action,
+            query,
+            player,
+            catalog,
+            vc,
+            should_abort,
+            context=context,
+            reader=reader,
+            raw_text=text,
+        )
+    finally:
+        timer.mark("act")
+        timer.finish()
+        timing.clear()
 
 
 async def _listen_once(vc: VoiceContext, onset_timeout: float) -> str | None:
@@ -417,18 +453,15 @@ async def _listen_once(vc: VoiceContext, onset_timeout: float) -> str | None:
     import asyncio
 
     try:
-        audio = await asyncio.to_thread(
-            record_until_silence,
+        _audio, text = await asyncio.to_thread(
+            listen,
+            vc.stt_fast,
             silence_duration=settings.vad_silence_duration_radio,
             onset_timeout=onset_timeout,
         )
     except (ValueError, OSError) as e:
         logger.warning(f"Mic unavailable: {e}")
         return None
-    if len(audio) == 0:
-        return None
-    vc.stt_fast.load()
-    text = await asyncio.to_thread(vc.stt_fast.transcribe, audio)
     return text.strip() or None
 
 

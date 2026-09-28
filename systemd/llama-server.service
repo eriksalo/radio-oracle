@@ -1,0 +1,26 @@
+[Unit]
+Description=Radio Oracle - llama.cpp server (NVIDIA JP6 container)
+# Same GGUF Ollama pulled, served by llama-server: ~20% faster decode and
+# an explicit prompt cache. Only one of the two may hold the model.
+Conflicts=ollama.service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+# models/qwen3-…gguf is a hard link to the Ollama blob (see docs/deploy-2026-09-latency.md §4).
+ExecStartPre=-/usr/bin/docker rm -f llama-server
+ExecStart=/usr/bin/docker run --rm --name llama-server --runtime=nvidia --network host \
+    -v /opt/radio-oracle/models:/models:ro \
+    ghcr.io/nvidia-ai-iot/llama_cpp:latest-jetson-orin \
+    llama-server \
+      -m /models/qwen3-4b-instruct-2507-q4_K_M.gguf \
+      --alias qwen3-4b --host 127.0.0.1 --port 8080 \
+      -ngl 99 -c 3584 -np 1 -fa on -ctk q8_0 -ctv q8_0 \
+      --cache-ram 256 --cache-reuse 256 --jinja -t 4
+ExecStop=/usr/bin/docker stop -t 10 llama-server
+
+[Install]
+WantedBy=multi-user.target

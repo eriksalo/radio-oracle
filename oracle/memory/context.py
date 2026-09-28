@@ -13,7 +13,17 @@ from oracle.memory.summarizer import fold_into_profile, summarize_conversation
 
 
 class ContextBuilder:
-    """Builds the messages array: [system(+rag), long-term memory, summary, recent]."""
+    """Builds the messages array: [system, long-term memory, summary, recent, rag, user].
+
+    Order matters for latency: Ollama/llama.cpp reuse the KV cache for the
+    longest byte-identical prefix of the previous prompt. Persona, memory
+    and the summary are constant within a session and history only ever
+    grows at the end, so everything up to the retrieved chunks is a cache
+    hit on the next turn. The RAG block changes every turn and therefore
+    goes *last*, right before the question. (Measured 2026-09-27: with the
+    chunks inside the persona message the whole 2-3k-token prompt was
+    re-prefilled every turn, ~5 s.)
+    """
 
     def __init__(self, store: ConversationStore, session_id: str):
         self._store = store
@@ -42,23 +52,22 @@ class ContextBuilder:
         self,
         system_prompt: str,
         rag_context: str = "",
+        user_text: str | None = None,
     ) -> list[dict[str, str]]:
         """Build the full messages array for the LLM.
 
         Args:
             system_prompt: The system prompt (persona + instructions)
-            rag_context: Formatted RAG retrieval context
+            rag_context: Formatted RAG retrieval context (goes last)
+            user_text: The current question. Callers store it before
+                building, so it is dropped from the history tail and
+                appended once after the RAG block. None = legacy callers
+                that append the user message themselves.
 
         Returns:
             List of message dicts ready for Ollama
         """
-        messages: list[dict[str, str]] = []
-
-        # System prompt
-        full_system = system_prompt
-        if rag_context:
-            full_system += f"\n\n{rag_context}"
-        messages.append({"role": "system", "content": full_system})
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
 
         # Cross-session memory (profile + last conversation)
         if self._long_term:
@@ -73,9 +82,22 @@ class ContextBuilder:
                 }
             )
 
-        # Recent conversation turns
+        # Recent conversation turns — minus the current question, which
+        # was already persisted and is re-added at the very end.
         recent = self._store.get_messages(self._session_id, limit=settings.max_context_turns)
+        if (
+            user_text is not None
+            and recent
+            and recent[-1]["role"] == "user"
+            and recent[-1]["content"] == user_text
+        ):
+            recent = recent[:-1]
         messages.extend(recent)
+
+        if rag_context:
+            messages.append({"role": "system", "content": rag_context})
+        if user_text is not None:
+            messages.append({"role": "user", "content": user_text})
 
         return messages
 

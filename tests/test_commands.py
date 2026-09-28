@@ -334,21 +334,15 @@ async def test_question_turns_followup_window(monkeypatch):
         np.array([], dtype=np.float32),  # then silence → window closes
     ]
 
-    def fake_record(**kwargs):
+    def fake_listen(stt, **kwargs):
         assert kwargs.get("onset_timeout") == settings.followup_window_s
-        return recordings.pop(0)
-
-    class _FakeSTT:
-        def load(self):
-            pass
-
-        def transcribe(self, audio, sample_rate=None):
-            return "and what about his brother?"
+        audio = recordings.pop(0)
+        return audio, ("and what about his brother?" if len(audio) else "")
 
     vc = _FakeVC()
-    vc.stt_fast = _FakeSTT()
+    vc.stt_fast = object()  # listen() is faked; only its identity is passed through
     monkeypatch.setattr(core_mod, "voice_turn", fake_voice_turn)
-    monkeypatch.setattr(commands, "record_until_silence", fake_record)
+    monkeypatch.setattr(commands, "listen", fake_listen)
     monkeypatch.setattr(commands, "_play_thinking_ack", lambda vc, should_abort=None: None)
 
     await commands._question_turns(vc, "who was tesla?", None, None)

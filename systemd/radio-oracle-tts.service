@@ -1,0 +1,37 @@
+[Unit]
+Description=Radio Oracle - Kokoro TTS sidecar (GPU)
+# Loads before the main app so its first Kokoro call goes to the GPU.
+Before=radio-oracle.service
+After=network.target
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/radio-oracle
+# cp310 venv: the only JetPack 6 onnxruntime-gpu wheel is cp310
+# (uv venv --python 3.10 .venv-tts; see docs/deploy-2026-09-latency.md).
+ExecStart=/opt/radio-oracle/.venv-tts/bin/python -m oracle.tts_server
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+EnvironmentFile=-/opt/radio-oracle/.env
+Environment=ORACLE_TTS_MODEL_PATH=models/kokoro-v1.0.fp16.onnx
+Environment=ORACLE_TTS_PROVIDER=CUDAExecutionProvider
+# Arena *cap*, not a reservation (kSameAsRequested grows on demand). 512
+# was too small: the LSTM node failed to allocate on longer units
+# (harness crash 2026-09-27), and the fallback is slow CPU synthesis.
+Environment=ORACLE_TTS_GPU_MEM_MB=1024
+# Belt and braces: never let kokoro-onnx pick TensorRT on its own.
+Environment=ONNX_PROVIDER=CUDAExecutionProvider
+# GPU device nodes are group video/render (oracle was added 2026-09-27).
+SupplementaryGroups=video render
+
+# Measured 2.2 GB RSS on the Jetson (fp16 model + CUDA/cuDNN runtime);
+# the cap is a leak guard, not a budget.
+MemoryMax=2800M
+
+[Install]
+WantedBy=multi-user.target
