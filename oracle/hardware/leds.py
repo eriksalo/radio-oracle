@@ -10,6 +10,7 @@ Falls back to log-only output if Jetson.GPIO is unavailable (dev machines).
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import Literal
 
 from loguru import logger
