@@ -56,6 +56,9 @@ class DispatchResult:
     resume_channel: bool = True
     reader_query: str | None = None
     play_query: str | None = None
+    # A chapter reference to apply once the book is open ("go to chapter
+    # three" said while music plays → resume the current book there).
+    reader_chapter: str | None = None
 
 
 _LLM_SYSTEM_PROMPT = """You are a strict voice-command parser for a radio. \
@@ -68,6 +71,11 @@ action must be one of:
   "next"        — skip forward (track, or chapter when reading)
   "next_album"  — skip to a new album
   "next_chapter"— skip to the next chapter of the book
+  "prev_chapter"— go back to the previous chapter
+  "goto_chapter"— jump to a chapter; query is the reference: "three", "XII", "the last",
+                  "the preface", or a chapter title
+  "restart_book"— start the current book over from its first chapter
+  "book_status" — what book / chapter is being read right now
   "pause"       — pause playback
   "resume"      — resume playback
   "stop"        — stop playback / silence
@@ -86,6 +94,11 @@ Examples:
 "hush"                   -> {"action":"pause","query":null}
 "read me Moby Dick"      -> {"action":"read_book","query":"Moby Dick"}
 "read Sherlock Holmes to me" -> {"action":"read_book","query":"Sherlock Holmes"}
+"start with chapter one"  -> {"action":"goto_chapter","query":"one"}
+"go to the chapter called Loomings" -> {"action":"goto_chapter","query":"Loomings"}
+"go back a chapter"      -> {"action":"prev_chapter","query":null}
+"start the book over"    -> {"action":"restart_book","query":null}
+"what am I reading"      -> {"action":"book_status","query":null}
 "what music do we have"  -> {"action":"list_music","query":null}
 "any albums by the Beatles" -> {"action":"list_music","query":"Beatles"}
 "what books are there by Mark Twain" -> {"action":"list_books","query":"Mark Twain"}
@@ -121,7 +134,28 @@ def _build_keyword_table() -> list[_KeywordRule]:
         (r"\bwhat\s+books?\b|\bwhich\s+books?\b", "list_books"),
         # Chapter / track / album ops.
         (r"\bnext\s+chapter\b", "next_chapter"),
-        (r"\bnext\s+(?:song|track)\b", "next"),
+        (
+            r"\b(?:previous|last|prior)\s+chapter\b|\b(?:go\s+)?back\s+(?:a|one)\s+chapter\b",
+            "prev_chapter",
+        ),
+        (
+            r"\b(?:start|read)\s+(?:it\s+|the\s+book\s+)?(?:over|again)\b|\bfrom\s+the\s+(?:beginning|top|start)\b|\brestart\s+(?:the\s+)?book\b",
+            "restart_book",
+        ),
+        (
+            r"\b(?:go|jump|skip)\s+to\s+(?:the\s+)?chapter\b|\bstart\s+(?:with|at|from)\s+(?:the\s+)?chapter\b|\bread\s+(?:me\s+)?(?:the\s+)?chapter\b|^\s*chapter\s+\w+",
+            "goto_chapter",
+        ),
+        (
+            r"\b(?:read|go\s+to|start\s+with)\s+(?:me\s+)?(?:the\s+)?(?:front\s+matter|preface|preamble|introduction)\b",
+            "goto_chapter",
+        ),
+        (
+            r"\bwhat\s+(?:am\s+i|are\s+we)\s+reading\b|\bwhere\s+(?:was|am|were)\s+(?:i|we)\b|\b(?:what|which)\s+chapter\b|\bwhat\s+book\s+(?:is\s+this|was\s+that|am\s+i)\b",
+            "book_status",
+        ),
+        # "next slide" is what Parakeet hears for "next song" (2026-09-28).
+        (r"\bnext\s+(?:song|track|slide|tune)\b", "next"),
         (r"\bskip(?:\s+(?:this|song|track|chapter))?\b", "next"),
         (r"\b(?:next|new|change|another)\s+album\b", "next_album"),
         # Transport — with or without the noun, channel decides meaning.
@@ -197,6 +231,13 @@ async def _llm_intent(text: str) -> tuple[str, str | None]:
     else:
         query = None
     return (action, query)
+
+
+def _chapter_announcement(title: str | None) -> str:
+    if not title:
+        return "That's as far as the book goes."
+    t = title.strip().rstrip(".")
+    return t if t.lower().startswith(("chapter", "part", "book", "act")) else f"Chapter: {t}"
 
 
 def _speak(vc: VoiceContext, text: str, should_abort: AbortCheck = None) -> None:
@@ -470,6 +511,67 @@ async def _listen_once(vc: VoiceContext, onset_timeout: float) -> str | None:
 _QUALIFIER_RE = re.compile(r"\b(?:by|from|about|like|of)\s+(.+?)[.?!]?\s*$", re.IGNORECASE)
 
 
+_CHAPTER_SPEC_RE = re.compile(
+    r"\bchapter\s+(?:called\s+|titled\s+|named\s+)?([a-z0-9 ]+?)[.?!]?\s*$", re.IGNORECASE
+)
+_FRONT_MATTER_RE = re.compile(r"\b(front\s+matter|preface|preamble|introduction)\b", re.IGNORECASE)
+
+
+def _extract_chapter_spec(text: str) -> str | None:
+    """ "go to chapter twenty one" → "twenty one"; "read the preface" → "preface"."""
+    m = _CHAPTER_SPEC_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    m = _FRONT_MATTER_RE.search(text)
+    return m.group(1) if m else None
+
+
+def _book_in_progress() -> bool:
+    """A bookmark exists — "next chapter" while music plays means resume it."""
+    try:
+        from oracle.books.bookmarks import BookmarkStore
+
+        store = BookmarkStore()
+        try:
+            return bool(store.list_in_progress())
+        finally:
+            store.close()
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"bookmark check failed: {e}")
+        return False
+
+
+def _current_book_status() -> str | None:
+    """Status of the most recent book without opening the reader."""
+    try:
+        from oracle.books.session import ReaderSession
+
+        session = ReaderSession()
+        try:
+            book = session.current_book()
+            if book is None:
+                return None
+            bm = session._bookmarks.get(book.id)
+            titles = [
+                (i, sub or t) for i, t, sub in session._library.list_chapter_headings(book.id)
+            ]
+            first = session._library.first_content_chapter(book.id)
+            ch = bm.chapter_idx if bm else first
+            title = next((t for i, t in titles if i == ch), "")
+            where = (
+                f"chapter {ch - first + 1} of {max(len(titles) - first, 1)}"
+                if ch >= first
+                else "the front matter"
+            )
+            tail = f": {title.strip()}" if title and ch >= first else ""
+            return f"{book.title}, {where}{tail}."
+        finally:
+            session.close()
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"book status failed: {e}")
+        return None
+
+
 def _extract_qualifier(text: str) -> str | None:
     m = _QUALIFIER_RE.search(text)
     return m.group(1).strip() if m else None
@@ -569,6 +671,30 @@ def _do_action(
             if reader is not None and not reader.next_chapter():
                 _speak(vc, "That's the last chapter.", should_abort)
             return DispatchResult("reader")
+        if action == "prev_chapter":
+            title = reader.prev_chapter() if reader is not None else None
+            _speak(vc, _chapter_announcement(title), should_abort)
+            return DispatchResult("reader")
+        if action == "goto_chapter":
+            spec = query or _extract_chapter_spec(raw_text)
+            title = reader.goto_chapter(spec) if (reader is not None and spec) else None
+            if title is None:
+                _speak(
+                    vc,
+                    f"I couldn't find chapter {spec}." if spec else "Which chapter?",
+                    should_abort,
+                )
+            else:
+                _speak(vc, _chapter_announcement(title), should_abort)
+            return DispatchResult("reader")
+        if action == "restart_book":
+            title = reader.restart() if reader is not None else None
+            _speak(vc, "From the beginning. " + _chapter_announcement(title), should_abort)
+            return DispatchResult("reader")
+        if action == "book_status":
+            status = reader.status_text() if reader is not None else None
+            _speak(vc, status or "Nothing is open right now.", should_abort)
+            return DispatchResult("reader")
         if action in ("pause", "stop"):
             return DispatchResult("reader", resume_channel=False)
         if action == "resume":
@@ -577,9 +703,29 @@ def _do_action(
         return DispatchResult("reader")
 
     # ---- music channel transport -------------------------------------------
-    if action == "next_chapter":
-        # Chapter words while music plays → treat as resuming the book.
-        return DispatchResult("reader", resume_channel=False)
+    if action in ("next_chapter", "prev_chapter", "goto_chapter", "restart_book"):
+        # Chapter words while music plays: resume the book *if there is
+        # one* (and apply the jump once it's open). Without a bookmark,
+        # "next chapter" is almost certainly a misheard "next song".
+        if _book_in_progress():
+            spec = {
+                "next_chapter": "next",
+                "prev_chapter": "previous",
+                "restart_book": "beginning",
+            }.get(action, query or _extract_chapter_spec(raw_text))
+            return DispatchResult("reader", resume_channel=False, reader_chapter=spec)
+        if action == "next_chapter":
+            action = "next"
+        else:
+            _speak(
+                vc,
+                "You're not reading anything right now. Say 'read a book' to start one.",
+                should_abort,
+            )
+            return DispatchResult("radio")
+    if action == "book_status":
+        _speak(vc, _current_book_status() or "You're not reading anything right now.", should_abort)
+        return DispatchResult("radio")
     if player is None:
         _speak(vc, "Music player isn't available.", should_abort)
         return DispatchResult("radio")

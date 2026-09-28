@@ -25,6 +25,96 @@ _CHAPTER_RE = re.compile(
     r"^(?:chapter|book|part|act|section|canto)\s+[\dIVXLCDMivxlcdm]+",
     re.IGNORECASE | re.MULTILINE,
 )
+# The number a heading carries ("CHAPTER 12", "Chapter XII.", "PART I").
+_HEADING_NUM_RE = re.compile(
+    r"^(?:chapter|book|part|act|section|canto)\s+([\d]+|[IVXLCDMivxlcdm]+)\b", re.IGNORECASE
+)
+_PREAMBLE_TITLES = {"preamble", "full text"}
+
+_WORD_NUMBERS = {
+    w: i
+    for i, w in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
+    )
+}
+_WORD_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+              "seventy": 70, "eighty": 80, "ninety": 90}  # fmt: skip
+_ORDINALS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12,
+}  # fmt: skip
+_ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+
+def _roman_to_int(s: str) -> int | None:
+    s = s.lower()
+    if not s or any(ch not in _ROMAN for ch in s):
+        return None
+    total = 0
+    for i, ch in enumerate(s):
+        v = _ROMAN[ch]
+        if i + 1 < len(s) and _ROMAN[s[i + 1]] > v:
+            total -= v
+        else:
+            total += v
+    return total
+
+
+def parse_chapter_number(spec: str) -> int | None:
+    """ "12", "twelve", "twelfth", "twenty one", "XII" → 12; None if not a number."""
+    words = re.findall(r"[a-z0-9]+", spec.lower())
+    if not words:
+        return None
+    if len(words) == 1 and words[0].isdigit():
+        return int(words[0])
+    if len(words) == 1 and words[0] in _ORDINALS:
+        return _ORDINALS[words[0]]
+    total = 0
+    matched = False
+    for w in words:
+        if w in _WORD_TENS:
+            total += _WORD_TENS[w]
+            matched = True
+        elif w in _WORD_NUMBERS:
+            total += _WORD_NUMBERS[w]
+            matched = True
+        elif w in _ORDINALS:
+            total += _ORDINALS[w]
+            matched = True
+        elif w in ("and", "number", "chapter"):
+            continue
+        else:
+            matched = False
+            break
+    if matched:
+        return total
+    if len(words) == 1:
+        return _roman_to_int(words[0])
+    return None
+
+
+def _clean_subtitle(text: str | None) -> str:
+    """ ". Loomings." → "Loomings"; None/long/sentence-like → ""."""
+    if not text:
+        return ""
+    t = text.strip().strip(".:;-— ").strip()
+    if not t or len(t) > 60 or t.count(" ") > 8:
+        return ""
+    return t
+
+
+def heading_number(title: str) -> int | None:
+    """The number in a chapter heading, arabic or roman ("CHAPTER XII" → 12)."""
+    m = _HEADING_NUM_RE.match(title.strip())
+    if not m:
+        return None
+    tok = m.group(1)
+    return int(tok) if tok.isdigit() else _roman_to_int(tok)
+
+
+def is_content_heading(title: str) -> bool:
+    return bool(_CHAPTER_RE.match(title.strip()))
 
 
 def _synchronized(method):
@@ -187,6 +277,102 @@ class Library:
             title=row["title"],
             text=full_text,
         )
+
+    @_synchronized
+    def get_chapter_title(self, book_id: int, chapter_idx: int) -> str | None:
+        row = self._conn.execute(
+            "SELECT title FROM chapters WHERE book_id = ? AND chapter_idx = ?",
+            (book_id, chapter_idx),
+        ).fetchone()
+        return row["title"] if row else None
+
+    @_synchronized
+    def list_chapter_titles(self, book_id: int) -> list[tuple[int, str]]:
+        rows = self._conn.execute(
+            "SELECT chapter_idx, title FROM chapters WHERE book_id = ? ORDER BY chapter_idx",
+            (book_id,),
+        ).fetchall()
+        return [(r["chapter_idx"], r["title"]) for r in rows]
+
+    @_synchronized
+    def list_chapter_headings(self, book_id: int) -> list[tuple[int, str, str]]:
+        """(chapter_idx, title, subtitle). The indexer stores only the
+        matched heading ("CHAPTER 1"); a short first paragraph (". Loomings.")
+        is the chapter's descriptive title and is returned as subtitle."""
+        rows = self._conn.execute(
+            """SELECT c.chapter_idx, c.title,
+                      (SELECT p.text FROM paragraphs p
+                        WHERE p.book_id = c.book_id AND p.chapter_idx = c.chapter_idx
+                          AND p.para_idx = 0 AND length(p.text) <= 80) AS sub
+                 FROM chapters c WHERE c.book_id = ? ORDER BY c.chapter_idx""",
+            (book_id,),
+        ).fetchall()
+        # Only real chapter headings get a subtitle; the preamble's first
+        # line ("[Transcriber's notes]") is not a name.
+        return [
+            (
+                r["chapter_idx"],
+                r["title"],
+                _clean_subtitle(r["sub"]) if is_content_heading(r["title"]) else "",
+            )
+            for r in rows
+        ]
+
+    def chapter_label(self, book_id: int, chapter_idx: int) -> str:
+        """Spoken name of a chapter: "Chapter 1: Loomings" / "Preamble"."""
+        for idx, title, sub in self.list_chapter_headings(book_id):
+            if idx == chapter_idx:
+                t = title.strip().rstrip(".")
+                return f"{t}: {sub}" if sub else t
+        return ""
+
+    def first_content_chapter(self, book_id: int) -> int:
+        """Where a fresh read should start: the first real chapter heading
+        (Chapter/Part/Book N), skipping the Gutenberg preamble (transcriber's
+        notes, contents, dedications) that the indexer files as chapter 0.
+        Falls back to 1 if chapter 0 is a preamble, else 0."""
+        titles = self.list_chapter_titles(book_id)
+        for idx, title in titles:
+            if is_content_heading(title):
+                return idx
+        if titles and titles[0][1].strip().lower() in _PREAMBLE_TITLES and len(titles) > 1:
+            return 1
+        return 0
+
+    def resolve_chapter(self, book_id: int, spec: str) -> int | None:
+        """Map a spoken chapter reference to a chapter_idx, or None.
+
+        "one"/"1"/"first"/"XII" → the heading carrying that number, else the
+        Nth content chapter; "the beginning"/"start" → first content chapter;
+        "front matter"/"preface"/"preamble" → chapter 0; "last"/"final"/"end"
+        → the last chapter; anything else → a title fragment ("loomings").
+        """
+        titles = self.list_chapter_titles(book_id)
+        if not titles:
+            return None
+        norm = re.sub(r"[^a-z0-9 ]+", " ", spec.lower()).strip()
+        norm = re.sub(r"^(?:the|chapter|to|at|with|from|of)\s+", "", norm).strip()
+        if norm in ("front matter", "preface", "preamble", "introduction", "notes", "credits"):
+            return titles[0][0]
+        if norm in ("beginning", "start", "top", "beginning of the book"):
+            return self.first_content_chapter(book_id)
+        if norm in ("last", "final", "end", "last chapter", "final chapter", "end of the book"):
+            return titles[-1][0]
+        n = parse_chapter_number(norm)
+        content = [(idx, t) for idx, t in titles if is_content_heading(t)]
+        if n is not None:
+            for idx, t in content:
+                if heading_number(t) == n:
+                    return idx
+            pool = content or titles
+            if 1 <= n <= len(pool):
+                return pool[n - 1][0]
+            return None
+        if len(norm) >= 3:
+            for idx, t, sub in self.list_chapter_headings(book_id):
+                if norm in t.lower() or (sub and norm in sub.lower()):
+                    return idx
+        return None
 
     @_synchronized
     def get_paragraph(self, book_id: int, chapter_idx: int, para_idx: int) -> str | None:

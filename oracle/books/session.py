@@ -8,6 +8,7 @@ app polls buttons.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,21 @@ from oracle.books.reader import Reader
 
 if TYPE_CHECKING:
     from oracle.tts import KokoroTTS
+
+
+def _format_status(st: dict) -> str:
+    title = st["chapter_title"].strip()
+    where = (
+        f"chapter {st['chapter_number']} of {st['chapter_total']}"
+        if st["chapter_number"] > 0
+        else "the front matter"
+    )
+    if title and st["chapter_number"] > 0 and title.lower().startswith(("chapter", "part", "book")):
+        # "CHAPTER 3. Loomings." → keep the descriptive part if any
+        rest = re.sub(r"^(?:chapter|part|book)\s+\S+[.:\s]*", "", title, flags=re.IGNORECASE)
+        title = rest.strip(" .")
+    tail = f": {title}" if title and st["chapter_number"] > 0 else ""
+    return f"{st['book']}, {where}{tail}."
 
 
 class ReaderSession:
@@ -34,6 +50,15 @@ class ReaderSession:
     def find_book(self, query: str) -> Book | None:
         hits = self._library.search(query)
         return hits[0] if hits else None
+
+    @staticmethod
+    def is_confident_match(query: str, book: Book) -> bool:
+        """Every meaningful word of the request appears in the title or
+        author — otherwise the app should confirm before reading aloud."""
+        stop = {"the", "a", "an", "of", "by", "and", "book", "me", "to", "read", "please"}
+        words = [w for w in re.findall(r"[a-z0-9]+", query.lower()) if w not in stop and len(w) > 1]
+        hay = f"{book.title} {book.author}".lower()
+        return bool(words) and all(w in hay for w in words)
 
     def current_book(self) -> Book | None:
         """The most recently read book (freshest bookmark), if any."""
@@ -84,6 +109,40 @@ class ReaderSession:
 
     def next_chapter(self) -> bool:
         return self._reader.next_chapter()
+
+    def prev_chapter(self) -> str | None:
+        return self._reader.prev_chapter()
+
+    def goto_chapter(self, spec: str) -> str | None:
+        """Jump to a spoken chapter reference ("three", "XII", "the last",
+        "loomings", "the preface"). Returns the chapter title, or None when
+        it doesn't resolve."""
+        pos = self._reader.position
+        if pos is None:
+            return None
+        idx = self._library.resolve_chapter(pos.book_id, spec)
+        if idx is None:
+            return None
+        return self._reader.goto_chapter(idx)
+
+    def restart(self) -> str | None:
+        """Back to the first real chapter."""
+        pos = self._reader.position
+        if pos is None:
+            return None
+        return self._reader.goto_chapter(self._library.first_content_chapter(pos.book_id))
+
+    @property
+    def started_fresh(self) -> bool:
+        return self._reader.started_fresh
+
+    def status_text(self) -> str | None:
+        """Spoken summary of where we are, e.g. "Moby-Dick, chapter 3 of
+        135: Loomings." None when nothing is open."""
+        st = self._reader.status()
+        if not st:
+            return None
+        return _format_status(st)
 
     def stop(self) -> None:
         """Stop reading and persist the bookmark."""

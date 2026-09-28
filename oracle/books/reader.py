@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -12,7 +13,7 @@ from loguru import logger
 
 from config.settings import settings
 from oracle.books.bookmarks import BookmarkStore
-from oracle.books.library import Library
+from oracle.books.library import Library, heading_number
 
 if TYPE_CHECKING:
     from oracle.tts import KokoroTTS
@@ -24,6 +25,28 @@ class ReadingPosition:
     chapter_idx: int
     para_idx: int
     total_chapters: int
+
+
+# Sentence boundaries that keep the terminal punctuation (prosody).
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _group_units(sentences: list[str], max_words: int) -> list[str]:
+    """Pack sentences into units of at most *max_words* (a long sentence
+    stays whole)."""
+    units: list[str] = []
+    cur: list[str] = []
+    n = 0
+    for sent in sentences:
+        w = len(sent.split())
+        if cur and n + w > max_words:
+            units.append(" ".join(cur))
+            cur, n = [], 0
+        cur.append(sent)
+        n += w
+    if cur:
+        units.append(" ".join(cur))
+    return units
 
 
 class Reader:
@@ -44,6 +67,9 @@ class Reader:
         self._bookmarks = bookmarks or BookmarkStore()
         self._tts: KokoroTTS | None = tts
         self._position: ReadingPosition | None = None
+        # True after start() opened a book with no bookmark (announce
+        # "starting at chapter one" instead of "resuming").
+        self.started_fresh = False
         self._paused = threading.Event()
         self._paused.set()  # starts unpaused
         # Abort check consulted during playback so pause/stop takes effect
@@ -70,21 +96,30 @@ class Reader:
         return self._tts
 
     def start(
-        self, book_id: int, chapter_idx: int = 0, para_idx: int = 0
+        self, book_id: int, chapter_idx: int | None = None, para_idx: int = 0
     ) -> ReadingPosition | None:
-        """Begin reading from a position; resumes from bookmark if none given."""
+        """Begin reading. With no chapter given: resume the bookmark, or —
+        for a fresh book — start at the first real chapter, past the
+        Gutenberg front matter (transcriber's notes, contents). An explicit
+        chapter_idx (0 included, for "read the preface") is honoured."""
         book = self._library.get_book(book_id)
         if not book:
             logger.error(f"Book {book_id} not found")
             return None
 
-        # Resume from bookmark if starting from the beginning
-        if chapter_idx == 0 and para_idx == 0:
+        self.started_fresh = False
+        if chapter_idx is None:
             bm = self._bookmarks.get(book_id)
             if bm:
-                chapter_idx = bm.chapter_idx
-                para_idx = bm.para_idx
+                chapter_idx, para_idx = bm.chapter_idx, bm.para_idx
                 logger.info(f"Resuming '{book.title}' from ch {chapter_idx}, para {para_idx}")
+            else:
+                chapter_idx = self._library.first_content_chapter(book_id)
+                self.started_fresh = True
+                if chapter_idx:
+                    logger.info(
+                        f"'{book.title}': skipping front matter, starting at ch {chapter_idx}"
+                    )
 
         self._position = ReadingPosition(
             book_id=book_id,
@@ -228,28 +263,117 @@ class Reader:
         pos = self._position
         if not pos:
             return False
-        next_ch = pos.chapter_idx + 1
-        if next_ch >= pos.total_chapters:
-            return False
+        return self.goto_chapter(pos.chapter_idx + 1) is not None
+
+    def prev_chapter(self) -> str | None:
+        """Jump to the start of the previous chapter (or restart this one
+        when already at the first). Returns the chapter title."""
+        pos = self._position
+        if not pos:
+            return None
+        first = self._library.first_content_chapter(pos.book_id)
+        return self.goto_chapter(max(first, pos.chapter_idx - 1))
+
+    def goto_chapter(self, chapter_idx: int) -> str | None:
+        """Jump to the start of *chapter_idx*. Returns its title, or None
+        when out of range. The read loop picks the new position up on its
+        next paragraph (a paragraph in flight is not advanced past)."""
+        pos = self._position
+        if not pos or chapter_idx < 0 or chapter_idx >= pos.total_chapters:
+            return None
+        chapter = self._library.chapter_label(pos.book_id, chapter_idx) or None
+        if chapter is None:
+            return None
         self._position = ReadingPosition(
             book_id=pos.book_id,
-            chapter_idx=next_ch,
+            chapter_idx=chapter_idx,
             para_idx=0,
             total_chapters=pos.total_chapters,
         )
         self._save_bookmark()
-        logger.info(f"Skipped to chapter {next_ch}")
-        return True
+        logger.info(f"Jumped to chapter {chapter_idx}: {chapter!r}")
+        return chapter
+
+    def status(self) -> dict | None:
+        """Where we are: book title/author, chapter index, its number among
+        the content chapters, total, and the chapter title."""
+        pos = self._position
+        if not pos:
+            return None
+        book = self._library.get_book(pos.book_id)
+        if not book:
+            return None
+        headings = self._library.list_chapter_headings(pos.book_id)
+        first = self._library.first_content_chapter(pos.book_id)
+        title = next(
+            (sub or t for i, t, sub in headings if i == pos.chapter_idx),
+            "",
+        )
+        # Prefer the numbers the headings themselves carry ("CHAPTER XCIX"
+        # is chapter 99 even when stray headings inflate the row count).
+        own = next((heading_number(t) for i, t, _ in headings if i == pos.chapter_idx), None)
+        numbers = [heading_number(t) for i, t, _ in headings if i >= first]
+        numbers = [n for n in numbers if n]
+        if own is not None and numbers:
+            number, total = own, max(numbers)
+        else:
+            number = pos.chapter_idx - first + 1 if pos.chapter_idx >= first else 0
+            total = max(len(headings) - first, 1)
+        return {
+            "book": book.title,
+            "author": book.author,
+            "chapter_idx": pos.chapter_idx,
+            "chapter_number": number,
+            "chapter_total": total,
+            "chapter_title": title,
+            "paragraph": pos.para_idx,
+        }
 
     def _interrupted(self) -> bool:
         return not self._paused.is_set() or bool(self._should_stop and self._should_stop())
 
     def _speak(self, text: str) -> None:
+        """Speak a paragraph as a pipeline of short units: one thread
+        synthesizes unit N+1 while unit N plays. Whole paragraphs (a Moby
+        Dick paragraph can be 3 minutes of speech) overflowed the GPU
+        sidecar's arena and delayed the first word by the full synthesis."""
+        import queue
+        import threading
+
         from oracle.audio import play_audio
 
         tts = self._get_tts()
-        audio = tts.synthesize(text)
-        play_audio(audio, tts.sample_rate, should_abort=self._interrupted)
+        sentences = [x.strip() for x in _SENTENCE_SPLIT_RE.split(text) if x.strip()]
+        units = _group_units(sentences, settings.reading_unit_max_words)
+        if not units:
+            return
+        q: queue.Queue = queue.Queue(maxsize=2)
+
+        def synth() -> None:
+            for u in units:
+                if self._interrupted():
+                    break
+                try:
+                    q.put(tts.synthesize(u))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Reader TTS failed on a unit: {e}")
+            q.put(None)
+
+        worker = threading.Thread(target=synth, name="reader-tts", daemon=True)
+        worker.start()
+        try:
+            while True:
+                audio = q.get()
+                if audio is None:
+                    break
+                if self._interrupted():
+                    # Drain so the producer can finish.
+                    while q.get() is not None:
+                        pass
+                    break
+                play_audio(audio, tts.sample_rate, should_abort=self._interrupted)
+        finally:
+            worker.join(timeout=60)
 
     def _save_bookmark(self) -> None:
         if self._position:

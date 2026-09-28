@@ -28,6 +28,7 @@ Transitions:
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from queue import Empty
 from typing import Literal
@@ -62,6 +63,7 @@ class OracleApp:
         # Book title/author requested via "read me <title>"; consumed by
         # the reader loop on entry.
         self._pending_book_query: str | None = None
+        self._pending_book_chapter: str | None = None
         # Double-press detection: buffer the first short press and wait
         # up to _DOUBLE_PRESS_S to see if a second one arrives.
         self._pending_short_press: float | None = None
@@ -241,6 +243,7 @@ class OracleApp:
                         self._resume_music()
                 else:
                     self._pending_book_query = result.reader_query
+                    self._pending_book_chapter = result.reader_chapter
                     self._enter(result.next_mode)
                 return
 
@@ -305,6 +308,10 @@ class OracleApp:
                     book = session.find_book(query)
                     if book is None:
                         await speak_text(voice_ctx, f"I couldn't find {query} in the archive.")
+                    elif not session.is_confident_match(query, book):
+                        # A loose FTS hit must not start reading unasked.
+                        if not await self._confirm_book(voice_ctx, book):
+                            book = None
                 if book is None and not query:
                     book = session.current_book()
                     if book is not None:
@@ -316,17 +323,12 @@ class OracleApp:
                     logger.info("Reader: no book chosen — back to music")
                     break
 
-                if session.has_bookmark(book.id):
-                    announce = f"Resuming {book.title}."
-                elif book.author:
-                    announce = f"Reading {book.title}, by {book.author}."
-                else:
-                    announce = f"Reading {book.title}."
-                await speak_text(voice_ctx, announce)
-
                 if not session.start(book):
                     await speak_text(voice_ctx, "I couldn't open that book.")
                     break
+                chapter_spec = self._pending_book_chapter
+                self._pending_book_chapter = None
+                await speak_text(voice_ctx, self._book_announcement(session, book, chapter_spec))
             finally:
                 if self._wakeword:
                     self._wakeword.unmute()
@@ -385,6 +387,7 @@ class OracleApp:
                 break  # finished, long-press, or power-off → music
             if switch.next_mode == "reader" and switch.reader_query:
                 self._pending_book_query = switch.reader_query
+                self._pending_book_chapter = switch.reader_chapter
                 continue  # reselect and keep reading
             play_query = switch.play_query
             break
@@ -471,7 +474,59 @@ class OracleApp:
         book = session.find_book(text)
         if book is None:
             await speak_text(voice_ctx, f"I couldn't find {text.strip()} in the archive.")
+            return None
+        if not session.is_confident_match(text, book) and not await self._confirm_book(
+            voice_ctx, book
+        ):
+            return None
         return book
+
+    async def _confirm_book(self, voice_ctx, book) -> bool:
+        """ "Did you mean X, by Y?" — yes/no by voice; anything else is no."""
+        from oracle.core import speak_text
+        from oracle.stt import listen
+
+        by = f", by {book.author}" if book.author else ""
+        await speak_text(voice_ctx, f"Did you mean {book.title}{by}?")
+        try:
+            _audio, text = listen(
+                voice_ctx.stt, onset_timeout=6.0, should_abort=lambda: not self.power.is_on
+            )
+        except (ValueError, OSError) as e:
+            logger.warning(f"Mic unavailable for confirmation: {e}")
+            return False
+        finally:
+            voice_ctx.stt.unload()
+        answer = text.strip().lower()
+        logger.info(f"Book confirmation: {answer!r}")
+        if re.match(r"^\W*(yes|yeah|yep|sure|correct|right|please|that'?s it|ok(?:ay)?)\b", answer):
+            return True
+        await speak_text(voice_ctx, "Okay, not that one.")
+        return False
+
+    @staticmethod
+    def _book_announcement(session, book, chapter_spec: str | None) -> str:
+        """What to say once the book is open: resume point, fresh start
+        (past the front matter), or the requested chapter."""
+        title = f"{book.title}, by {book.author}" if book.author else book.title
+        if chapter_spec:
+            if chapter_spec == "next":
+                ok = session.next_chapter()
+                where = session.status_text() if ok else None
+            elif chapter_spec == "previous":
+                where = session.status_text() if session.prev_chapter() else None
+            elif chapter_spec == "beginning":
+                where = session.status_text() if session.restart() else None
+            else:
+                where = session.status_text() if session.goto_chapter(chapter_spec) else None
+            if where:
+                return f"{where}"
+            return f"Resuming {book.title}. I couldn't find chapter {chapter_spec}."
+        if session.started_fresh:
+            status = session.status_text() or ""
+            ch = status.split(", ", 1)[1] if ", " in status else ""
+            return f"Reading {title}. Starting at {ch}" if ch else f"Reading {title}."
+        return f"Resuming {session.status_text() or book.title}"
 
     # ---------------------------------------------------------------- music
 

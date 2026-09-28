@@ -274,6 +274,10 @@ class OracleSettings(BaseSettings):
     books_path: Path = Path("data/books")
     books_db_path: Path = Path("data/books.db")
     reading_paragraph_pause: float = 0.6  # seconds between paragraphs
+    # Paragraphs are spoken as pipelined units of at most this many words
+    # (sentence-aligned): the first word comes sooner and no single TTS
+    # request is minutes long.
+    reading_unit_max_words: int = 60
     reading_chapter_pause: float = 2.0  # seconds between chapters
 
     # Mode
