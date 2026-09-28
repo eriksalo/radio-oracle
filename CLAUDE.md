@@ -23,11 +23,12 @@ make test       # pytest
 - `oracle/endpoint.py` — end-of-utterance: energy (default) / Silero VAD / Silero + Smart Turn v3 (`ORACLE_VAD_BACKEND`)
 - `oracle/timing.py` — per-turn stage timer (`TURN …` log line + `timing` activity event; `ttfa` = end of speech → first audio)
 - `oracle/rag/` — FAISS IVF-PQ retrieval (nomic-v1.5), pluggable backends, tiered modes, cross-encoder rerank, query router
-- `oracle/memory/` — conversation persistence (SQLite + summarization)
+- `oracle/memory/` — conversation persistence (SQLite + summarization), `journal.py` (durable activity events → the "What you remember doing" prompt block), `users.py` (users + voiceprints); profiles, sessions, events and bookmarks are all per user
+- `oracle/speaker.py` — speaker identification (TitaNet via sherpa-onnx); asks "Is this Erik?" once per session when unsure and enrols the answer
 - `oracle/persona.py` — system prompt builder from persona config
 - `oracle/hardware/` — GPIO button, RGB LED, power switch, audio routing
 - `oracle/music/` — music library + player (`mpg123` subprocess → PulseAudio speaker sink)
-- `oracle/books/` — book library + reader (FTS5 search, bookmarks, voice-wired)
+- `oracle/books/` — book library + reader (FTS5 search, per-user bookmarks, chapter navigation by voice; fresh books start past the Gutenberg preamble; paragraphs spoken as ≤30-word pipelined units)
 - `oracle/diag/` — Pip-Boy styled diagnostic web GUI (FastAPI, port 8000)
 - `config/settings.py` — Pydantic BaseSettings, all `ORACLE_` prefixed env vars
 
@@ -46,6 +47,8 @@ make test       # pytest
 - Workstation builds FAISS indices from ChromaDB-staged chunks; only `data/faiss/` rsyncs to the Jetson. ChromaDB is workstation-only after the FAISS cutover (2026-05-19).
 - Query embedder on the Jetson is nomic-v1.5 fp32 ONNX via onnxruntime (`ORACLE_EMBEDDING_RUNTIME=onnx`, ~64 ms/query, no torch in the process); sentence-transformers stays the workstation/ingest path. The vectors are **un-normalized** mean-pooled outputs — the FAISS `score_scale`/distance gate are calibrated on that; never L2-normalize query vectors.
 - Audio architecture (see `docs/SETUP.md` §1.6): **asymmetric routing.** Mic capture goes through PulseAudio's `module-echo-cancel` (`aec_source`) for NS/AGC; music + TTS go *direct* to the real USB speaker sink at 48 kHz, bypassing AEC. Music is decoded by an `mpg123` subprocess at ~1 % CPU (the prior in-process miniaudio+scipy+sounddevice pipeline pegged 100 %+ and underran constantly). Trade-off: wake-word reliability degrades during music since AEC has no music reference; the action button is the reliable wake during playback. On-chip AEC on the XU316 doesn't apply either — separate USB devices, no shared reference. IC/NS/AGC/VNR on the XU316 still help (mic-input-only DSP). Pulse config tracked at `systemd/pulse-default.pa`; firmware bin + DFU procedure in `firmware/`.
+- Memory budget on the Jetson is the hard constraint (llama-server ~3.2 GB + TTS sidecar ~1 GB pinned; app ~2 GB). zram swap (`nvzramconfig`) is **disabled** — it held swapped pages compressed in RAM and starved the box; the 8 GB NVMe swapfile takes the overflow. Never add a resident model without measuring `free -m`.
+- On-device probes must not leave state behind: use a scratch `ORACLE_DB_PATH`, and restore bookmarks (see `scripts/probe_reader.py`). A stray bookmark once made the radio resume a book nobody asked for.
 - Config via env vars with `ORACLE_` prefix (direnv-compatible). The Jetson's `/opt/radio-oracle/.env` sets `ORACLE_COLLECTION_BACKENDS` to route every collection to FAISS.
 
 ## Workstreams

@@ -336,3 +336,58 @@ Not committed to git as of this writing — the working tree in
   A/B candidate after Phase 4.
 - TTS swap: Kokoro stays. Chatterbox Turbo (GPU) is a later personality experiment.
 - Software AEC during music: two USB clocks; see the July mono-gambit notes.
+
+
+## 2026-09-28 — reader fixes, activity memory, speaker identification
+
+Plan: `~/.claude/plans/vast-beaming-hammock.md`. Commits `09b2e20`,
+`6ca7c55`, `3efb982`, `1424676`.
+
+**Reader (Phase A).** Fresh books start at the first real chapter heading
+(the Gutenberg preamble is chapter 0 and is skipped; "read the preface"
+opts in). Chapter navigation by voice: "go to chapter three", "chapter
+XV", "the last chapter", "go back a chapter", "start the book over",
+"the chapter called Loomings", "what am I reading?". Chapter names come
+from the heading plus the short first paragraph the indexer left behind
+("CHAPTER I: LOOMINGS"). In music mode chapter words only enter the
+reader when a book is in progress; "next slide" (Parakeet's version of
+"next song") is `next`. Loose title matches are confirmed ("Did you mean
+X, by Y?"). Paragraphs are spoken as ≤30-word pipelined units (60-word
+units overflowed the GPU sidecar's CUDA arena → HTTP 500 → CPU Kokoro).
+`scripts/probe_reader.py` exercises all of it on the production DB and
+restores any bookmark it touches; `scripts/check_books_db.py` verified
+books/chapters ids agree (150 random + the bookmarked ones: 0 mismatches).
+Also: a phantom long press at boot (ADC settling) toggled reader mode —
+presses in the poller's first 2 s are ignored.
+
+**Activity memory (Phase B).** `oracle/memory/journal.py`: `events` table
+in oracle.db fed by the activity feed (playing / asked / answered /
+music_request) and the reader (book started / resumed / chapter /
+stopped / finished, with the spoken status). The prompt gets a
+deterministic "What you remember doing with Erik" block (current book +
+position, artists played, music asked for, questions from earlier
+sessions — earlier sessions only, so the prefix cache survives). Session
+summaries include the activity log; the profile prompt is structured
+(Name only if said, Music, Books, Interests, Projects & people,
+Preferences) and the drifted old profile was reset once (`meta.profile_version=2`).
+
+**Speaker identification (Phase C).** TitaNet-small
+(`models/nemo_en_titanet_small.onnx`, sherpa-onnx) embeddings of each
+command, 76–170 ms on the CPU. On Kokoro voices: same speaker 0.85–0.90,
+other speakers ≤0.41 (probe: 8/8 at threshold 0.6). CAM++ was
+content-sensitive (same voice/different text 0.1) and rejected. Once per
+session, an unknown voice gets "Is this Erik?" / "Who am I talking to?";
+a "yes" or a name enrols that utterance plus the next two. Memory,
+journal, session and bookmarks are all per user
+(`users`/`voiceprints`/`profiles` tables; `bookmarks(user, book_id)`).
+Settings: `speaker_id_enabled`, `speaker_threshold` 0.6,
+`speaker_ask_threshold` 0.4.
+
+**Memory: zram.** The Jetson's `nvzramconfig` creates six 634 MB zram
+swap devices at priority 5, above the 8 GB NVMe swapfile. With
+llama-server + the TTS sidecar pinned, the app's idle pages went to zram
+— 3.7 GB of "swap" held *compressed in RAM* (~2.6 GB), 60 MB free, the
+app's RSS down to 47 MB, and every turn paging in. `nvzramconfig` is now
+disabled and the swapfile takes the overflow (~0.9–1.3 GB) from NVMe.
+Still tight (~0.3–0.4 GB free); next candidates are Parakeet on the GPU
+or the fp16 embedder.
