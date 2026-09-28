@@ -25,10 +25,24 @@ class Retriever:
         reranker: CrossEncoderReranker | None = None,
     ):
         self._chroma_path = chroma_path or settings.chroma_path
-        self._embedder = embedder or Embedder()
+        # Built lazily: only Chroma backends use it, and constructing it
+        # eagerly imported torch (device probe) on a FAISS-only Jetson.
+        self._embedder_override = embedder
+        self._embedder_cache: Embedder | None = None
         self._reranker = reranker  # lazy-built only when first deep query lands
         self._client = None
         self._backends: dict[str, VectorBackend] = {}
+
+    @property
+    def _embedder(self) -> Embedder:
+        if self._embedder_cache is None:
+            self._embedder_cache = self._embedder_override or Embedder()
+        return self._embedder_cache
+
+    def _chroma_needed(self) -> bool:
+        """Any collection not routed to FAISS still lives in Chroma."""
+        backends = settings.collection_backends
+        return not backends or any(kind != "faiss" for kind in backends.values())
 
     def _get_client(self):
         if self._client is None:
@@ -70,8 +84,13 @@ class Retriever:
         return self._reranker
 
     def list_collections(self) -> list[str]:
-        client = self._get_client()
-        names = {c.name for c in client.list_collections()}
+        names: set[str] = set()
+        # On the Jetson every collection is FAISS: never touch Chroma there
+        # (importing chromadb mapped pandas, pyarrow and sklearn into the
+        # app — hundreds of MB — for a client that was never queried).
+        if self._chroma_needed():
+            client = self._get_client()
+            names = {c.name for c in client.list_collections()}
         # Surface FAISS-backed collections that have no chroma counterpart
         # (e.g. the music collection has no ZIM source, so it never lived
         # in chroma). Without this union, the router can't see them.

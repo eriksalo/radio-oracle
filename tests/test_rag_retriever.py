@@ -92,3 +92,19 @@ def test_format_context_truncates_long_chunks(monkeypatch):
     body = ctx.split("]\n", 1)[1]
     assert len(body) < 150
     assert "…" in body
+
+
+def test_faiss_only_config_never_touches_chroma_or_torch(monkeypatch):
+    """With every collection on FAISS, listing collections must not build
+    a Chroma client, and constructing the retriever must not build the
+    default (torch-probing) embedder."""
+    from config.settings import settings
+    from oracle.rag import retriever as mod
+
+    monkeypatch.setattr(settings, "collection_backends", {"wikipedia": "faiss", "music": "faiss"})
+    monkeypatch.setattr(
+        mod, "Embedder", lambda *a, **k: (_ for _ in ()).throw(AssertionError("embedder built"))
+    )
+    r = mod.Retriever()
+    r._get_client = lambda: (_ for _ in ()).throw(AssertionError("chroma client built"))
+    assert r.list_collections() == ["music", "wikipedia"]
