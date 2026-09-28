@@ -74,6 +74,9 @@ oracle = "oracle.__main__:main"
 [tool.setuptools.packages.find]
 include = ["oracle*", "config*"]
 
+[tool.setuptools.package-data]
+"oracle.diag" = ["static/*"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

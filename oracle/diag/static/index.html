@@ -1,0 +1,1145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#02100a" />
+  <title>Radio Oracle :: Diagnostics</title>
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+  <style>
+    /* Self-hosted (the radio is an offline appliance; Google Fonts never loads there). */
+    @font-face {
+      font-family: 'VT323'; font-style: normal; font-weight: 400; font-display: swap;
+      src: url('/static/vt323-latin.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Share Tech Mono'; font-style: normal; font-weight: 400; font-display: swap;
+      src: url('/static/share-tech-mono-latin.woff2') format('woff2');
+    }
+
+    :root {
+      color-scheme: dark;
+      --grn: #3dff7a;        /* primary phosphor */
+      --grn-dim: #1f8a3f;    /* dim phosphor */
+      --grn-deep: #0a2010;   /* darker fill */
+      --grn-glow: rgba(61, 255, 122, 0.55);
+      --amber: #ffb641;
+      --red: #ff5e5e;
+      --bg: #02100a;
+      --bg-2: #051b0f;
+    }
+    * { box-sizing: border-box; }
+    html, body { background: var(--bg); }
+    body {
+      font-family: 'VT323', 'Share Tech Mono', 'Courier New', monospace;
+      color: var(--grn);
+      margin: 0;
+      padding: 18px;
+      font-size: 18px;
+      line-height: 1.35;
+      text-shadow: 0 0 4px var(--grn-glow);
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse at center, rgba(61,255,122,0.06) 0%, transparent 70%),
+        var(--bg);
+      position: relative;
+      overflow-x: hidden;
+    }
+    @media (max-width: 600px) { body { padding: 10px; font-size: 16px; } }
+    /* CRT scan lines */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(0,0,0,0) 0px,
+        rgba(0,0,0,0) 2px,
+        rgba(0,0,0,0.18) 3px,
+        rgba(0,0,0,0) 4px
+      );
+      pointer-events: none;
+      z-index: 100;
+      mix-blend-mode: multiply;
+    }
+    /* CRT vignette + flicker */
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      box-shadow: inset 0 0 180px rgba(0,0,0,0.85);
+      pointer-events: none;
+      z-index: 99;
+      animation: flicker 6s infinite;
+    }
+    @keyframes flicker {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.97; }
+      52% { opacity: 0.9; }
+      53% { opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      body::after { animation: none; }
+      .footer .blink { animation: none; }
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border: 2px solid var(--grn);
+      padding: 10px 14px;
+      box-shadow: 0 0 12px var(--grn-glow), inset 0 0 12px rgba(61,255,122,0.08);
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .header svg { flex: 0 0 auto; filter: drop-shadow(0 0 5px var(--grn-glow)); }
+    .header .title { flex: 1 1 240px; }
+    .header h1 {
+      margin: 0; font-size: 26px; letter-spacing: 0.08em;
+    }
+    .header .sub {
+      font-size: 15px; color: var(--grn-dim); letter-spacing: 0.1em;
+    }
+    .header .clock {
+      text-align: right; font-size: 14px; color: var(--grn-dim);
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+    }
+    .header .clock .poll { display: block; font-size: 12px; letter-spacing: 0.12em; }
+    .header .clock .poll.paused { color: var(--amber); }
+
+    /* status pills under the title */
+    .pills { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 6px; font-size: 14px; }
+    .pill {
+      border: 1px solid var(--grn-dim); padding: 1px 8px; letter-spacing: 0.06em;
+      color: var(--grn-dim); white-space: nowrap;
+    }
+    .pill b { color: var(--grn); font-weight: normal; }
+    .pill.on { border-color: var(--grn); }
+    .pill.warn { border-color: var(--amber); color: var(--amber); }
+    .pill.warn b { color: var(--amber); }
+
+    .banner {
+      border: 1px dashed var(--grn-dim);
+      padding: 6px 10px;
+      margin-bottom: 14px;
+      font-size: 15px;
+      color: var(--grn-dim);
+    }
+    .banner::before { content: '! '; color: var(--grn); }
+    .banner.warn { border-color: var(--amber); color: var(--amber); }
+    .banner.warn::before { color: var(--amber); }
+    .banner[hidden] { display: none; }
+
+    .addressbar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 10px; margin-bottom: 14px;
+      border: 1px solid var(--grn-dim);
+      background: rgba(0,0,0,0.25);
+      flex-wrap: wrap;
+    }
+    .addressbar input { flex: 0 1 220px; padding: 4px 8px; font-size: 16px; }
+    .addressbar label { margin: 0; }
+
+    .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .card {
+      background: linear-gradient(180deg, var(--bg-2), var(--bg));
+      border: 2px solid var(--grn);
+      padding: 12px 14px 14px;
+      box-shadow: 0 0 8px rgba(61,255,122,0.18), inset 0 0 8px rgba(61,255,122,0.04);
+      position: relative;
+      min-width: 0;
+    }
+    .card.wide { grid-column: 1 / -1; }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0.1em;
+      border-bottom: 1px solid var(--grn-dim);
+      padding-bottom: 4px;
+    }
+    h2::before { content: '> '; color: var(--grn); }
+    h2 .tag { float: right; font-size: 13px; color: var(--grn-dim); letter-spacing: 0.08em; }
+
+    button {
+      font-family: inherit;
+      font-size: 17px;
+      background: transparent;
+      color: var(--grn);
+      border: 2px solid var(--grn);
+      padding: 4px 14px;
+      cursor: pointer;
+      letter-spacing: 0.08em;
+      text-shadow: 0 0 4px var(--grn-glow);
+      transition: background 0.1s, transform 0.05s;
+    }
+    button:hover:not(:disabled) {
+      background: var(--grn);
+      color: var(--bg);
+      text-shadow: none;
+      box-shadow: 0 0 12px var(--grn-glow);
+    }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { color: var(--grn-dim); border-color: var(--grn-dim); cursor: wait; text-shadow: none; }
+    button.secondary { border-style: dashed; }
+
+    textarea, input[type=text] {
+      width: 100%;
+      background: rgba(0,0,0,0.4);
+      color: var(--grn);
+      border: 1px solid var(--grn-dim);
+      padding: 8px 10px;
+      font: inherit;
+      text-shadow: 0 0 3px var(--grn-glow);
+      caret-color: var(--grn);
+    }
+    textarea { min-height: 64px; resize: vertical; }
+    textarea:focus, input:focus { outline: 0; border-color: var(--grn); box-shadow: 0 0 8px var(--grn-glow); }
+    textarea::placeholder, input::placeholder { color: var(--grn-dim); }
+
+    label { font-size: 15px; color: var(--grn-dim); display: block; margin: 10px 0 4px; letter-spacing: 0.05em; }
+    label.inline {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin: 0; cursor: pointer;
+    }
+    /* terminal-style checkbox */
+    input[type=checkbox] {
+      appearance: none; -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border: 1px solid var(--grn-dim);
+      background: transparent;
+      position: relative; cursor: pointer;
+      vertical-align: middle;
+    }
+    input[type=checkbox]:checked { border-color: var(--grn); }
+    input[type=checkbox]:checked::after {
+      content: 'X';
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--grn); font-size: 16px; line-height: 1;
+      text-shadow: 0 0 4px var(--grn-glow);
+    }
+
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+    .hint { color: var(--grn-dim); font-size: 14px; margin-top: 6px; }
+    .answer {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--grn-dim);
+      padding: 10px 12px;
+      white-space: pre-wrap;
+      max-height: 320px;
+      overflow: auto;
+      min-height: 50px;
+      font-size: 17px;
+    }
+    .answer:empty::before { content: '[ awaiting query ]'; color: var(--grn-dim); }
+
+    .stat-row {
+      display: flex; justify-content: space-between; gap: 10px;
+      padding: 2px 0; font-size: 16px;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-row span:first-child { color: var(--grn-dim); white-space: nowrap; }
+    .stat-row span:first-child::before { content: '· '; }
+    .stat-row span:last-child { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .bar {
+      background: rgba(0,0,0,0.5);
+      border: 1px solid var(--grn-dim);
+      height: 16px;
+      overflow: hidden;
+      margin: 3px 0;
+      position: relative;
+    }
+    .bar > div {
+      height: 100%;
+      background:
+        repeating-linear-gradient(
+          90deg,
+          var(--grn) 0px,
+          var(--grn) 8px,
+          rgba(0,0,0,0.3) 8px,
+          rgba(0,0,0,0.3) 10px
+        );
+      box-shadow: 0 0 8px var(--grn-glow);
+      transition: width 0.3s;
+    }
+    .bar > div.amber {
+      background: repeating-linear-gradient(90deg, var(--amber) 0px, var(--amber) 8px, rgba(0,0,0,0.3) 8px, rgba(0,0,0,0.3) 10px);
+      box-shadow: 0 0 8px rgba(255,182,65,0.5);
+    }
+    .bar > div.red {
+      background: repeating-linear-gradient(90deg, var(--red) 0px, var(--red) 8px, rgba(0,0,0,0.3) 8px, rgba(0,0,0,0.3) 10px);
+      box-shadow: 0 0 8px rgba(255,80,80,0.5);
+    }
+    .meter-label {
+      display: flex; justify-content: space-between;
+      font-size: 14px; color: var(--grn-dim);
+      margin-bottom: 2px; letter-spacing: 0.05em;
+    }
+
+    /* stacked memory bar */
+    .stack { display: flex; height: 18px; border: 1px solid var(--grn-dim); background: rgba(0,0,0,0.5); overflow: hidden; margin: 4px 0 8px; }
+    .stack > div { height: 100%; transition: width 0.3s; min-width: 0; }
+    .s0 { background: var(--grn); }
+    .s1 { background: var(--grn-dim); }
+    .s2 { background: var(--amber); }
+    .s3 { background: #7a5cff; }
+    .s4 { background: rgba(61,255,122,0.25); }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; color: var(--grn-dim); }
+    .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: middle; }
+
+    /* last-turn stage bars */
+    .stages { margin-top: 6px; }
+    .stage { display: grid; grid-template-columns: 90px 1fr 64px; gap: 8px; align-items: center; font-size: 14px; }
+    .stage .n { color: var(--grn-dim); letter-spacing: 0.05em; }
+    .stage .v { text-align: right; font-variant-numeric: tabular-nums; }
+    .stage .bar { height: 10px; margin: 0; }
+    .big {
+      font-size: 44px; line-height: 1; letter-spacing: 0.04em;
+      font-variant-numeric: tabular-nums; margin: 4px 0 2px;
+    }
+    .big small { font-size: 16px; color: var(--grn-dim); letter-spacing: 0.1em; }
+    .ttfa-hist { display: flex; gap: 3px; align-items: flex-end; height: 34px; margin-top: 6px; }
+    .ttfa-hist > div { flex: 1; background: var(--grn-dim); min-height: 2px; }
+    .ttfa-hist > div.last { background: var(--grn); box-shadow: 0 0 6px var(--grn-glow); }
+
+    audio {
+      width: 100%; margin-top: 8px;
+      filter: hue-rotate(85deg) saturate(2) brightness(1.1) sepia(0.4);
+    }
+
+    .status { font-size: 14px; color: var(--grn-dim); }
+    .status.ok { color: var(--grn); }
+    .status.err { color: var(--red); text-shadow: 0 0 4px rgba(255,80,80,0.6); }
+    .status:not(:empty)::before { content: '> '; }
+
+    .cpu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; margin-top: 6px; }
+    .cpu-cell {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--grn-dim);
+      padding: 3px 2px;
+      font-size: 13px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.04em;
+    }
+    .cpu-cell .v { font-size: 16px; color: var(--grn); }
+
+    /* Health dots */
+    .dot {
+      display: inline-block;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--grn-dim);
+      box-shadow: 0 0 6px transparent;
+      margin-right: 8px; vertical-align: middle;
+    }
+    .dot.ok  { background: var(--grn);   box-shadow: 0 0 8px var(--grn-glow); }
+    .dot.err { background: var(--red);   box-shadow: 0 0 8px rgba(255,80,80,0.6); }
+    .dot.warn{ background: #f5c518;      box-shadow: 0 0 8px rgba(245,197,24,0.55); }
+    .health-row {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      padding: 4px 0; border-bottom: 1px dashed rgba(31,138,63,0.25);
+      font-size: 16px;
+    }
+    .health-row:last-child { border-bottom: 0; }
+    .health-row .name { color: var(--grn-dim); letter-spacing: 0.06em; white-space: nowrap; }
+    .health-row .detail { color: var(--grn); font-size: 14px; max-width: 65%;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Log tail */
+    .log-tabs { display: flex; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .log-tabs button { padding: 2px 10px; font-size: 14px; }
+    .log-tabs button.active {
+      background: var(--grn); color: var(--bg);
+      text-shadow: none; box-shadow: 0 0 12px var(--grn-glow);
+    }
+    .log {
+      background: rgba(0,0,0,0.55);
+      border: 1px solid var(--grn-dim);
+      padding: 6px 8px;
+      max-height: 280px;
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.25;
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      white-space: pre;
+    }
+    .log .lvl-WARNING { color: #f5c518; }
+    .log .lvl-ERROR, .log .lvl-CRITICAL { color: var(--red); }
+    .log .lvl-DEBUG { color: var(--grn-dim); }
+
+    .feed { margin-top: 8px; max-height: 340px; overflow-y: auto; font-size: 13px; line-height: 1.55; }
+    .feed .t { color: var(--grn-dim); }
+    .feed .k { display: inline-block; min-width: 76px; color: var(--amber); }
+    .feed .k.err { color: var(--red); }
+
+    .footer {
+      margin-top: 18px;
+      text-align: center;
+      font-size: 14px;
+      color: var(--grn-dim);
+      letter-spacing: 0.15em;
+    }
+    .footer .blink { animation: blink 1.1s steps(2, jump-none) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    code { font-family: 'Share Tech Mono', monospace; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <!-- Original retro tin-robot mascot — own design, no franchise IP.
+         Mid-century atomic-age styling, monochrome phosphor green w/ yellow accents. -->
+    <svg width="84" height="108" viewBox="0 0 100 130" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <radialGradient id="eye">
+          <stop offset="0%" stop-color="#bfffd4"/>
+          <stop offset="60%" stop-color="#3dff7a"/>
+          <stop offset="100%" stop-color="#1f8a3f"/>
+        </radialGradient>
+      </defs>
+      <g stroke="#3dff7a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="#0a1f12">
+        <line x1="34" y1="16" x2="28" y2="4"/>
+        <circle cx="28" cy="4" r="3" fill="#f5c518" stroke-width="1.5"/>
+        <line x1="66" y1="16" x2="72" y2="4"/>
+        <circle cx="72" cy="4" r="3" fill="#f5c518" stroke-width="1.5"/>
+        <rect x="26" y="16" width="48" height="40" rx="8" stroke-width="2.5"/>
+        <circle cx="50" cy="22" r="2" fill="#f5c518" stroke-width="1"/>
+        <circle cx="40" cy="34" r="6"/>
+        <circle cx="40" cy="34" r="3.5" fill="url(#eye)" stroke="none"/>
+        <circle cx="60" cy="34" r="6"/>
+        <circle cx="60" cy="34" r="3.5" fill="url(#eye)" stroke="none"/>
+        <rect x="36" y="46" width="28" height="7" rx="1" stroke-width="1.5"/>
+        <line x1="42" y1="46" x2="42" y2="53" stroke-width="1"/>
+        <line x1="48" y1="46" x2="48" y2="53" stroke-width="1"/>
+        <line x1="54" y1="46" x2="54" y2="53" stroke-width="1"/>
+        <line x1="60" y1="46" x2="60" y2="53" stroke-width="1"/>
+        <rect x="42" y="56" width="16" height="6" stroke-width="2"/>
+        <path d="M20 64 L 80 64 L 84 120 L 16 120 Z" stroke-width="2.5"/>
+        <circle cx="50" cy="88" r="12" stroke-width="2"/>
+        <circle cx="50" cy="88" r="9" fill="none" stroke="#1f8a3f" stroke-width="1"/>
+        <line x1="50" y1="78" x2="50" y2="80" stroke-width="1"/>
+        <line x1="60" y1="88" x2="58" y2="88" stroke-width="1"/>
+        <line x1="50" y1="98" x2="50" y2="96" stroke-width="1"/>
+        <line x1="40" y1="88" x2="42" y2="88" stroke-width="1"/>
+        <line x1="50" y1="88" x2="57" y2="82" stroke="#f5c518" stroke-width="1.8"/>
+        <circle cx="50" cy="88" r="1.5" fill="#f5c518" stroke="none"/>
+        <circle cx="24" cy="68" r="1.2" fill="#3dff7a" stroke="none"/>
+        <circle cx="76" cy="68" r="1.2" fill="#3dff7a" stroke="none"/>
+        <circle cx="20" cy="116" r="1.2" fill="#3dff7a" stroke="none"/>
+        <circle cx="80" cy="116" r="1.2" fill="#3dff7a" stroke="none"/>
+        <circle cx="80" cy="70" r="4" stroke-width="2"/>
+        <rect x="76" y="73" width="8" height="18" rx="2" stroke-width="2"/>
+        <circle cx="80" cy="93" r="3" stroke-width="2"/>
+        <rect x="76" y="94" width="8" height="20" rx="2" stroke-width="2"/>
+        <path d="M76 113 L 72 122 L 78 122 L 80 116 L 82 116 L 84 122 L 90 122 L 86 113 Z" stroke-width="2"/>
+        <circle cx="20" cy="70" r="4" stroke-width="2"/>
+        <path d="M16 71 L 12 50 L 22 47 L 26 68 Z" stroke-width="2"/>
+        <circle cx="17" cy="50" r="3" stroke-width="2"/>
+        <rect x="13" y="26" width="8" height="22" rx="2" stroke-width="2"/>
+        <path d="M13 26 Q 9 14, 13 10 Q 18 10, 18 16 L 18 24 Z" stroke-width="2"/>
+        <path d="M21 26 Q 24 22, 22 18 L 19 22 Z" stroke-width="2"/>
+      </g>
+    </svg>
+
+    <div class="title">
+      <h1>RADIO ORACLE</h1>
+      <div class="sub">DIAGNOSTIC CONSOLE :: <span id="hostName">—</span> :: <span id="assistantName">THE LIBRARIAN</span></div>
+      <div class="pills">
+        <span class="pill" id="pillService">SERVICE <b>—</b></span>
+        <span class="pill" id="pillMode">MODE <b>—</b></span>
+        <span class="pill" id="pillPhase">DOING <b>—</b></span>
+        <span class="pill" id="pillTtfa">LAST TTFA <b>—</b></span>
+        <span class="pill" id="pillMem">MEM FREE <b>—</b></span>
+      </div>
+    </div>
+    <div class="clock">
+      <span id="clock">00:00:00</span>
+      <span class="poll" id="pollState">LIVE</span>
+    </div>
+  </div>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="addressbar">
+    <label class="inline" for="userName">ADDRESS ME AS</label>
+    <input id="userName" type="text" maxlength="40" placeholder="Erik" />
+    <button id="saveUserName" class="secondary">[ SAVE ]</button>
+    <span class="status" id="userNameStatus"></span>
+  </div>
+
+  <div class="grid">
+
+    <!-- Health -->
+    <div class="card">
+      <h2>[ 0 ] SYSTEM HEALTH <span class="tag">every 30 s</span></h2>
+      <div id="healthList">
+        <div class="health-row"><span class="name"><span class="dot"></span>LLM</span><span class="detail">…</span></div>
+        <div class="health-row"><span class="name"><span class="dot"></span>ARCHIVES</span><span class="detail">…</span></div>
+        <div class="health-row"><span class="name"><span class="dot"></span>VOICE</span><span class="detail">…</span></div>
+        <div class="health-row"><span class="name"><span class="dot"></span>AUDIO</span><span class="detail">…</span></div>
+        <div class="health-row"><span class="name"><span class="dot"></span>GPIO</span><span class="detail">…</span></div>
+      </div>
+      <div class="row"><button id="refreshHealthBtn" class="secondary">[ REFRESH ]</button>
+        <span class="status" id="healthStatus"></span></div>
+    </div>
+
+    <!-- Live state -->
+    <div class="card">
+      <h2>[ 0 ] LIVE STATE</h2>
+      <div id="liveState">
+        <div class="stat-row"><span>service</span><span id="lsRunning">—</span></div>
+        <div class="stat-row"><span>mode</span><span id="lsMode">—</span></div>
+        <div class="stat-row"><span>power</span><span id="lsPower">—</span></div>
+        <div class="stat-row"><span>last button</span><span id="lsButton">—</span></div>
+        <div class="stat-row"><span>last heard</span><span id="lsLastTx">—</span></div>
+        <div class="stat-row"><span>updated</span><span id="lsUpdated">—</span></div>
+      </div>
+      <div class="hint">Published by <code>radio-oracle.service</code> on every transition.</div>
+    </div>
+
+    <!-- Last turn timing -->
+    <div class="card">
+      <h2>[ ⏱ ] LAST TURN <span class="tag" id="turnLabel"></span></h2>
+      <div class="big"><span id="turnTtfa">—</span> <small>TTFA · end of speech → first audio</small></div>
+      <div class="ttfa-hist" id="ttfaHist" title="ttfa of recent turns"></div>
+      <div class="stages" id="turnStages"></div>
+      <div class="stat-row" style="margin-top:6px"><span>decode</span><span id="turnDecode">—</span></div>
+      <div class="hint">From the <code>timing</code> activity event. Target: under 5 s.</div>
+    </div>
+
+    <!-- Memory budget -->
+    <div class="card">
+      <h2>[ ▦ ] MEMORY BUDGET <span class="tag">every 5 s</span></h2>
+      <div class="meter-label"><span>RAM</span><span id="memSummary">—</span></div>
+      <div class="stack" id="memStack"></div>
+      <div class="legend" id="memLegend"></div>
+      <div id="procRows" style="margin-top:8px"></div>
+      <div class="hint">Per-service cgroup memory. Resident + swapped, so a service that has been paged out still shows its true size.</div>
+    </div>
+
+    <!-- Live activity feed -->
+    <div class="card wide">
+      <h2>[ * ] LIVE ACTIVITY</h2>
+      <div class="stat-row"><span>doing</span><span id="actPhase">—</span></div>
+      <div class="stat-row"><span>now playing</span><span id="actMedia">—</span></div>
+      <div class="feed" id="actFeed"></div>
+      <div class="hint">Everything the oracle hears, decides, and says — live
+        from <code>radio-oracle.service</code>.</div>
+    </div>
+
+    <!-- Hardware I/O -->
+    <div class="card wide">
+      <h2>[ ! ] HARDWARE I/O <span class="tag">every 1 s</span></h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+        <div>
+          <div class="meter-label"><span>MOMENTARY (AIN<span id="hwBtnPin">—</span>)</span><span id="hwBtnLevel">—</span></div>
+          <div class="stat-row"><span>state</span><span id="hwBtnState">—</span></div>
+          <div class="stat-row"><span>voltage</span><span id="hwBtnVolt">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>POWER SWITCH (AIN<span id="hwSwPin">—</span>)</span><span id="hwSwLevel">—</span></div>
+          <div class="stat-row"><span>state</span><span id="hwSwState">—</span></div>
+          <div class="stat-row"><span>voltage</span><span id="hwSwVolt">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>POTENTIOMETER</span><span id="hwPotPct">—</span></div>
+          <div class="bar"><div id="hwPotBar" style="width:0%"></div></div>
+          <div class="stat-row"><span>raw</span><span id="hwPotRaw">—</span></div>
+          <div class="stat-row"><span>voltage</span><span id="hwPotV">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>RGB LED</span><span id="hwLedSwatch" style="display:inline-block;width:18px;height:14px;border:1px solid var(--grn-dim);background:#000;vertical-align:middle"></span></div>
+          <div class="row" style="margin-top:4px">
+            <label class="inline"><input type="checkbox" id="hwLedR" /> R</label>
+            <label class="inline"><input type="checkbox" id="hwLedG" /> G</label>
+            <label class="inline"><input type="checkbox" id="hwLedB" /> B</label>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <button id="hwLedApply">[ APPLY ]</button>
+            <button id="hwLedOff" class="secondary">[ OFF ]</button>
+          </div>
+          <span class="status" id="hwLedStatus"></span>
+        </div>
+      </div>
+      <div class="hint">While the radio runs, readings come from its telemetry (the ADS1115 has one mux register and can't be shared). Its own LED writes will win over yours.</div>
+      <div class="status" id="hwInputsStatus"></div>
+    </div>
+
+    <!-- Mic -->
+    <div class="card">
+      <h2>[ 1 ] AUDIO INPUT TEST</h2>
+      <div class="row">
+        <button id="recBtn">[ RECORD ]</button>
+        <span class="status" id="recStatus">Captures until silence detected.</span>
+      </div>
+      <audio id="recPlayer" controls></audio>
+    </div>
+
+    <!-- TTS -->
+    <div class="card">
+      <h2>[ 2 ] VOX SYNTHESIS</h2>
+      <textarea id="ttsText" placeholder="Type transmission for the Oracle to broadcast...">Testing one two three. The Oracle is operational.</textarea>
+      <div class="row">
+        <button id="speakBtn">[ TRANSMIT ]</button>
+        <button id="speakBrowserBtn" class="secondary">[ PREVIEW ]</button>
+        <label class="inline"><input type="checkbox" id="filterChk" /> RADIO FILTER</label>
+        <span class="status" id="ttsStatus"></span>
+      </div>
+      <audio id="ttsPlayer" controls></audio>
+      <div class="hint">Runs Kokoro on the CPU in a worker subprocess (the GPU sidecar belongs to the radio).</div>
+    </div>
+
+    <!-- Ask -->
+    <div class="card wide">
+      <h2>[ 3 ] ORACLE QUERY (LLM + RAG)</h2>
+      <textarea id="askText" placeholder="State your inquiry..."></textarea>
+      <div class="row">
+        <button id="askBtn">[ INTERROGATE ]</button>
+        <label class="inline"><input type="checkbox" id="ragChk" checked /> ARCHIVES (RAG)</label>
+        <label class="inline"><input type="checkbox" id="speakAnswerChk" /> VOICE RESPONSE</label>
+        <span class="status" id="askStatus"></span>
+      </div>
+      <label>RESPONSE</label>
+      <div class="answer" id="answer"></div>
+      <div class="hint" id="ragSources"></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="card wide">
+      <h2>[ 4 ] VITALS <span class="tag">every 3 s</span></h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+        <div>
+          <div class="meter-label"><span>CPU LOAD</span><span id="cpuPct">—</span></div>
+          <div class="bar"><div id="cpuBar" style="width:0%"></div></div>
+          <div class="cpu-grid" id="cpuGrid"></div>
+          <div class="stat-row" style="margin-top:6px"><span>load avg</span><span id="loadAvg">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>MEMORY</span><span id="memPct">—</span></div>
+          <div class="bar"><div id="memBar" style="width:0%"></div></div>
+          <div class="stat-row"><span>used</span><span id="memUsed">—</span></div>
+          <div class="stat-row"><span>available</span><span id="memAvail">—</span></div>
+          <div class="meter-label" style="margin-top:8px"><span>SWAP</span><span id="swapPct">—</span></div>
+          <div class="bar"><div id="swapBar" style="width:0%"></div></div>
+          <div class="stat-row"><span>swap used</span><span id="swapUsed">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>TEMPERATURE (°C)</span><span></span></div>
+          <div id="temps"></div>
+          <div class="stat-row" style="margin-top:6px"><span>uptime</span><span id="uptime">—</span></div>
+        </div>
+        <div>
+          <div class="meter-label"><span>GPU</span><span id="gpuPct">—</span></div>
+          <div class="bar"><div id="gpuBar" style="width:0%"></div></div>
+          <div class="stat-row"><span>freq</span><span id="gpuFreq">—</span></div>
+          <div class="stat-row"><span>tegrastats</span><span id="gpuAvail">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="card wide">
+      <h2>[ 5 ] TELEMETRY LOG</h2>
+      <div class="log-tabs">
+        <button id="tabDiag" class="active">[ DIAG ]</button>
+        <button id="tabRadio" class="secondary">[ RADIO-ORACLE ]</button>
+        <button id="tabRefresh" class="secondary" style="margin-left:auto">[ REFRESH ]</button>
+        <label class="inline" style="margin-left:8px"><input type="checkbox" id="logAuto" checked /> AUTO (5 s)</label>
+      </div>
+      <div class="log" id="logBox">[ awaiting telemetry ]</div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    RADIO ORACLE &nbsp;·&nbsp; OFFLINE COMPANION &nbsp;·&nbsp; JETSON ORIN NANO<span class="blink">_</span>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function postJSON(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r;
+}
+
+function setStatus(el, msg, cls) {
+  el.textContent = msg;
+  el.className = 'status' + (cls ? ' ' + cls : '');
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
+function fmtMB(mb) { return mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : Math.round(mb) + ' MB'; }
+function fmtAgo(ts) {
+  if (!ts) return '—';
+  const d = Math.max(0, (Date.now() / 1000) - ts);
+  if (d < 60) return d.toFixed(0) + 's ago';
+  if (d < 3600) return (d / 60).toFixed(0) + 'm ago';
+  return (d / 3600).toFixed(1) + 'h ago';
+}
+function fmtDur(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return (d ? d + 'd ' : '') + h + 'h ' + m + 'm';
+}
+function setPill(id, value, cls) {
+  const el = $(id);
+  el.querySelector('b').textContent = value;
+  el.className = 'pill' + (cls ? ' ' + cls : '');
+}
+
+// ---- polling scheduler: nothing polls while the tab is hidden ----
+// A backgrounded tab used to keep ~7 requests/s hitting the Jetson forever.
+const _pollers = [];
+function poll(fn, everyMs) {
+  const p = { fn, everyMs, timer: null, running: false };
+  const tick = async () => {
+    if (document.hidden || p.running) return;
+    p.running = true;
+    try { await fn(); } catch (e) { /* transient */ } finally { p.running = false; }
+  };
+  p.start = () => { if (!p.timer) { tick(); p.timer = setInterval(tick, everyMs); } };
+  p.stop = () => { if (p.timer) { clearInterval(p.timer); p.timer = null; } };
+  _pollers.push(p);
+  p.start();
+  return tick;
+}
+document.addEventListener('visibilitychange', () => {
+  const hidden = document.hidden;
+  _pollers.forEach(p => hidden ? p.stop() : p.start());
+  $('pollState').textContent = hidden ? 'PAUSED' : 'LIVE';
+  $('pollState').className = 'poll' + (hidden ? ' paused' : '');
+});
+
+// --- mic ---
+$('recBtn').onclick = async () => {
+  const btn = $('recBtn'), st = $('recStatus');
+  btn.disabled = true;
+  setStatus(st, 'Listening on Jetson mic (speak now, then go quiet)…');
+  try {
+    const r = await postJSON('/api/record', {});
+    const blob = await r.blob();
+    const dur = r.headers.get('X-Duration-Sec') || '?';
+    $('recPlayer').src = URL.createObjectURL(blob);
+    setStatus(st, `Captured ${dur}s. Press play.`, 'ok');
+  } catch (e) {
+    setStatus(st, 'Error: ' + e.message, 'err');
+  } finally { btn.disabled = false; }
+};
+
+// --- tts ---
+$('speakBtn').onclick = async () => {
+  const btn = $('speakBtn'), st = $('ttsStatus');
+  const text = $('ttsText').value.trim();
+  if (!text) return;
+  btn.disabled = true; setStatus(st, 'Synthesizing & playing on Jetson…');
+  try {
+    const r = await postJSON('/api/speak', { text, radio_filter: $('filterChk').checked });
+    const j = await r.json();
+    setStatus(st, `Played ${j.duration_sec.toFixed(2)}s.`, 'ok');
+  } catch (e) {
+    setStatus(st, 'Error: ' + e.message, 'err');
+  } finally { btn.disabled = false; }
+};
+
+$('speakBrowserBtn').onclick = async () => {
+  const btn = $('speakBrowserBtn'), st = $('ttsStatus');
+  const text = $('ttsText').value.trim();
+  if (!text) return;
+  btn.disabled = true; setStatus(st, 'Synthesizing for browser preview…');
+  try {
+    const url = `/api/speak.wav?text=${encodeURIComponent(text)}&radio_filter=${$('filterChk').checked}`;
+    $('ttsPlayer').src = url;
+    $('ttsPlayer').play().catch(()=>{});
+    setStatus(st, 'Loaded into player.', 'ok');
+  } catch (e) {
+    setStatus(st, 'Error: ' + e.message, 'err');
+  } finally { btn.disabled = false; }
+};
+
+// --- ask (streaming via SSE / fetch ReadableStream) ---
+$('askBtn').onclick = async () => {
+  const btn = $('askBtn'), st = $('askStatus');
+  const text = $('askText').value.trim();
+  if (!text) return;
+  btn.disabled = true; setStatus(st, 'Streaming…');
+  $('answer').textContent = ''; $('ragSources').textContent = '';
+
+  // Use fetch + ReadableStream (POST is required; EventSource only does GET).
+  const ctrl = new AbortController();
+  let answer = '';
+  try {
+    const resp = await fetch('/api/ask/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, use_rag: $('ragChk').checked }),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok || !resp.body) throw new Error(await resp.text() || resp.statusText);
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      // SSE frames split by blank line.
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const dataLines = frame.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6));
+        if (!dataLines.length) continue;
+        let evt;
+        try { evt = JSON.parse(dataLines.join('\n')); } catch { continue; }
+        if (evt.type === 'token') {
+          answer += evt.value;
+          $('answer').textContent = answer;
+        } else if (evt.type === 'meta') {
+          if (evt.rag_used) {
+            $('ragSources').textContent = 'RAG sources: ' + (evt.rag_sources.join(', ') || '(none)');
+          } else if ($('ragChk').checked) {
+            $('ragSources').textContent = 'RAG requested but no collections matched.';
+          }
+        } else if (evt.type === 'done') {
+          setStatus(st, 'Done.', 'ok');
+        } else if (evt.type === 'error') {
+          setStatus(st, 'Error: ' + evt.message, 'err');
+        }
+      }
+    }
+    if ($('speakAnswerChk').checked && answer) {
+      setStatus(st, 'Speaking…', 'ok');
+      await postJSON('/api/speak', { text: answer, radio_filter: $('filterChk').checked });
+      setStatus(st, 'Done.', 'ok');
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      setStatus(st, 'Cancelled.', 'ok');
+    } else {
+      setStatus(st, 'Error: ' + e.message, 'err');
+    }
+  } finally { btn.disabled = false; }
+};
+
+// --- stats poll ---
+const barCls = (pct) => pct >= 90 ? 'red' : pct >= 75 ? 'amber' : '';
+poll(async () => {
+  const r = await fetch('/api/stats'); const j = await r.json();
+  $('cpuPct').textContent = j.cpu.overall_pct.toFixed(1) + '%';
+  $('cpuBar').style.width = j.cpu.overall_pct + '%';
+  $('cpuBar').className = barCls(j.cpu.overall_pct);
+  $('loadAvg').textContent = j.cpu.load_avg.join(' / ');
+  $('cpuGrid').innerHTML = j.cpu.per_cpu_pct.map((v,i) =>
+    `<div class="cpu-cell">cpu${i}<div class="v">${v.toFixed(0)}%</div></div>`).join('');
+  $('memPct').textContent = j.memory.pct + '%';
+  $('memBar').style.width = j.memory.pct + '%';
+  $('memBar').className = barCls(j.memory.pct);
+  $('memUsed').textContent = fmtMB(j.memory.used_mb);
+  $('memAvail').textContent = fmtMB(j.memory.available_mb);
+  $('swapPct').textContent = j.swap.pct + '%';
+  $('swapBar').style.width = j.swap.pct + '%';
+  $('swapUsed').textContent = fmtMB(j.swap.used_mb) + ' / ' + fmtMB(j.swap.total_mb);
+  $('temps').innerHTML = Object.entries(j.temps_c).map(([k,v]) =>
+    `<div class="stat-row"><span>${escapeHtml(k)}</span><span>${v.toFixed(1)}</span></div>`).join('');
+  if (j.uptime_sec) $('uptime').textContent = fmtDur(j.uptime_sec);
+  if (j.hostname) $('hostName').textContent = j.hostname.toUpperCase();
+  setPill('pillMem', fmtMB(j.memory.available_mb) + ' avail', j.memory.available_mb < 400 ? 'warn' : 'on');
+}, 3000);
+
+// --- gpu poll (tegrastats) ---
+poll(async () => {
+  const r = await fetch('/api/gpu'); const j = await r.json();
+  $('gpuAvail').textContent = j.available ? (j.stale_sec != null ? `${j.stale_sec.toFixed(1)}s ago` : 'live') : 'unavailable';
+  if (j.gpu_pct != null) {
+    $('gpuPct').textContent = j.gpu_pct + '%';
+    $('gpuBar').style.width = j.gpu_pct + '%';
+  } else {
+    $('gpuPct').textContent = '—';
+    $('gpuBar').style.width = '0%';
+  }
+  $('gpuFreq').textContent = j.gpu_freq_mhz != null ? j.gpu_freq_mhz + ' MHz' : '—';
+}, 3000);
+
+// --- memory budget (per-service cgroups) ---
+const PROC_CLS = { 'llama-server': 's0', 'radio-oracle': 's1', 'radio-oracle-tts': 's2', 'radio-oracle-diag': 's3', 'ollama': 's4' };
+poll(async () => {
+  const r = await fetch('/api/procs'); const j = await r.json();
+  const total = j.total_mb || 1;
+  const services = (j.services || []).filter(s => s.present);
+  const stack = services.map(s =>
+    `<div class="${PROC_CLS[s.unit] || 's4'}" style="width:${(s.resident_mb / total * 100).toFixed(1)}%" title="${escapeHtml(s.unit)} ${fmtMB(s.resident_mb)}"></div>`).join('');
+  $('memStack').innerHTML = stack;
+  $('memLegend').innerHTML = services.map(s =>
+    `<span><i class="${PROC_CLS[s.unit] || 's4'}"></i>${escapeHtml(s.unit)}</span>`).join('');
+  $('memSummary').textContent = `${fmtMB(j.used_mb)} used · ${fmtMB(j.available_mb)} avail of ${fmtMB(total)}`;
+  $('procRows').innerHTML = services.map(s =>
+    `<div class="stat-row"><span>${escapeHtml(s.unit)}</span><span>${fmtMB(s.resident_mb)}${s.swap_mb ? ' + ' + fmtMB(s.swap_mb) + ' swap' : ''}${s.gpu_mb ? ' · ' + fmtMB(s.gpu_mb) + ' gpu' : ''}</span></div>`).join('')
+    + `<div class="stat-row"><span>everything else</span><span>${fmtMB(Math.max(0, j.used_mb - services.reduce((a, s) => a + s.resident_mb, 0)))}</span></div>`;
+}, 5000);
+
+// --- health poll ---
+function setHealthRow(el, name, info) {
+  const dotCls = info?.ok ? 'ok' : (info?.optional ? 'warn' : 'err');
+  const detail = info?.detail || '';
+  const lat = info?.latency_ms != null ? ` (${info.latency_ms} ms)` : '';
+  el.innerHTML = `<span class="name"><span class="dot ${dotCls}"></span>${name}</span><span class="detail" title="${escapeHtml(detail)}">${escapeHtml(detail)}${lat}</span>`;
+}
+const pollHealth = poll(async () => {
+  const st = $('healthStatus');
+  setStatus(st, 'checking…');
+  try {
+    const r = await fetch('/api/health'); const j = await r.json();
+    const rows = $('healthList').children;
+    setHealthRow(rows[0], 'LLM', j.llm);
+    setHealthRow(rows[1], 'ARCHIVES', j.rag);
+    setHealthRow(rows[2], 'VOICE', j.tts);
+    setHealthRow(rows[3], 'AUDIO', j.audio);
+    setHealthRow(rows[4], 'GPIO', j.gpio);
+    setStatus(st, j.ok ? 'all systems nominal' : 'subsystem failures', j.ok ? 'ok' : 'err');
+  } catch (e) {
+    setStatus(st, 'error: ' + e.message, 'err');
+  }
+}, 30000);
+$('refreshHealthBtn').onclick = pollHealth;
+
+// --- live state poll ---
+let _running = null;
+function setBanner(running) {
+  if (running === _running) return;
+  _running = running;
+  const b = $('banner');
+  if (running) {
+    b.textContent = 'radio-oracle is running: live panels are fed by it, but the mic / speaker / LED test cards will collide with it (device busy).';
+    b.className = 'banner'; b.hidden = false;
+  } else {
+    b.textContent = 'radio-oracle is stopped: the test cards have the hardware to themselves; live state and activity are stale.';
+    b.className = 'banner warn'; b.hidden = false;
+  }
+}
+poll(async () => {
+  const r = await fetch('/api/state'); const j = await r.json();
+  const running = !!(j.ok && j.running);
+  setBanner(running);
+  setPill('pillService', running ? 'RUNNING' : 'STOPPED', running ? 'on' : 'warn');
+  if (!running) {
+    $('lsRunning').textContent = j.running === false ? 'stale state file' : 'not running';
+    $('lsMode').textContent = j.mode || '—';
+    $('lsPower').textContent = j.power_on != null ? (j.power_on ? 'on' : 'off') : '—';
+    $('lsButton').textContent = '—';
+    $('lsLastTx').textContent = '—';
+    $('lsUpdated').textContent = j.updated_at ? fmtAgo(j.updated_at) : '—';
+    setPill('pillMode', j.mode ? j.mode.toUpperCase() : '—');
+    return;
+  }
+  $('lsRunning').textContent = `pid ${j.pid} ✓`;
+  $('lsMode').textContent = (j.mode || '—').toUpperCase();
+  setPill('pillMode', (j.mode || '—').toUpperCase(), 'on');
+  $('lsPower').textContent = j.power_on ? 'ON' : 'OFF';
+  $('lsButton').textContent = j.last_button
+    ? `${j.last_button.kind} (${j.last_button.duration.toFixed(2)}s, ${fmtAgo(j.last_button.ts)})`
+    : '—';
+  $('lsLastTx').textContent = j.last_transcription
+    ? `"${j.last_transcription.text}" — ${fmtAgo(j.last_transcription.ts)}`
+    : '—';
+  $('lsUpdated').textContent = fmtAgo(j.updated_at);
+}, 2000);
+
+// ---- live activity feed + last-turn timing ----
+let actAfter = 0;
+const ACT_LABELS = {
+  phase: 'PHASE', wake: 'WAKE', heard: 'HEARD', decided: 'DECIDED',
+  spoke: 'SPOKE', asked: 'ASKED', answered: 'ANSWERED',
+  consulted: 'ARCHIVES', playing: 'PLAYING', reading: 'READING', error: 'ERROR',
+  timing: 'TIMING',
+};
+const PHASE_TEXT = {
+  radio: 'playing music', librarian: 'listening', thinking: 'thinking',
+  speaking: 'speaking', reader: 'reading a book', off: 'standby',
+};
+const STAGE_ORDER = ['record', 'stt', 'rewrite', 'retrieve', 'prefill', 'first_token', 'total'];
+const ttfaHistory = [];
+function actLine(ev) {
+  const t = new Date(ev.ts * 1000).toTimeString().slice(0, 8);
+  let detail = '';
+  if (ev.kind === 'phase') detail = PHASE_TEXT[ev.phase] || ev.phase;
+  else if (ev.kind === 'heard' || ev.kind === 'spoke' || ev.kind === 'asked' || ev.kind === 'answered') detail = '“' + (ev.text || '') + '”';
+  else if (ev.kind === 'decided') detail = ev.action + (ev.query ? ' → ' + ev.query : '');
+  else if (ev.kind === 'consulted') detail = (ev.sources || []).join(' / ') + ' (' + ev.hits + ' hits)';
+  else if (ev.kind === 'playing') detail = (ev.artist ? ev.artist + ' — ' : '') + ev.title;
+  else if (ev.kind === 'reading') detail = (ev.book ? ev.book + ', ' : '') + 'chapter ' + ev.chapter + (ev.chapter_title ? ': ' + ev.chapter_title : '');
+  else if (ev.kind === 'timing') {
+    const order = ['ttfa', ...STAGE_ORDER];
+    detail = ev.label + ' ' + order.filter(k => typeof ev[k] === 'number').map(k => k + '=' + ev[k].toFixed(2) + 's').join(' ')
+      + (ev.decode_tps ? ' ' + ev.decode_tps + ' tok/s' : '')
+      + (ev.prompt_tokens ? ' ' + ev.prompt_tokens + ' tok' : '');
+  }
+  else if (ev.kind === 'wake') detail = ev.source || ev.reason || 'wake';
+  else detail = Object.entries(ev).filter(([k]) => !['id', 'ts', 'kind'].includes(k)).map(([k, v]) => k + '=' + (typeof v === 'string' ? v : JSON.stringify(v))).join(' ');
+  const label = ACT_LABELS[ev.kind] || ev.kind.toUpperCase();
+  return '<div><span class="t">' + t + '</span> <span class="k' + (ev.kind === 'error' ? ' err' : '') + '">' + label + '</span> ' + escapeHtml(detail) + '</div>';
+}
+function showTurn(ev) {
+  $('turnLabel').textContent = (ev.label || '') + ' · ' + new Date(ev.ts * 1000).toTimeString().slice(0, 8);
+  const ttfa = typeof ev.ttfa === 'number' ? ev.ttfa : null;
+  $('turnTtfa').textContent = ttfa != null ? ttfa.toFixed(2) + ' s' : '—';
+  setPill('pillTtfa', ttfa != null ? ttfa.toFixed(2) + ' s' : '—', ttfa == null ? '' : ttfa > 8 ? 'warn' : 'on');
+  if (ttfa != null) { ttfaHistory.push(ttfa); while (ttfaHistory.length > 24) ttfaHistory.shift(); }
+  const max = Math.max(1, ...ttfaHistory);
+  $('ttfaHist').innerHTML = ttfaHistory.map((v, i) =>
+    `<div class="${i === ttfaHistory.length - 1 ? 'last' : ''}" style="height:${(v / max * 100).toFixed(0)}%" title="${v.toFixed(2)} s"></div>`).join('');
+  const total = typeof ev.total === 'number' && ev.total > 0 ? ev.total : null;
+  $('turnStages').innerHTML = STAGE_ORDER.filter(k => typeof ev[k] === 'number').map(k =>
+    `<div class="stage"><span class="n">${k.replace('_', ' ')}</span><div class="bar"><div style="width:${total ? Math.min(100, ev[k] / total * 100).toFixed(0) : 0}%"></div></div><span class="v">${ev[k].toFixed(2)} s</span></div>`).join('');
+  $('turnDecode').textContent = (ev.decode_tps ? ev.decode_tps + ' tok/s' : '—') + (ev.prompt_tokens ? ' · ' + ev.prompt_tokens + ' prompt tok' : '') + (ev.cached_tokens ? ' (' + ev.cached_tokens + ' cached)' : '');
+}
+poll(async () => {
+  const r = await fetch('/api/activity?after=' + actAfter + '&limit=' + (actAfter ? 100 : 300));
+  const j = await r.json();
+  if (!j.events || !j.events.length) return;
+  const feed = $('actFeed');
+  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  for (const ev of j.events) {
+    feed.insertAdjacentHTML('beforeend', actLine(ev));
+    if (ev.kind === 'phase') {
+      const txt = PHASE_TEXT[ev.phase] || ev.phase;
+      $('actPhase').textContent = txt; setPill('pillPhase', txt.toUpperCase(), 'on');
+    }
+    if (ev.kind === 'playing') $('actMedia').textContent = (ev.artist ? ev.artist + ' — ' : '') + ev.title;
+    if (ev.kind === 'reading' && ev.book) $('actMedia').textContent = 'reading: ' + ev.book + ' (ch ' + ev.chapter + ')';
+    if (ev.kind === 'timing') showTurn(ev);
+  }
+  while (feed.childElementCount > 300) feed.removeChild(feed.firstChild);
+  if (atBottom) feed.scrollTop = feed.scrollHeight;
+  actAfter = j.last_id;
+}, 2000);
+
+// --- hardware I/O poll + LED control ---
+poll(async () => {
+  const st = $('hwInputsStatus');
+  try {
+    const r = await fetch('/api/hardware/inputs'); const j = await r.json();
+    const volt = v => (v == null ? '—' : v.toFixed(3) + ' V');
+    if (j.button) {
+      $('hwBtnPin').textContent = j.button.channel;
+      $('hwBtnLevel').textContent = j.button.level ?? '—';
+      $('hwBtnState').textContent = j.button.pressed ? 'PRESSED' : (j.button.last ? 'last: ' + j.button.last : 'released');
+      $('hwBtnVolt').textContent = volt(j.button.voltage);
+    }
+    if (j.switch) {
+      $('hwSwPin').textContent = j.switch.channel;
+      $('hwSwLevel').textContent = j.switch.level ?? '—';
+      $('hwSwState').textContent = j.switch.on ? 'ON' : 'OFF';
+      $('hwSwVolt').textContent = volt(j.switch.voltage);
+    }
+    if (j.pot && j.pot.available) {
+      $('hwPotPct').textContent = j.pot.pct.toFixed(1) + '%';
+      $('hwPotBar').style.width = j.pot.pct + '%';
+      $('hwPotRaw').textContent = j.pot.raw;
+      $('hwPotV').textContent = volt(j.pot.voltage);
+    } else {
+      $('hwPotPct').textContent = '—';
+      $('hwPotBar').style.width = '0%';
+      $('hwPotRaw').textContent = j.pot?.detail || 'unavailable';
+      $('hwPotV').textContent = '—';
+    }
+    if (j.available === false) {
+      setStatus(st, 'GPIO unavailable: ' + (j.detail || ''), 'err');
+    } else if (j.via_app) {
+      setStatus(st, 'via radio-oracle telemetry' + (j.stale_s ? ` (stale ${j.stale_s}s)` : ''));
+    } else {
+      setStatus(st, 'direct ADS1115 reads');
+    }
+  } catch (e) {
+    setStatus(st, 'poll error: ' + e.message, 'err');
+  }
+}, 1000);
+function updateLedSwatch() {
+  const r = $('hwLedR').checked, g = $('hwLedG').checked, b = $('hwLedB').checked;
+  // Common-anode digital: each channel is on/off only (polarity handled server-side).
+  $('hwLedSwatch').style.background = `rgb(${r?255:0}, ${g?255:0}, ${b?255:0})`;
+}
+['hwLedR','hwLedG','hwLedB'].forEach(id => $(id).addEventListener('change', updateLedSwatch));
+async function applyLed(r, g, b) {
+  const st = $('hwLedStatus');
+  setStatus(st, 'writing…');
+  try {
+    const resp = await postJSON('/api/hardware/led', { r, g, b });
+    const j = await resp.json();
+    setStatus(st, `R=${j.r?1:0} G=${j.g?1:0} B=${j.b?1:0}`, 'ok');
+  } catch (e) {
+    setStatus(st, 'error: ' + e.message, 'err');
+  }
+}
+$('hwLedApply').onclick = () => applyLed($('hwLedR').checked, $('hwLedG').checked, $('hwLedB').checked);
+$('hwLedOff').onclick = () => {
+  $('hwLedR').checked = $('hwLedG').checked = $('hwLedB').checked = false;
+  updateLedSwatch();
+  applyLed(false, false, false);
+};
+updateLedSwatch();
+
+// --- log tail ---
+let _logTab = 'diag';
+async function pollLogs() {
+  const box = $('logBox');
+  try {
+    if (_logTab === 'diag') {
+      const r = await fetch('/api/logs?tail=200'); const j = await r.json();
+      box.innerHTML = (j.entries || []).map(e =>
+        `<span class="lvl-${e.level}">[${e.ts}] ${e.level.padEnd(7)} ${escapeHtml(e.name)} :: ${escapeHtml(e.message)}</span>`
+      ).join('\n') || '[ empty ]';
+    } else {
+      const r = await fetch('/api/journal?unit=radio-oracle&tail=200'); const j = await r.json();
+      if (!j.available) { box.textContent = j.detail || 'journalctl unavailable'; return; }
+      box.innerHTML = (j.entries || []).map(escapeHtml).join('\n') || '[ no entries ]' + (j.detail ? '\n' + escapeHtml(j.detail) : '');
+    }
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { box.textContent = 'log fetch error: ' + e.message; }
+}
+$('tabDiag').onclick = () => { _logTab = 'diag';
+  $('tabDiag').classList.add('active'); $('tabRadio').classList.remove('active'); pollLogs(); };
+$('tabRadio').onclick = () => { _logTab = 'radio';
+  $('tabRadio').classList.add('active'); $('tabDiag').classList.remove('active'); pollLogs(); };
+$('tabRefresh').onclick = pollLogs;
+poll(async () => { if ($('logAuto').checked) await pollLogs(); }, 5000);
+
+// --- persona / user name ---
+async function loadPersona() {
+  try {
+    const r = await fetch('/api/persona');
+    const j = await r.json();
+    $('userName').value = j.user_name || '';
+    if (j.assistant_name) $('assistantName').textContent = j.assistant_name.toUpperCase();
+  } catch (e) { /* ignore */ }
+}
+$('saveUserName').onclick = async () => {
+  const btn = $('saveUserName'), st = $('userNameStatus');
+  const name = $('userName').value.trim();
+  if (!name) { setStatus(st, 'name required', 'err'); return; }
+  btn.disabled = true; setStatus(st, 'saving…');
+  try {
+    const r = await postJSON('/api/persona', { user_name: name });
+    const j = await r.json();
+    setStatus(st, `saved: ${j.user_name}`, 'ok');
+  } catch (e) {
+    setStatus(st, 'error: ' + e.message, 'err');
+  } finally { btn.disabled = false; }
+};
+$('userName').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('saveUserName').click();
+});
+loadPersona();
+
+// --- clock ---
+function tickClock() {
+  const d = new Date();
+  const z = (n) => String(n).padStart(2, '0');
+  $('clock').textContent = `${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
+</script>
+</body>
+</html>

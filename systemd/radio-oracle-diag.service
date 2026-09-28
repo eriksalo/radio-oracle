@@ -23,12 +23,14 @@ Environment=ORACLE_LOG_LEVEL=INFO
 # written by radio-oracle are found.
 Environment=XDG_RUNTIME_DIR=/run/user/999
 
-# Resource limits
-MemoryMax=7G
+# Resource limits: ~50 MB idle; 2G leaves room for a debug /api/ask that loads
+# the embedder, but can never take the LLM or the radio down with it.
+MemoryMax=2G
 CPUQuota=90%
 
 # Hardware access (mic/speaker via audio group; LEDs via gpio; ADS1115 via i2c)
-SupplementaryGroups=gpio audio i2c
+# + systemd-journal so the RADIO-ORACLE log tab can read the sibling unit's journal.
+SupplementaryGroups=gpio audio i2c systemd-journal
 
 [Install]
 WantedBy=multi-user.target

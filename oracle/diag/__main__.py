@@ -27,9 +27,9 @@ def main() -> None:
     args = p.parse_args()
 
     if _service_active("radio-oracle"):
-        logger.warning(
-            "radio-oracle.service is active — it holds the mic/speaker. "
-            "Stop it first: sudo systemctl stop radio-oracle"
+        logger.info(
+            "radio-oracle.service is active: live panels will follow it; "
+            "the mic/speaker/LED test cards will report device-busy until it stops"
         )
 
     logger.info(f"Diagnostics server starting on http://{args.host}:{args.port}")
@@ -39,6 +39,9 @@ def main() -> None:
         port=args.port,
         reload=args.reload,
         log_level="info",
+        # The dashboard polls several endpoints a second; one journal line per
+        # request was ~60k lines/day of noise burying the real diag logs.
+        access_log=False,
     )
 
 
