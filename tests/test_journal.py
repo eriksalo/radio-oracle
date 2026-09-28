@@ -150,10 +150,13 @@ async def test_context_builder_inserts_recent_block_after_profile(tmp_path):
 
 
 def test_profile_v2_reset_once(tmp_path):
+    """A pre-v2 database: the drifted single-row profile is wiped once."""
     db = tmp_path / "oracle.db"
     store = ConversationStore(db)
-    store.update_profile("Name: Unknown. Interests: Montenegro.")
-    # Simulate a pre-v2 database: drop the version marker.
+    store._conn.execute(
+        "INSERT INTO profile (id, content, updated_at) VALUES (1, ?, 'x')",
+        ("Name: Unknown. Interests: Montenegro.",),
+    )
     store._conn.execute("DELETE FROM meta")
     store._conn.commit()
     store.close()
@@ -164,6 +167,23 @@ def test_profile_v2_reset_once(tmp_path):
     store3 = ConversationStore(db)
     assert store3.get_profile() == "Music: Pink Floyd"  # not wiped again
     store3.close()
+
+
+def test_legacy_v2_profile_row_moves_to_default_user(tmp_path):
+    """A v2 single-row profile (written before per-user profiles) carries
+    over into the default user's row."""
+    db = tmp_path / "oracle.db"
+    store = ConversationStore(db)
+    store._conn.execute(
+        "INSERT INTO profile (id, content, updated_at) VALUES (1, 'Music: jazz', 'x')"
+    )
+    store._conn.commit()
+    store.close()
+    store2 = ConversationStore(db)
+    assert store2.get_profile(settings.default_user) == "Music: jazz"
+    assert store2.get_profile("guest") is None
+    assert store2._conn.execute("SELECT COUNT(*) FROM profile").fetchone()[0] == 0
+    store2.close()
 
 
 @pytest.mark.asyncio

@@ -261,6 +261,7 @@ class OracleApp:
             from oracle.books.session import ReaderSession
 
             session = ReaderSession(tts=voice_ctx.tts)
+            session.set_user(voice_ctx.user)
             if session.book_count() == 0:
                 logger.info("Book library empty — reader disabled")
                 session.close()

@@ -265,6 +265,17 @@ class OracleSettings(BaseSettings):
     db_path: Path = Path("data/oracle.db")
     # Who the memory belongs to until speaker identification says otherwise.
     default_user: str = "erik"
+    # Speaker identification (oracle/speaker.py): TitaNet-small embeddings of
+    # each command, scored against enrolled voiceprints. Same speaker ≥0.90,
+    # different ≤0.41 measured on Kokoro voices; 0.6 is the match line,
+    # 0.4 the "worth asking 'Is this X?'" line.
+    speaker_id_enabled: bool = True
+    speaker_model: Path = Path("models/nemo_en_titanet_small.onnx")
+    speaker_threshold: float = 0.6
+    speaker_ask_threshold: float = 0.4
+    speaker_min_seconds: float = 1.0  # shorter clips are skipped
+    speaker_enroll_prints: int = 3  # the confirmed utterance + this many - 1 more
+    speaker_answer_timeout: float = 6.0
     max_context_turns: int = 10
     summary_threshold: int = 20
 
@@ -278,8 +289,9 @@ class OracleSettings(BaseSettings):
     reading_paragraph_pause: float = 0.6  # seconds between paragraphs
     # Paragraphs are spoken as pipelined units of at most this many words
     # (sentence-aligned): the first word comes sooner and no single TTS
-    # request is minutes long.
-    reading_unit_max_words: int = 60
+    # request is long. 60 (~22 s of speech) overflowed the GPU sidecar's
+    # 1 GB CUDA arena on the Jetson; 30 (~11 s) fits.
+    reading_unit_max_words: int = 30
     reading_chapter_pause: float = 2.0  # seconds between chapters
 
     # Mode

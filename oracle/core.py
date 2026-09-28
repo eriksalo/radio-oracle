@@ -351,6 +351,13 @@ class VoiceContext:
     system_prompt: str
     session_id: str
     catch_up: asyncio.Task | None = None
+    # Speaker identification (oracle/speaker.py); None when disabled/unavailable.
+    speaker_id: object | None = None
+    speaker: object | None = None
+
+    @property
+    def user(self) -> str:
+        return self.speaker.user if self.speaker is not None else settings.default_user
 
 
 async def voice_init() -> VoiceContext:
@@ -384,12 +391,26 @@ async def voice_init() -> VoiceContext:
     # (first spoken reply otherwise pays a cold model load), and the RAG
     # retriever (embedder + FAISS indices — seconds of disk I/O).
     from oracle.endpoint import warm as warm_endpoint
+    from oracle.speaker import SpeakerId, SpeakerSession
+
+    speaker_id: SpeakerId | None = SpeakerId() if settings.speaker_id_enabled else None
+
+    def _load_speaker() -> None:
+        nonlocal speaker_id
+        if speaker_id is None:
+            return
+        try:
+            speaker_id.load()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Speaker ID disabled: {e}")
+            speaker_id = None
 
     await asyncio.gather(
         asyncio.to_thread(stt_fast.load),
         asyncio.to_thread(tts.load),
         asyncio.to_thread(_get_retriever),
         asyncio.to_thread(warm_endpoint),
+        asyncio.to_thread(_load_speaker),
     )
 
     vc_stub = VoiceContext(
@@ -418,6 +439,8 @@ async def voice_init() -> VoiceContext:
         # Summarize sessions that ended without one (power-off usually
         # beats the in-session threshold) — background, off the boot path.
         catch_up=asyncio.create_task(catch_up_summaries(store, session_id)),
+        speaker_id=speaker_id,
+        speaker=SpeakerSession() if speaker_id is not None else None,
     )
 
 
@@ -551,7 +574,7 @@ async def _voice_turn(
             leds.set_mode("librarian")
         logger.info("Listening...")
         try:
-            _audio, text = await asyncio.to_thread(listen, vc.stt, should_abort=should_abort)
+            audio_in, text = await asyncio.to_thread(listen, vc.stt, should_abort=should_abort)
         except (ValueError, OSError) as e:
             logger.warning(f"Mic unavailable for voice turn: {e}")
             return False
@@ -560,6 +583,10 @@ async def _voice_turn(
             leds.set_mode("thinking")
         if aborted():
             return False
+        if text.strip():
+            from oracle.speaker import check_in
+
+            await check_in(vc, audio_in)
 
     if not text.strip():
         logger.debug("Empty transcription, skipping")

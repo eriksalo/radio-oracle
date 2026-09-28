@@ -48,9 +48,29 @@ class ConversationStore:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS profiles (
+                user TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
         self._conn.commit()
         self._migrate()
+        # sessions.user (per-user memory, 2026-09-28)
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "user" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN user TEXT")
+            self._conn.execute(
+                "UPDATE sessions SET user = ? WHERE user IS NULL", (settings.default_user,)
+            )
+            self._conn.commit()
+        # Legacy single profile row → the default user's profile (v2 reset
+        # already cleared the drifted one; this only carries over a v2 row).
+        legacy = self._conn.execute("SELECT content FROM profile WHERE id = 1").fetchone()
+        if legacy:
+            self.update_profile(legacy["content"], user=settings.default_user)
+            self._conn.execute("DELETE FROM profile WHERE id = 1")
+            self._conn.commit()
 
     PROFILE_VERSION = "2"
 
@@ -72,17 +92,27 @@ class ConversationStore:
         )
         self._conn.commit()
 
-    def new_session(self) -> str:
+    def new_session(self, user: str | None = None) -> str:
         """Create a new conversation session, return session_id."""
         session_id = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
         self._conn.execute(
-            "INSERT INTO sessions (session_id, started_at) VALUES (?, ?)",
-            (session_id, now),
+            "INSERT INTO sessions (session_id, started_at, user) VALUES (?, ?, ?)",
+            (session_id, now, user or settings.default_user),
         )
         self._conn.commit()
         logger.debug(f"New session: {session_id}")
         return session_id
+
+    def set_session_user(self, session_id: str, user: str) -> None:
+        self._conn.execute("UPDATE sessions SET user = ? WHERE session_id = ?", (user, session_id))
+        self._conn.commit()
+
+    def get_session_user(self, session_id: str) -> str:
+        row = self._conn.execute(
+            "SELECT user FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return (row["user"] if row and row["user"] else None) or settings.default_user
 
     def add_message(self, session_id: str, role: str, content: str) -> None:
         """Store a message in the conversation."""
@@ -133,12 +163,16 @@ class ConversationStore:
         ).fetchone()
         return row["cnt"]
 
-    def latest_summarized_session(self, exclude: str | None = None) -> dict | None:
-        """Most recent prior session that has a summary."""
+    def latest_summarized_session(
+        self, exclude: str | None = None, user: str | None = None
+    ) -> dict | None:
+        """Most recent prior session (of *user*, if given) that has a summary."""
         rows = self._conn.execute(
             "SELECT session_id, started_at, summary FROM sessions "
             "WHERE summary IS NOT NULL AND summary != '' "
+            "AND (? IS NULL OR user = ?) "
             "ORDER BY started_at DESC LIMIT 5",
+            (user, user),
         ).fetchall()
         for r in rows:
             if r["session_id"] != exclude:
@@ -165,18 +199,20 @@ class ConversationStore:
 
     # ---------------------------------------------------------------- profile
 
-    def get_profile(self) -> str | None:
-        """The rolling long-term profile of the user (single row)."""
-        row = self._conn.execute("SELECT content FROM profile WHERE id = 1").fetchone()
+    def get_profile(self, user: str | None = None) -> str | None:
+        """The rolling long-term profile of *user* (default user if None)."""
+        row = self._conn.execute(
+            "SELECT content FROM profiles WHERE user = ?", (user or settings.default_user,)
+        ).fetchone()
         return row["content"] if row else None
 
-    def update_profile(self, content: str) -> None:
+    def update_profile(self, content: str, user: str | None = None) -> None:
         now = datetime.now(UTC).isoformat()
         self._conn.execute(
-            "INSERT INTO profile (id, content, updated_at) VALUES (1, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET content = excluded.content, "
+            "INSERT INTO profiles (user, content, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(user) DO UPDATE SET content = excluded.content, "
             "updated_at = excluded.updated_at",
-            (content, now),
+            (user or settings.default_user, content, now),
         )
         self._conn.commit()
 

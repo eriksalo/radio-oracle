@@ -132,6 +132,17 @@ else
     done
 fi
 
+# Speaker identification (oracle/speaker.py): NVIDIA TitaNet-small via
+# sherpa-onnx (~40MB). "Is this Erik?" enrolment builds the voiceprints.
+TITANET_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx"
+TITANET_FILE="$MODELS_DIR/nemo_en_titanet_small.onnx"
+if [[ "$DRY_RUN" == true ]]; then
+    echo "  TitaNet speaker model: $TITANET_URL -> $TITANET_FILE (~40MB)"
+elif [[ ! -f "$TITANET_FILE" ]]; then
+    echo "Downloading TitaNet-small speaker model..."
+    wget -q --show-progress -O "$TITANET_FILE" "$TITANET_URL"
+fi
+
 # Embedding model is downloaded by sentence-transformers on first use
 echo ""
 echo "Note: The embedding model (all-MiniLM-L6-v2, ~80MB) will be downloaded"

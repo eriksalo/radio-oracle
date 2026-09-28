@@ -46,6 +46,7 @@ class BookmarkStore:
         # check_same_thread=False + _lock: created on the event-loop thread,
         # used from the reader worker thread (2026-09-27 crash in book mode).
         self._lock = threading.RLock()
+        self._user = settings.default_user
         self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
@@ -62,35 +63,72 @@ class BookmarkStore:
             )
         """)
         self._conn.commit()
+        # Per-user bookmarks (2026-09-28): one row per (user, book).
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(bookmarks)").fetchall()}
+        if "user" not in cols:
+            self._conn.executescript(f"""
+                ALTER TABLE bookmarks RENAME TO bookmarks_v1;
+                CREATE TABLE bookmarks (
+                    user TEXT NOT NULL,
+                    book_id INTEGER NOT NULL,
+                    chapter_idx INTEGER NOT NULL DEFAULT 0,
+                    para_idx INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user, book_id)
+                );
+                INSERT INTO bookmarks (user, book_id, chapter_idx, para_idx, updated_at)
+                    SELECT '{settings.default_user}', book_id, chapter_idx, para_idx, updated_at
+                    FROM bookmarks_v1;
+                DROP TABLE bookmarks_v1;
+            """)
+            self._conn.commit()
+
+    @property
+    def user(self) -> str:
+        return self._user
+
+    @user.setter
+    def user(self, name: str) -> None:
+        self._user = name
 
     @_synchronized
     def get(self, book_id: int) -> Bookmark | None:
-        row = self._conn.execute("SELECT * FROM bookmarks WHERE book_id = ?", (book_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT book_id, chapter_idx, para_idx, updated_at FROM bookmarks "
+            "WHERE user = ? AND book_id = ?",
+            (self._user, book_id),
+        ).fetchone()
         return Bookmark(**dict(row)) if row else None
 
     @_synchronized
     def save(self, book_id: int, chapter_idx: int, para_idx: int) -> None:
         now = datetime.now(UTC).isoformat()
         self._conn.execute(
-            """INSERT INTO bookmarks (book_id, chapter_idx, para_idx, updated_at)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(book_id) DO UPDATE SET
+            """INSERT INTO bookmarks (user, book_id, chapter_idx, para_idx, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user, book_id) DO UPDATE SET
                    chapter_idx = excluded.chapter_idx,
                    para_idx = excluded.para_idx,
                    updated_at = excluded.updated_at""",
-            (book_id, chapter_idx, para_idx, now),
+            (self._user, book_id, chapter_idx, para_idx, now),
         )
         self._conn.commit()
 
     @_synchronized
     def delete(self, book_id: int) -> None:
-        self._conn.execute("DELETE FROM bookmarks WHERE book_id = ?", (book_id,))
+        self._conn.execute(
+            "DELETE FROM bookmarks WHERE user = ? AND book_id = ?", (self._user, book_id)
+        )
         self._conn.commit()
 
     @_synchronized
     def list_in_progress(self) -> list[Bookmark]:
         """Return all bookmarks (books that have been started)."""
-        rows = self._conn.execute("SELECT * FROM bookmarks ORDER BY updated_at DESC").fetchall()
+        rows = self._conn.execute(
+            "SELECT book_id, chapter_idx, para_idx, updated_at FROM bookmarks "
+            "WHERE user = ? ORDER BY updated_at DESC",
+            (self._user,),
+        ).fetchall()
         return [Bookmark(**dict(r)) for r in rows]
 
     @_synchronized

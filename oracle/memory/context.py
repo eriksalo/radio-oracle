@@ -40,6 +40,17 @@ class ContextBuilder:
     def user(self) -> str:
         return self._user
 
+    def set_user(self, user: str) -> None:
+        """Switch the session to *user*: reload their profile and last
+        conversation, retag the session and the journal."""
+        if user == self._user:
+            return
+        logger.info(f"Session user: {self._user!r} -> {user!r}")
+        self._user = user
+        self._store.set_session_user(self._session_id, user)
+        self._long_term = self._load_long_term()
+        journal.set_context(user, self._session_id)
+
     def _recent_activity(self) -> str | None:
         """Deterministic block from the activity journal (what the user
         read / played / asked before this session, plus the current book)."""
@@ -61,10 +72,10 @@ class ContextBuilder:
         """Compose the cross-session memory block injected into every turn."""
         parts: list[str] = []
         try:
-            profile = self._store.get_profile()
+            profile = self._store.get_profile(self._user)
             if profile:
-                parts.append(f"What you remember about your user:\n{profile}")
-            prior = self._store.latest_summarized_session(exclude=self._session_id)
+                parts.append(f"What you remember about {self._user.title()}:\n{profile}")
+            prior = self._store.latest_summarized_session(exclude=self._session_id, user=self._user)
             if prior:
                 when = _humanize_date(prior["started_at"])
                 parts.append(f"Your previous conversation ({when}):\n{prior['summary']}")
@@ -180,8 +191,9 @@ async def finalize_session(store: ConversationStore, session_id: str) -> None:
     messages = store.get_messages(session_id)
     summary = await summarize_conversation(messages, activity=activity)
     store.update_summary(session_id, summary)
-    profile = await fold_into_profile(store.get_profile(), summary)
-    store.update_profile(profile)
+    user = store.get_session_user(session_id)
+    profile = await fold_into_profile(store.get_profile(user), summary)
+    store.update_profile(profile, user=user)
     logger.info(f"Session {session_id[:8]} summarized into long-term memory")
 
 

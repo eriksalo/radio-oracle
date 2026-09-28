@@ -407,7 +407,7 @@ async def dispatch_radio_command(
     if leds is not None:
         leds.set_mode("librarian")  # solid blue while listening
     try:
-        _audio, text = listen(
+        audio_in, text = listen(
             vc.stt_fast,
             silence_duration=settings.vad_silence_duration_radio,
             should_abort=should_abort,
@@ -420,6 +420,11 @@ async def dispatch_radio_command(
     if aborted() or not text.strip():
         return DispatchResult(here)
     logger.info(f"Voice command ({context}): {text!r}")
+
+    # Who is this? (~80 ms; asks "Is this Erik?" once per session if unsure.)
+    from oracle.speaker import check_in
+
+    await check_in(vc, audio_in, reader=reader)
 
     # 3. Classify.
     action = _keyword_match(text)

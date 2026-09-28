@@ -136,6 +136,10 @@ class ReaderSession:
     def started_fresh(self) -> bool:
         return self._reader.started_fresh
 
+    def set_user(self, name: str) -> None:
+        """Bookmarks (and so "my book") belong to the identified user."""
+        self._bookmarks.user = name
+
     def status_text(self) -> str | None:
         """Spoken summary of where we are, e.g. "Moby-Dick, chapter 3 of
         135: Loomings." None when nothing is open."""
