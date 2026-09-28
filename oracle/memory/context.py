@@ -8,6 +8,7 @@ from datetime import datetime
 from loguru import logger
 
 from config.settings import settings
+from oracle.memory import journal
 from oracle.memory.store import ConversationStore
 from oracle.memory.summarizer import fold_into_profile, summarize_conversation
 
@@ -25,13 +26,36 @@ class ContextBuilder:
     re-prefilled every turn, ~5 s.)
     """
 
-    def __init__(self, store: ConversationStore, session_id: str):
+    def __init__(self, store: ConversationStore, session_id: str, user: str | None = None):
         self._store = store
         self._session_id = session_id
+        self._user = user or settings.default_user
         # Survive a mid-session restart: reload whatever was persisted.
         self._summary: str | None = store.get_summary(session_id)
         self._long_term: str | None = self._load_long_term()
         self._bg_task: asyncio.Task | None = None
+        journal.set_context(self._user, session_id)
+
+    @property
+    def user(self) -> str:
+        return self._user
+
+    def _recent_activity(self) -> str | None:
+        """Deterministic block from the activity journal (what the user
+        read / played / asked before this session, plus the current book)."""
+        j = journal.get_journal()
+        if j is None:
+            return None
+        try:
+            text = j.recent_summary(self._user, exclude_session=self._session_id)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"recent activity unavailable: {e}")
+            return None
+        return (
+            f"What you remember doing with {self._user.title()} (from the log, reliable):\n{text}"
+            if text
+            else None
+        )
 
     def _load_long_term(self) -> str | None:
         """Compose the cross-session memory block injected into every turn."""
@@ -72,6 +96,11 @@ class ContextBuilder:
         # Cross-session memory (profile + last conversation)
         if self._long_term:
             messages.append({"role": "system", "content": self._long_term})
+
+        # Recent books / music / questions — from the journal, not the LLM.
+        recent = self._recent_activity()
+        if recent:
+            messages.append({"role": "system", "content": recent})
 
         # Session summary (if we've summarized older turns)
         if self._summary:
@@ -144,10 +173,12 @@ async def finalize_session(store: ConversationStore, session_id: str) -> None:
     """Summarize a finished session and fold it into the long-term profile."""
     # <2 messages means no real exchange happened (a lone misheard command,
     # a restart) — not worth an LLM call or a slot in long-term memory.
-    if store.get_summary(session_id) or store.count_messages(session_id) < 2:
+    j = journal.get_journal()
+    activity = j.session_activity_text(session_id) if j is not None else ""
+    if store.get_summary(session_id) or (store.count_messages(session_id) < 2 and not activity):
         return
     messages = store.get_messages(session_id)
-    summary = await summarize_conversation(messages)
+    summary = await summarize_conversation(messages, activity=activity)
     store.update_summary(session_id, summary)
     profile = await fold_into_profile(store.get_profile(), summary)
     store.update_profile(profile)

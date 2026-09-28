@@ -152,7 +152,7 @@ async def test_context_builder_legacy_call_without_user_text():
 async def test_finalize_session_summarizes_and_folds(monkeypatch):
     from oracle.memory import context as ctx_mod
 
-    async def fake_summarize(messages):
+    async def fake_summarize(messages, activity=""):
         return "Summary of the chat."
 
     async def fake_fold(existing, new_summary):

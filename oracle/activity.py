@@ -26,6 +26,7 @@ _TEXT_LIMIT = 300  # clip long free text (answers) per event
 
 _lock = threading.Lock()
 _next_id: int | None = None
+_DURABLE = frozenset({"playing", "asked", "answered", "music_request"})
 
 
 def activity_path() -> Path:
@@ -43,6 +44,11 @@ def emit(kind: str, **fields: Any) -> None:
         for k, v in fields.items():
             if isinstance(v, str) and len(v) > _TEXT_LIMIT:
                 fields[k] = v[: _TEXT_LIMIT - 1] + "…"
+        if kind in _DURABLE:
+            # Durable memory of what was played / asked (oracle.memory.journal).
+            from oracle.memory.journal import record as _journal_record
+
+            _journal_record(kind, **fields)
         with _lock:
             p = activity_path()
             if _next_id is None:

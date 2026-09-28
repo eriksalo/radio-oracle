@@ -358,6 +358,9 @@ def _play_query(player: Player, catalog: Catalog, query: str) -> str | None:
     import random
 
     hits = catalog.search(query)
+    from oracle.activity import emit
+
+    emit("music_request", query=query, hits=len(hits))
     if not hits:
         return None
     # Random hit, not hits[0]: "play Pink Floyd" should feel like tuning

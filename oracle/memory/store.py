@@ -44,7 +44,32 @@ class ConversationStore:
                 content TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
         """)
+        self._conn.commit()
+        self._migrate()
+
+    PROFILE_VERSION = "2"
+
+    def _migrate(self) -> None:
+        """Profile v2 (2026-09-28): the old free-form profile had drifted
+        into invented facts ("Name: Unknown … Montenegro"). Start it over
+        once; the structured PROFILE_PROMPT rebuilds it from real sessions."""
+        row = self._conn.execute("SELECT value FROM meta WHERE key = 'profile_version'").fetchone()
+        if row and row["value"] == self.PROFILE_VERSION:
+            return
+        old = self._conn.execute("SELECT content FROM profile WHERE id = 1").fetchone()
+        if old:
+            logger.info(f"Resetting long-term profile (v{row['value'] if row else '1'} → v2)")
+            self._conn.execute("DELETE FROM profile WHERE id = 1")
+        self._conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('profile_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (self.PROFILE_VERSION,),
+        )
         self._conn.commit()
 
     def new_session(self) -> str:

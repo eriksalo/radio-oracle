@@ -135,12 +135,32 @@ class Reader:
         from oracle.activity import emit
 
         emit("reading", book=book.title, chapter=chapter_idx, paragraph=para_idx)
+        self._journal("started" if self.started_fresh else "resumed")
         return self._position
 
-    def stop(self) -> None:
+    def _journal(self, event: str) -> None:
+        """Durable memory of where the user is in which book."""
+        try:
+            from oracle.books.session import _format_status
+            from oracle.memory.journal import record
+
+            st = self.status()
+            if st:
+                record(
+                    "book",
+                    event=event,
+                    book=st["book"],
+                    author=st["author"],
+                    status=_format_status(st),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"book journal failed: {e}")
+
+    def stop(self, finished: bool = False) -> None:
         """Stop reading and save bookmark."""
         if self._position:
             self._save_bookmark()
+            self._journal("finished" if finished else "stopped")
             logger.info(f"Stopped reading book {self._position.book_id}")
         self._position = None
 
@@ -168,12 +188,12 @@ class Reader:
         if text is None:
             # Try next chapter
             if not self._advance_chapter():
-                self.stop()
+                self.stop(finished=True)
                 return None
             pos = self._position
             text = self._library.get_paragraph(pos.book_id, pos.chapter_idx, pos.para_idx)
             if text is None:
-                self.stop()
+                self.stop(finished=True)
                 return None
 
         # Speak it
@@ -292,6 +312,7 @@ class Reader:
         )
         self._save_bookmark()
         logger.info(f"Jumped to chapter {chapter_idx}: {chapter!r}")
+        self._journal("chapter")
         return chapter
 
     def status(self) -> dict | None:

@@ -263,6 +263,8 @@ class OracleSettings(BaseSettings):
 
     # Memory
     db_path: Path = Path("data/oracle.db")
+    # Who the memory belongs to until speaker identification says otherwise.
+    default_user: str = "erik"
     max_context_turns: int = 10
     summary_threshold: int = 20
 

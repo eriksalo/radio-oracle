@@ -29,11 +29,18 @@ async def summarize_conversation(messages: list[dict[str, str]]) -> str:
 
 
 PROFILE_PROMPT = (
-    "You maintain a compact long-term memory profile of a voice assistant's "
-    "owner. Merge the existing profile with the new conversation summary. "
-    "Keep durable facts: name, interests, ongoing projects, preferences, "
-    "recurring topics. Drop one-off details and anything superseded. "
-    "Under 150 words. Output only the profile text, no preamble."
+    "You maintain a compact long-term memory profile of one person who talks to a "
+    "voice assistant (a radio that plays music, reads books aloud and answers "
+    "questions). Merge the existing profile with the new session summary. Keep it "
+    "under 150 words, as short labelled lines:\n"
+    "Name: (only if they said it; never invent one)\n"
+    "Music: artists/genres they ask for, like, or skip\n"
+    "Books: what they are reading or have finished, and reactions\n"
+    "Interests & recurring topics: what they keep asking about\n"
+    "Projects & people: ongoing things and names they mention\n"
+    "Preferences: how they like answers, pet peeves\n"
+    "Keep durable facts, drop one-off details and anything superseded. Never pad with "
+    "guesses. Output only the profile text, no preamble."
 )
 
 
