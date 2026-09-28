@@ -53,6 +53,10 @@ class OracleSettings(BaseSettings):
     stt_backend: Literal["faster-whisper", "pywhispercpp", "parakeet", "nemotron-streaming"] = (
         "faster-whisper"
     )
+    # The Jetson runs the 110M variant (models/sherpa-onnx-nemo-
+    # parakeet_tdt_transducer_110m-en-36000-int8, set in .env): same WER on
+    # the radio phrases as 0.6B (0.05, 19/24 exact), 102 vs 232 ms, and
+    # ~900 MB less resident (0.6B int8 inflates to 0.85-1.1 GB in RAM).
     parakeet_model_dir: Path = Path("models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8")
     parakeet_provider: str = "cpu"  # "cuda" on the Jetson (JetPack 6.2 build)
     parakeet_num_threads: int = 4

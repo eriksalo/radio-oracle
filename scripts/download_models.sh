@@ -95,6 +95,19 @@ else
     done
 fi
 
+# Parakeet-TDT 110M int8 (~100MB): the Jetson's STT since 2026-09-28
+# (ORACLE_PARAKEET_MODEL_DIR=models/$PARAKEET_SMALL_NAME).
+PARAKEET_SMALL_NAME="sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8"
+PARAKEET_SMALL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$PARAKEET_SMALL_NAME.tar.bz2"
+if [[ "$DRY_RUN" == true ]]; then
+    echo "  Parakeet 110M STT: $PARAKEET_SMALL_URL -> $MODELS_DIR/$PARAKEET_SMALL_NAME (~100MB)"
+elif [[ ! -d "$MODELS_DIR/$PARAKEET_SMALL_NAME" ]]; then
+    echo "Downloading Parakeet-TDT 110M int8..."
+    wget -q --show-progress -O "$MODELS_DIR/$PARAKEET_SMALL_NAME.tar.bz2" "$PARAKEET_SMALL_URL"
+    tar -xjf "$MODELS_DIR/$PARAKEET_SMALL_NAME.tar.bz2" -C "$MODELS_DIR"
+    rm "$MODELS_DIR/$PARAKEET_SMALL_NAME.tar.bz2"
+fi
+
 # Streaming STT (ORACLE_STT_BACKEND=nemotron-streaming): NVIDIA
 # Nemotron-speech-streaming-en-0.6b, sherpa-onnx int8 export (~460MB).
 NEMOTRON_NAME="sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"

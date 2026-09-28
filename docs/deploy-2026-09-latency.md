@@ -391,3 +391,29 @@ app's RSS down to 47 MB, and every turn paging in. `nvzramconfig` is now
 disabled and the swapfile takes the overflow (~0.9–1.3 GB) from NVMe.
 Still tight (~0.3–0.4 GB free); next candidates are Parakeet on the GPU
 or the fp16 embedder.
+
+
+## 2026-09-28 (afternoon) — "skips and starts/stops"
+
+Live log showed three causes: the power switch dropping to standby on a
+single stray ADS1115 sample (now needs 0.4 s of agreement); a synthesis
+gap at every paragraph (the reader is now one pipeline across
+paragraphs and chapters); and "Is this Erik?" firing mid-command with
+no listening cue (now asked after the command, music side only, with the
+chime). Underneath all of it: memory starvation — the GPU TTS sidecar's
+CUDA arena failed to allocate (HTTP 500), and the client then abandoned
+the GPU for CPU Kokoro for the session.
+
+Memory work, measured with `scripts/probe_memory.py`:
+
+| step | effect |
+|---|---|
+| zram disabled (held ~2.6 GB of compressed swap in RAM) | free 60 MB → ~450 MB |
+| sidecar arena cap 1024 → 640 MB, reader units 24 words | −~400 MB peak |
+| embedder fp32 → fp16 ONNX (cos 1.0) | −~270 MB |
+| retriever: no Chroma client / default embedder on a FAISS-only box (torch, pandas, pyarrow, sklearn were mapped) | libs gone |
+| **Parakeet 0.6B → 110M** (`scripts/probe_stt_small.py`: WER 0.05 = same, 19/24 exact = same, 102 vs 232 ms, 0.6B int8 was 0.85–1.1 GB resident) | −~900 MB |
+
+The sidecar no longer returns 500 for a unit it can't voice (degenerate
+text → silence; synthesis error → 200 + `X-Error` + silence) and the
+client only falls back to CPU Kokoro when the sidecar is unreachable.
