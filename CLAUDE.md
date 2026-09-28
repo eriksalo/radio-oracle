@@ -24,6 +24,7 @@ make test       # pytest
 - `oracle/timing.py` — per-turn stage timer (`TURN …` log line + `timing` activity event; `ttfa` = end of speech → first audio)
 - `oracle/rag/` — FAISS IVF-PQ retrieval (nomic-v1.5), pluggable backends, tiered modes, cross-encoder rerank, query router
 - `oracle/memory/` — conversation persistence (SQLite + summarization), `journal.py` (durable activity events → the "What you remember doing" prompt block), `users.py` (users + voiceprints); profiles, sessions, events and bookmarks are all per user
+- `oracle/welcome.py` — power-on routine: chime + listen (7 s) → "This is the Librarian…" (5 s) → the four options (5 s) → music; anything heard goes through the dispatcher (`about_device` = who built it + live counts)
 - `oracle/speaker.py` — speaker identification (TitaNet via sherpa-onnx); asks "Is this Erik?" once per session when unsure and enrols the answer
 - `oracle/persona.py` — system prompt builder from persona config
 - `oracle/hardware/` — GPIO button, RGB LED, power switch, audio routing

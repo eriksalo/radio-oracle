@@ -83,6 +83,15 @@ class Retriever:
             self._reranker = CrossEncoderReranker()
         return self._reranker
 
+    def collection_sizes(self) -> dict[str, int]:
+        """Vectors per loaded FAISS collection (for the device summary)."""
+        out: dict[str, int] = {}
+        for name, backend in self._backends.items():
+            idx = getattr(backend, "_index", None)
+            if idx is not None:
+                out[name] = int(idx.ntotal)
+        return out
+
     def list_collections(self) -> list[str]:
         names: set[str] = set()
         # On the Jetson every collection is FAISS: never touch Chroma there

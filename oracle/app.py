@@ -64,6 +64,8 @@ class OracleApp:
         # the reader loop on entry.
         self._pending_book_query: str | None = None
         self._pending_book_chapter: str | None = None
+        self._welcome_pending = False
+        self._music_held = False  # "quiet" at power-on: don't auto-start music
         # Double-press detection: buffer the first short press and wait
         # up to _DOUBLE_PRESS_S to see if a second one arrives.
         self._pending_short_press: float | None = None
@@ -149,6 +151,7 @@ class OracleApp:
             # Presses queued while the models loaded (~10 s) are stale.
             self._drain_events()
             self._enter("radio")
+            self._welcome_pending = settings.welcome_enabled
 
             while True:
                 if not self.power.is_on:
@@ -161,6 +164,7 @@ class OracleApp:
                     if self._wakeword:
                         self._wakeword.unmute()
                     self._enter("radio")
+                    self._welcome_pending = settings.welcome_enabled
                     continue
 
                 self._handle_buttons()
@@ -168,6 +172,11 @@ class OracleApp:
                 if self._state == "reader":
                     await self._run_reader(voice_ctx)
                 elif self._state == "radio":
+                    if self._welcome_pending:
+                        self._welcome_pending = False
+                        await self._welcome(voice_ctx)
+                        if self._state != "radio" or not self.power.is_on:
+                            continue
                     self._ensure_music()
                     await self._radio_wait(voice_ctx)
 
@@ -179,6 +188,71 @@ class OracleApp:
             await asyncio.sleep(2)
         finally:
             await self._shutdown(voice_ctx)
+
+    async def _welcome(self, voice_ctx) -> None:
+        """Power-on routine (oracle/welcome.py) before any music plays."""
+        from oracle.commands import DispatchResult, dispatch_radio_command
+        from oracle.core import speak_text
+        from oracle.stt import listen
+        from oracle.welcome import run_welcome
+
+        if self._wakeword:
+            self._wakeword.mute()
+        self.leds.set_mode("librarian")
+
+        def abort() -> bool:
+            return not self.power.is_on
+
+        async def speak(text: str) -> None:
+            await speak_text(voice_ctx, text)
+
+        async def chime() -> None:
+            if settings.wake_chime:
+                from oracle.chime import play_wake_chime
+
+                await asyncio.to_thread(play_wake_chime)
+
+        async def hear(wait: float):
+            return await asyncio.to_thread(
+                listen,
+                voice_ctx.stt_fast,
+                silence_duration=settings.vad_silence_duration_radio,
+                onset_timeout=wait,
+                should_abort=abort,
+            )
+
+        async def dispatch(text: str, audio):
+            player = self._get_player()
+            try:
+                return await dispatch_radio_command(
+                    player=player,
+                    catalog=player._catalog if player is not None else None,
+                    vc=voice_ctx,
+                    leds=self.leds,
+                    should_abort=self._make_turn_abort(),
+                    pre_text=text,
+                    pre_audio=audio,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("welcome dispatch failed")
+                return DispatchResult("radio")
+
+        try:
+            outcome = await run_welcome(speak, chime, hear, dispatch, should_abort=abort)
+        finally:
+            if self._wakeword:
+                self._wakeword.unmute()
+            self._drain_events()
+        result = outcome.dispatched
+        if result is not None and result.next_mode != "radio":
+            self._pending_book_query = result.reader_query
+            self._pending_book_chapter = result.reader_chapter
+            self._enter(result.next_mode)
+            return
+        self.leds.set_mode("radio")
+        if result is not None and not result.resume_channel:
+            # "pause" / "quiet" at power-on: hold the music until asked for.
+            self._music_held = True
 
     async def _radio_wait(self, voice_ctx) -> None:
         """Wait for wake word, button, or power-off in radio mode."""
@@ -242,6 +316,7 @@ class OracleApp:
                 if result.next_mode == "radio":
                     self.leds.set_mode("radio")
                     if result.resume_channel:
+                        self._music_held = False
                         self._resume_music()
                 else:
                     self._pending_book_query = result.reader_query
@@ -444,6 +519,7 @@ class OracleApp:
 
     def _start_specific_music(self, query: str) -> None:
         """Start playback of a searched-for track/artist (channel switch)."""
+        self._music_held = False
         player = self._get_player()
         if player is None:
             return
@@ -534,7 +610,9 @@ class OracleApp:
     # ---------------------------------------------------------------- music
 
     def _ensure_music(self) -> None:
-        """Start music if not already playing."""
+        """Start music if not already playing (unless held by a "quiet")."""
+        if self._music_held:
+            return
         player = self._get_player()
         if player and not player.is_playing:
             player.play()

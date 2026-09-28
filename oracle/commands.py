@@ -83,6 +83,7 @@ action must be one of:
   "list_music"  — what music is available; query narrows it (artist/genre)
   "list_books"  — what books are available; query narrows it (author/title)
   "question"    — an information question or request for knowledge
+  "about_device"— what this radio is: who built it, what it holds
   "none"        — not a command and not a question (fragments, noise)
 
 Examples:
@@ -120,7 +121,14 @@ def _build_keyword_table() -> list[_KeywordRule]:
     raw: list[tuple[str, str]] = [
         # Channel switches / conversation first so they don't get eaten
         # by the generic transport words below.
-        (r"\bi\s+have\s+a\s+question\b", "mode_librarian"),
+        (
+            r"\bi\s+have\s+a\s+question\b|\b(?:ask|have)\s+(?:you\s+)?(?:a\s+|some\s+)?questions?\b|\bquestion\s+mode\b",
+            "mode_librarian",
+        ),
+        (
+            r"\b(?:about|tell\s+me\s+about)\s+(?:this|the|your)\s+(?:device|radio|machine|box|hardware)\b|\bwho\s+(?:made|built|created)\s+you\b|\bwhat\s+are\s+you\b",
+            "about_device",
+        ),
         (r"\bi'?d\s+like\s+to\s+read\s+a\s+book\b", "mode_reader"),
         (r"\b(?:read|listen\s+to)\s+(?:a|my|the)\s+book\b", "mode_reader"),
         (r"\b(?:continue|resume)\s+(?:my|the)\s+book\b", "mode_reader"),
@@ -130,8 +138,11 @@ def _build_keyword_table() -> list[_KeywordRule]:
         # Bare "play music" (utterance ends there) = resume/switch channel.
         (r"\b(?:play|back\s+to|put\s+on)\s+(?:the\s+|some\s+)?music[.!]?\s*$", "music_on"),
         # Exploration.
-        (r"\bwhat\s+music\b|\bwhat\s+(?:songs|albums|artists)\s+(?:do|are)\b", "list_music"),
-        (r"\bwhat\s+books?\b|\bwhich\s+books?\b", "list_books"),
+        (
+            r"\bwhat\s+music\b|\bwhat\s+(?:songs|albums|artists)\s+(?:do|are)\b|\bexplore\s+(?:the\s+)?music\b",
+            "list_music",
+        ),
+        (r"\bwhat\s+books?\b|\bwhich\s+books?\b|\bexplore\s+(?:the\s+)?books?\b", "list_books"),
         # Chapter / track / album ops.
         (r"\bnext\s+chapter\b", "next_chapter"),
         (
@@ -380,6 +391,8 @@ async def dispatch_radio_command(
     should_abort: AbortCheck = None,
     context: Channel = "music",
     reader=None,
+    pre_text: str | None = None,
+    pre_audio=None,
 ) -> DispatchResult:
     """One wake-word voice turn — the single dispatcher for both channels.
 
@@ -404,17 +417,22 @@ async def dispatch_radio_command(
     # decode during capture). ``stt_fast`` is kept resident across calls
     # (with parakeet/nemotron it's the same object as ``stt``) and only
     # unloaded around LLM-intent calls on the whisper backends.
-    if leds is not None:
-        leds.set_mode("librarian")  # solid blue while listening
-    try:
-        audio_in, text = listen(
-            vc.stt_fast,
-            silence_duration=settings.vad_silence_duration_radio,
-            should_abort=should_abort,
-        )
-    except (ValueError, OSError) as e:
-        logger.warning(f"Mic unavailable: {e}")
-        return DispatchResult(here)
+    if pre_text is not None:
+        # Already recorded and transcribed (the power-on welcome).
+        audio_in, text = pre_audio, pre_text
+        timer.speech_ended()
+    else:
+        if leds is not None:
+            leds.set_mode("librarian")  # solid blue while listening
+        try:
+            audio_in, text = listen(
+                vc.stt_fast,
+                silence_duration=settings.vad_silence_duration_radio,
+                should_abort=should_abort,
+            )
+        except (ValueError, OSError) as e:
+            logger.warning(f"Mic unavailable: {e}")
+            return DispatchResult(here)
     if leds is not None:
         leds.set_mode("thinking")
     if aborted() or not text.strip():
@@ -425,7 +443,8 @@ async def dispatch_radio_command(
     # the command completes (see the end of this function), never mid-turn.
     from oracle.speaker import maybe_ask, observe
 
-    await observe(vc, audio_in, reader=reader)
+    if audio_in is not None:
+        await observe(vc, audio_in, reader=reader)
 
     # 3. Classify.
     action = _keyword_match(text)
@@ -611,6 +630,75 @@ def _describe_music(catalog: Catalog | None, query: str | None) -> str:
     )
 
 
+_KB_LABELS = {
+    "wikipedia": "Wikipedia",
+    "gutenberg": "the Project Gutenberg books",
+    "wikimed": "WikiMed",
+    "wikibooks": "Wikibooks",
+    "ifixit": "iFixit repair guides",
+    "crashcourse": "Crash Course",
+}
+
+
+def _millions(n: int) -> str:
+    if n >= 1_000_000:
+        return f"about {n / 1_000_000:.1f} million"
+    if n >= 1_000:
+        return f"about {round(n / 1000)} thousand"
+    return str(n)
+
+
+def describe_device(catalog: Catalog | None) -> str:
+    """ "Tell me about this device" — who built it and what it holds, with
+    live counts from the music catalog, the book library and the FAISS
+    collections."""
+    parts = [
+        "I'm the Librarian: an offline radio built by Erik Salo, started in April 2026, "
+        "running on a Jetson computer inside a vintage radio cabinet. Nothing I know comes "
+        "from the internet; it's all stored here."
+    ]
+    try:
+        if catalog is not None:
+            st = catalog.stats()
+            parts.append(
+                f"The music library holds {st['tracks']:,} songs from {st['artists']:,} artists "
+                f"across {st['albums']:,} albums."
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"music stats failed: {e}")
+    try:
+        from oracle.books.library import Library
+
+        lib = Library()
+        try:
+            parts.append(f"The book collection has {lib.count_books():,} books.")
+        finally:
+            lib.close()
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"book count failed: {e}")
+    try:
+        from oracle.core import _get_retriever
+
+        r = _get_retriever()
+        sizes = r.collection_sizes() if r else {}
+        sizes.pop("music", None)
+        if sizes:
+            big = [
+                f"{_millions(n)} passages from {_KB_LABELS.get(k, k)}"
+                for k, n in sorted(sizes.items(), key=lambda kv: -kv[1])
+                if n >= 1_000_000
+            ]
+            small = [_KB_LABELS.get(k, k) for k, n in sizes.items() if n < 1_000_000]
+            kb = "The knowledge base has " + ", ".join(big)
+            if small:
+                kb += ", plus " + ", ".join(small)
+            parts.append(kb + ".")
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"kb summary failed: {e}")
+    parts.append("Ask me anything, or say 'read a book' or 'play some music'.")
+    return " ".join(parts)
+
+
 def _describe_books(query: str | None) -> str:
     try:
         from oracle.books.library import Library
@@ -678,6 +766,9 @@ def _do_action(
         return DispatchResult(here)
     if action == "list_books":
         _speak(vc, _describe_books(query or _extract_qualifier(raw_text)), should_abort)
+        return DispatchResult(here)
+    if action == "about_device":
+        _speak(vc, describe_device(catalog), should_abort)
         return DispatchResult(here)
 
     # ---- book channel transport --------------------------------------------

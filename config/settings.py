@@ -314,6 +314,12 @@ class OracleSettings(BaseSettings):
     led_green_pin: int = 18  # BOARD pin 18
     led_blue_pin: int = 22  # BOARD pin 22
     power_switch_pin: int = 17  # (legacy wiring on BCM 17; now unused for reads)
+    # Power-on routine (oracle/welcome.py): chime + listen, then a greeting,
+    # then the four options, before falling back to music.
+    welcome_enabled: bool = True
+    welcome_first_wait: float = 7.0
+    welcome_second_wait: float = 5.0
+    welcome_third_wait: float = 5.0
     # Play the "ready to listen" chime after the wake word (oracle/chime.py).
     wake_chime: bool = True
     wake_chime_path: Path = Path("chime-clean-short.wav")
