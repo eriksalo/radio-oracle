@@ -192,3 +192,26 @@ def test_speech_units_never_exceed_limit(monkeypatch):
     assert " ".join(units).split() == long.split()
     nopunct = " ".join(f"w{i}" for i in range(15))
     assert [len(u.split()) for u in speech_units(nopunct)] == [6, 6, 3]
+
+
+@pytest.mark.parametrize(
+    "raw,spoken",
+    [
+        ("I'd suggest *Moby Dick* by Melville.", "I'd suggest Moby Dick by Melville."),
+        ("**The Odyssey** and _The Iliad_", "The Odyssey and The Iliad"),
+        ("- *Dracula*\n- *Frankenstein*", "Dracula\nFrankenstein"),
+        ("## Books\nTry `Emma`.", "Books\nTry Emma."),
+        ("See [Moby Dick](http://x) now", "See Moby Dick now"),
+        ("2 * 3 = 6", "2 3 = 6"),
+    ],
+)
+def test_clean_for_speech_strips_markdown(raw, spoken):
+    from oracle.tts import clean_for_speech
+
+    assert clean_for_speech(raw) == spoken
+
+
+def test_speech_units_use_clean_text(monkeypatch):
+    from oracle.tts import speech_units
+
+    assert speech_units("Read *Moby Dick*. It's **great**.") == ["Read Moby Dick. It's great."]

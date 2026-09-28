@@ -22,6 +22,27 @@ def split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_MD_EMPHASIS_RE = re.compile(r"(\*{1,3}|_{1,3})(?=\S)(.+?)(?<=\S)\1")
+_MD_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
+_MD_BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+", re.MULTILINE)
+_MD_LEFTOVER_RE = re.compile(r"[*_`#~^|>]+")
+
+
+def clean_for_speech(text: str) -> str:
+    """Strip markdown the LLM likes to emit — *Moby Dick* was being read
+    aloud as "asterisk Moby Dick asterisk" (2026-09-28). Emphasis, links,
+    headings, bullets and code ticks go; the words stay."""
+    t = _MD_LINK_RE.sub(r"\1", text)
+    t = _MD_HEADING_RE.sub("", t)
+    t = _MD_BULLET_RE.sub("", t)
+    for _ in range(2):  # nested ***bold italic***
+        t = _MD_EMPHASIS_RE.sub(r"\2", t)
+    t = _MD_LEFTOVER_RE.sub("", t)
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    return t.strip()
+
+
 # Sentence boundaries that keep the terminal punctuation (prosody).
 _SENTENCE_KEEP_RE = re.compile(r"(?<=[.!?])\s+")
 _LEADING_PUNCT_RE = re.compile(r"^[^A-Za-z0-9\(\[\"'$]+")
@@ -34,6 +55,7 @@ def speech_units(text: str, max_words: int | None = None) -> list[str]:
     the GPU sidecar fails on requests longer than ~10 s of speech, and a
     whole paragraph or a long answer was exactly that (2026-09-28)."""
     limit = settings.reading_unit_max_words if max_words is None else max_words
+    text = clean_for_speech(text)
     sentences = [_LEADING_PUNCT_RE.sub("", x).strip() for x in _SENTENCE_KEEP_RE.split(text)]
     sentences = [x for x in sentences if re.search(r"[A-Za-z0-9]", x)]
     # A sentence longer than the limit is cut at clause boundaries (, ; :)
@@ -224,6 +246,7 @@ class KokoroTTS:
         """Synthesize text to float32 audio array at 24 kHz."""
         if self._kokoro is None and self._server is None:
             self.load()
+        text = clean_for_speech(text) or text
 
         audio = self._synth_remote(text) if self._server is not None else None
         if audio is None:
