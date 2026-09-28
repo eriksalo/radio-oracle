@@ -456,6 +456,8 @@ async def test_followup_that_is_a_command_switches_channel(monkeypatch):
         turns.append(pre_text)
         return True
 
+    import numpy as np
+
     recordings = [np.ones(100, dtype=np.float32)]
 
     def fake_listen(stt, **kwargs):
