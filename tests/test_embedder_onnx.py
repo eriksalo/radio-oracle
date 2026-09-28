@@ -70,3 +70,19 @@ def test_onnx_batch_matches_single(onnx_embedder):
         np.linalg.norm(batch, axis=1) * np.linalg.norm(singles, axis=1)
     )
     assert cos.min() > 0.95
+
+
+def test_onnx_mode_does_not_probe_torch(monkeypatch):
+    """resolve_device('auto') imports torch (~350 MB on the Jetson); the
+    ONNX runtime must not call it."""
+    from oracle.rag import embedder as mod
+
+    monkeypatch.setattr(settings, "embedding_runtime", "onnx")
+    monkeypatch.setattr(settings, "embedding_device", "auto")
+    monkeypatch.setattr(
+        settings, "onnx_embedding_dirs", {"nomic-ai/nomic-embed-text-v1.5": str(MODEL_DIR)}
+    )
+    called = []
+    monkeypatch.setattr(mod, "resolve_device", lambda req: called.append(req) or "cpu")
+    e = mod.Embedder(model_name="nomic-ai/nomic-embed-text-v1.5")
+    assert e.device == "cpu" and called == []

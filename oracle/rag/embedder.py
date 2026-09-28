@@ -88,7 +88,12 @@ class Embedder:
         batch_size: int | None = None,
     ):
         self._model_name = model_name or settings.embedding_model
-        self._device = resolve_device(device or settings.embedding_device)
+        # ONNX mode never needs torch — resolve_device("auto") imports it
+        # (~350 MB of anonymous memory on the Jetson, measured 2026-09-28).
+        if self._onnx_dir_for(self._model_name) is not None:
+            self._device = "cpu"
+        else:
+            self._device = resolve_device(device or settings.embedding_device)
         self._fp16 = settings.embedding_fp16 if fp16 is None else fp16
         self._batch_size = batch_size or settings.embedding_batch_size
         self._model = None
@@ -102,11 +107,15 @@ class Embedder:
     def batch_size(self) -> int:
         return self._batch_size
 
-    def _onnx_dir(self) -> Path | None:
+    @staticmethod
+    def _onnx_dir_for(model_name: str) -> Path | None:
         if settings.embedding_runtime != "onnx":
             return None
-        d = settings.onnx_embedding_dirs.get(self._model_name)
+        d = settings.onnx_embedding_dirs.get(model_name)
         return Path(d) if d else None
+
+    def _onnx_dir(self) -> Path | None:
+        return self._onnx_dir_for(self._model_name)
 
     def load(self) -> None:
         if self._model is not None or self._onnx is not None:
