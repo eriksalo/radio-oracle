@@ -949,8 +949,15 @@ const ACT_LABELS = {
   timing: 'TIMING',
 };
 const PHASE_TEXT = {
+  off: 'standby', boot: 'booting', waiting: 'waiting (say the wake word)', error: 'error',
+  q_listen: 'listening', q_think: 'thinking', q_speak: 'speaking',
+  music_play: 'playing music', music_listen: 'listening (music)', music_think: 'thinking (music)',
+  music_speak: 'speaking (music)',
+  book_read: 'reading a book', book_listen: 'listening (book)', book_think: 'thinking (book)',
+  book_speak: 'speaking (book)', book_paused: 'book paused',
+  // legacy names, in case an older app is still running
   radio: 'playing music', librarian: 'listening', thinking: 'thinking',
-  speaking: 'speaking', reader: 'reading a book', off: 'standby',
+  speaking: 'speaking', reader: 'reading a book',
 };
 const STAGE_ORDER = ['record', 'stt', 'rewrite', 'retrieve', 'prefill', 'first_token', 'total'];
 const ttfaHistory = [];

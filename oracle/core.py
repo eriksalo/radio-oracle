@@ -491,7 +491,7 @@ async def wake_word_listen(
         return None
 
     if leds is not None:
-        leds.set_mode("thinking")
+        leds.set_mode("q_think")
 
     if aborted():
         return None
@@ -566,11 +566,11 @@ async def _voice_turn(
         text = pre_text
         timer.speech_ended()
         if leds is not None:
-            leds.set_mode("thinking")
+            leds.set_mode("q_think")
     else:
         # Listening (+ transcribing as we go with a streaming backend)
         if leds is not None:
-            leds.set_mode("librarian")
+            leds.set_mode("q_listen")
         logger.info("Listening...")
         try:
             audio_in, text = await asyncio.to_thread(listen, vc.stt, should_abort=should_abort)
@@ -579,7 +579,7 @@ async def _voice_turn(
             return False
         vc.stt.unload()
         if leds is not None:
-            leds.set_mode("thinking")
+            leds.set_mode("q_think")
         if aborted():
             return False
         if text.strip():
@@ -606,7 +606,7 @@ async def _voice_turn(
     response_parts: list[str] = []
 
     if leds is not None:
-        leds.set_mode("speaking")
+        leds.set_mode("q_speak")
 
     # Three-stage pipeline: token stream → text units → synthesis → playback.
     # Synthesis and playback are separate workers so sentence N+1 is being

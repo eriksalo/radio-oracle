@@ -100,8 +100,10 @@ class OracleApp:
             # Flip LED from the detector thread for zero perceived delay.
             # StatusLEDs.set_mode is lock-guarded; GPIO writes are sub-ms.
             # Doing this in the asyncio path queues behind the chime + pause.
-            if self._state in ("radio", "reader"):
-                self.leds.set_mode("librarian")
+            if self._state == "reader":
+                self.leds.set_mode("book_listen")
+            elif self._state == "radio":
+                self.leds.set_mode("q_listen" if self._music_held else "music_listen")
             from oracle.activity import emit
 
             emit("wake")
@@ -142,6 +144,7 @@ class OracleApp:
                 self._drain_events()
                 await asyncio.sleep(0.1)
 
+            self.leds.set_mode("boot")  # amber slow blink while the models load
             voice_ctx = await voice_init()
             self._voice_ctx = voice_ctx
             from oracle import volume_bridge
@@ -198,13 +201,15 @@ class OracleApp:
 
         if self._wakeword:
             self._wakeword.mute()
-        self.leds.set_mode("librarian")
+        self.leds.set_mode("q_listen")
 
         def abort() -> bool:
             return not self.power.is_on
 
         async def speak(text: str) -> None:
+            self.leds.set_mode("q_speak")
             await speak_text(voice_ctx, text)
+            self.leds.set_mode("q_listen")
 
         async def chime() -> None:
             if settings.wake_chime:
@@ -252,7 +257,7 @@ class OracleApp:
         # Music only when asked for: otherwise blink blue and wait for the
         # wake word or the button.
         self._music_held = not (result is not None and result.starts_music)
-        self.leds.set_mode("waiting" if self._music_held else "radio")
+        self.leds.set_mode("waiting" if self._music_held else "music_play")
 
     async def _radio_wait(self, voice_ctx) -> None:
         """Wait for wake word, button, or power-off in radio mode."""
@@ -316,7 +321,7 @@ class OracleApp:
                 if result.next_mode == "radio":
                     if result.starts_music:
                         self._music_held = False
-                    self.leds.set_mode("waiting" if self._music_held else "radio")
+                    self.leds.set_mode("waiting" if self._music_held else "music_play")
                     if result.resume_channel and not self._music_held:
                         self._resume_music()
                 else:
@@ -451,7 +456,7 @@ class OracleApp:
                     ):
                         pending_press = None
                         paused = session.toggle_pause()
-                        self.leds.set_mode("thinking" if paused else "reader")
+                        self.leds.set_mode("book_paused" if paused else "book_read")
                     if self._wake_event is not None and self._wake_event.is_set():
                         self._wake_event.clear()
                         result = await self._reader_wake_turn(voice_ctx, session)
@@ -516,9 +521,9 @@ class OracleApp:
         if result.next_mode == "reader" and not result.reader_query:
             if result.resume_channel:
                 session.resume()
-                self.leds.set_mode("reader")
+                self.leds.set_mode("book_read")
             else:
-                self.leds.set_mode("thinking")  # paused, awaiting button/wake
+                self.leds.set_mode("book_paused")  # awaiting button/wake
             return None
         return result
 
@@ -549,7 +554,7 @@ class OracleApp:
         if not self.power.is_on:
             return None
 
-        self.leds.set_mode("thinking")
+        self.leds.set_mode("book_think")
         if not text.strip():
             await speak_text(voice_ctx, "I didn't catch that.")
             return None
@@ -662,12 +667,12 @@ class OracleApp:
             self._stop_music()
             self.leds.set_mode("off")
         elif state == "radio":
-            self.leds.set_mode("waiting" if self._music_held else "radio")
+            self.leds.set_mode("waiting" if self._music_held else "music_play")
             if old == "reader":
                 self._resume_music()
         elif state == "reader":
             self._pause_music()
-            self.leds.set_mode("reader")
+            self.leds.set_mode("book_read")
 
     def _on_power_change(self, is_on: bool) -> None:
         """Called from power switch thread — immediately update LED."""
@@ -703,7 +708,7 @@ class OracleApp:
                     self._pending_short_press = None
                     if self._wake_event is not None:
                         logger.info("Button press while waiting — opening the mic")
-                        self.leds.set_mode("librarian")
+                        self.leds.set_mode("q_listen")
                         self._wake_event.set()
                     continue
                 if (

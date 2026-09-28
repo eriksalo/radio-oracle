@@ -10,14 +10,30 @@ Falls back to log-only output if Jetson.GPIO is unavailable (dev machines).
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
 from typing import Literal
 
 from loguru import logger
 
 from config.settings import settings
 
-Mode = Literal["off", "radio", "librarian", "reader", "thinking", "speaking", "error", "waiting"]
+Mode = Literal[
+    "off",
+    "boot",
+    "waiting",
+    "error",
+    "q_listen",
+    "q_think",
+    "q_speak",
+    "music_play",
+    "music_listen",
+    "music_think",
+    "music_speak",
+    "book_read",
+    "book_listen",
+    "book_think",
+    "book_speak",
+    "book_paused",
+]
 
 
 @dataclass(frozen=True)
@@ -29,25 +45,52 @@ class Color:
 
 # Mode → channel intent (True = that channel lit). Polarity to GPIO pins
 # is handled in ``_write`` for a common-anode LED.
+# Colour = what you're dealing with: blue = questions/conversation,
+# green = music, purple = books; white = idle, amber = booting, red = error.
+# Pattern = what it's doing: solid = output (speaking / playing / reading),
+# fast blink = thinking, slow blink = listening to you (mic open),
+# very slow = idle/paused. (Erik's scheme, 2026-09-28.)
+_BLUE = Color(False, False, True)
+_GREEN = Color(False, True, False)
+_PURPLE = Color(True, False, True)
+_WHITE = Color(True, True, True)
+_AMBER = Color(True, True, False)
+_RED = Color(True, False, False)
+
 MODE_COLORS: dict[str, Color] = {
     "off": Color(False, False, False),
-    "radio": Color(False, True, False),  # green
-    "librarian": Color(False, False, True),  # blue — wake-heard / listening
-    "reader": Color(True, False, True),  # purple (R+B)
-    "thinking": Color(False, False, True),  # blue — blinks
-    "speaking": Color(False, False, True),  # blue — solid
-    "error": Color(True, False, False),  # red — blinks
-    "waiting": Color(
-        False, False, True
-    ),  # blue — slow blink: on, silent, listening for the wake word
+    "boot": _AMBER,
+    "waiting": _WHITE,
+    "error": _RED,
+    "q_listen": _BLUE,
+    "q_think": _BLUE,
+    "q_speak": _BLUE,
+    "music_play": _GREEN,
+    "music_listen": _GREEN,
+    "music_think": _GREEN,
+    "music_speak": _GREEN,
+    "book_read": _PURPLE,
+    "book_listen": _PURPLE,
+    "book_think": _PURPLE,
+    "book_speak": _PURPLE,
+    "book_paused": _PURPLE,
 }
 
-# Blink full period (seconds) per mode; absent = solid. Thinking blinks
-# at 2 Hz to read as "actively working" without strobing the room.
+# Blink full period (seconds) per mode; absent = solid.
+_FAST = 0.3  # thinking
+_SLOW = 1.0  # listening
+_IDLE = 2.0  # waiting / paused / booting
 _BLINK_PERIOD_S: dict[str, float] = {
-    "error": 0.6,
-    "thinking": 0.5,
-    "waiting": 2.0,
+    "boot": _IDLE,
+    "waiting": _IDLE,
+    "error": 0.5,
+    "q_listen": _SLOW,
+    "q_think": _FAST,
+    "music_listen": _SLOW,
+    "music_think": _FAST,
+    "book_listen": _SLOW,
+    "book_think": _FAST,
+    "book_paused": _IDLE,
 }
 
 

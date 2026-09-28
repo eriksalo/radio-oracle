@@ -349,7 +349,7 @@ async def _question_turns(
         if window <= 0 or aborted():
             return None
         if leds is not None:
-            leds.set_mode("librarian")  # solid blue: still listening
+            leds.set_mode("q_listen")  # blue slow blink: still listening
         # A follow-up is a turn of its own for timing purposes: the
         # previous timer was finished by voice_turn.
         timing.start("followup")
@@ -469,13 +469,22 @@ async def dispatch_radio_command(
     # decode during capture). ``stt_fast`` is kept resident across calls
     # (with parakeet/nemotron it's the same object as ``stt``) and only
     # unloaded around LLM-intent calls on the whisper backends.
+    # LED colour follows the channel the turn started from: green while
+    # music is up, purple in a book, blue when the radio is idle (a wake
+    # from the quiet state is almost always a question).
+    if context == "book":
+        base = "book"
+    elif player is not None and getattr(player, "is_playing", False):
+        base = "music"
+    else:
+        base = "q"
     if pre_text is not None:
         # Already recorded and transcribed (the power-on welcome).
         audio_in, text = pre_audio, pre_text
         timer.speech_ended()
     else:
         if leds is not None:
-            leds.set_mode("librarian")  # solid blue while listening
+            leds.set_mode(f"{base}_listen")
         try:
             audio_in, text = listen(
                 vc.stt_fast,
@@ -486,7 +495,7 @@ async def dispatch_radio_command(
             logger.warning(f"Mic unavailable: {e}")
             return DispatchResult(here)
     if leds is not None:
-        leds.set_mode("thinking")
+        leds.set_mode(f"{base}_think")
     if aborted() or not text.strip():
         return DispatchResult(here)
     logger.info(f"Voice command ({context}): {text!r}")
@@ -551,7 +560,7 @@ async def dispatch_radio_command(
         return DispatchResult(here)
 
     if leds is not None:
-        leds.set_mode("speaking")
+        leds.set_mode(f"{base}_speak")
     try:
         result = _do_action(
             action,
