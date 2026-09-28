@@ -455,14 +455,13 @@ async def voice_close(vc: VoiceContext) -> None:
 
 
 async def speak_text(vc: VoiceContext, text: str) -> None:
-    """Synthesize and play a short announcement through the shared TTS."""
+    """Speak an announcement through the shared TTS (chunked + pipelined,
+    off the event loop)."""
     from oracle.activity import emit
-    from oracle.audio import play_audio
+    from oracle.tts import say
 
     emit("spoke", text=text)
-
-    audio = vc.tts.synthesize(text)
-    play_audio(audio, vc.tts.sample_rate)
+    await asyncio.to_thread(say, vc.tts, text)
 
 
 async def wake_word_listen(

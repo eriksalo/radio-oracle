@@ -166,7 +166,9 @@ def silent_speak(monkeypatch):
     def fake_play(audio, sample_rate=None, should_abort=None):
         spoken.append("<played>")
 
-    monkeypatch.setattr(commands, "play_audio", fake_play)
+    from oracle import audio
+
+    monkeypatch.setattr(audio, "play_audio", fake_play)  # say() resolves it here
     return spoken
 
 

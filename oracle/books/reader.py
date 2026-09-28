@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -14,6 +13,7 @@ from loguru import logger
 from config.settings import settings
 from oracle.books.bookmarks import BookmarkStore
 from oracle.books.library import Library, heading_number
+from oracle.tts import speech_units
 
 if TYPE_CHECKING:
     from oracle.tts import KokoroTTS
@@ -25,34 +25,6 @@ class ReadingPosition:
     chapter_idx: int
     para_idx: int
     total_chapters: int
-
-
-# Sentence boundaries that keep the terminal punctuation (prosody).
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
-
-
-_LEADING_PUNCT_RE = re.compile(r"^[^A-Za-z0-9\(\[\"'$]+")
-
-
-def _group_units(sentences: list[str], max_words: int) -> list[str]:
-    """Pack sentences into units of at most *max_words* (a long sentence
-    stays whole). Leading punctuation is dropped and units with nothing
-    voiceable are skipped (". LOOMINGS." made the GPU TTS fail)."""
-    units: list[str] = []
-    cur: list[str] = []
-    n = 0
-    sentences = [_LEADING_PUNCT_RE.sub("", s).strip() for s in sentences]
-    sentences = [s for s in sentences if re.search(r"[A-Za-z0-9]", s)]
-    for sent in sentences:
-        w = len(sent.split())
-        if cur and n + w > max_words:
-            units.append(" ".join(cur))
-            cur, n = [], 0
-        cur.append(sent)
-        n += w
-    if cur:
-        units.append(" ".join(cur))
-    return units
 
 
 class Reader:
@@ -283,8 +255,7 @@ class Reader:
                         q.put(("chapter", nxt, tts.synthesize(f"Chapter: {label}")))
                         pos = ReadingPosition(pos.book_id, nxt, 0, pos.total_chapters)
                         continue
-                    sentences = [x.strip() for x in _SENTENCE_SPLIT_RE.split(text) if x.strip()]
-                    units = _group_units(sentences, settings.reading_unit_max_words) or [text]
+                    units = speech_units(text) or [text]
                     for i, unit in enumerate(units):
                         if stop_flag.is_set():
                             return
@@ -474,8 +445,7 @@ class Reader:
         from oracle.audio import play_audio
 
         tts = self._get_tts()
-        sentences = [x.strip() for x in _SENTENCE_SPLIT_RE.split(text) if x.strip()]
-        units = _group_units(sentences, settings.reading_unit_max_words)
+        units = speech_units(text)
         if not units:
             return
         q: queue.Queue = queue.Queue(maxsize=2)

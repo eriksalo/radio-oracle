@@ -121,3 +121,62 @@ def test_local_backend_never_touches_http(monkeypatch):
     tts = KokoroTTS()
     assert tts._try_server() is False
     assert calls == []
+
+
+# ------------------------------------------------------------ say() / units
+
+
+def test_speech_units_chunks_and_sanitizes(monkeypatch):
+    from oracle.tts import speech_units
+
+    monkeypatch.setattr(settings, "reading_unit_max_words", 8)
+    text = ". LOOMINGS. Call me Ishmael. Some years ago, never mind how long precisely, I sailed. — Yes!"
+    units = speech_units(text)
+    assert units[0] == "LOOMINGS. Call me Ishmael."
+    assert all(len(u.split()) <= 8 or "," in u for u in units)  # long sentence stays whole
+    assert units[-1] == "Yes!"
+    assert speech_units("... — .") == []
+
+
+def test_say_pipelines_units_in_order(monkeypatch):
+    from oracle import audio
+    from oracle.tts import say
+
+    monkeypatch.setattr(settings, "reading_unit_max_words", 6)
+    played: list[int] = []
+    monkeypatch.setattr(
+        audio, "play_audio", lambda a, sr=None, should_abort=None: played.append(int(a[0]))
+    )
+
+    class T:
+        sample_rate = 24000
+        calls: list[str] = []
+
+        def synthesize(self, text):
+            T.calls.append(text)
+            return np.array([len(T.calls)], dtype=np.float32)
+
+    say(T(), "One two three four five six seven. Eight nine ten. Eleven twelve.")
+    assert T.calls == ["One two three four five six seven.", "Eight nine ten. Eleven twelve."]
+    assert played == [1, 2]
+
+
+def test_say_aborts_between_units(monkeypatch):
+    from oracle import audio
+    from oracle.tts import say
+
+    monkeypatch.setattr(settings, "reading_unit_max_words", 3)
+    played: list[str] = []
+    flags = iter([False, True, True, True, True])
+    monkeypatch.setattr(
+        audio, "play_audio", lambda a, sr=None, should_abort=None: played.append("x")
+    )
+
+    class T:
+        sample_rate = 24000
+
+        def synthesize(self, text):
+            return np.zeros(4, dtype=np.float32)
+
+    say(T(), "A b c. D e f. G h i.", should_abort=lambda: next(flags))
+    assert len(played) <= 1

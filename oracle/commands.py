@@ -256,10 +256,10 @@ def _chapter_announcement(title: str | None) -> str:
 
 def _speak(vc: VoiceContext, text: str, should_abort: AbortCheck = None) -> None:
     from oracle.activity import emit
+    from oracle.tts import say
 
     emit("spoke", text=text)
-    audio = vc.tts.synthesize(text)
-    play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
+    say(vc.tts, text, should_abort=should_abort)
 
 
 # Pre-synthesized "thinking" acknowledgments. A question turn takes several

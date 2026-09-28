@@ -22,6 +22,84 @@ def split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+# Sentence boundaries that keep the terminal punctuation (prosody).
+_SENTENCE_KEEP_RE = re.compile(r"(?<=[.!?])\s+")
+_LEADING_PUNCT_RE = re.compile(r"^[^A-Za-z0-9\(\[\"'$]+")
+
+
+def speech_units(text: str, max_words: int | None = None) -> list[str]:
+    """Cut *text* into TTS units: sentence-aligned, at most *max_words*
+    each (a long sentence stays whole), leading punctuation dropped and
+    unvoiceable fragments skipped. Every spoken line goes through this —
+    the GPU sidecar fails on requests longer than ~10 s of speech, and a
+    whole paragraph or a long answer was exactly that (2026-09-28)."""
+    limit = settings.reading_unit_max_words if max_words is None else max_words
+    sentences = [_LEADING_PUNCT_RE.sub("", x).strip() for x in _SENTENCE_KEEP_RE.split(text)]
+    sentences = [x for x in sentences if re.search(r"[A-Za-z0-9]", x)]
+    units: list[str] = []
+    cur: list[str] = []
+    n = 0
+    for sent in sentences:
+        w = len(sent.split())
+        if cur and n + w > limit:
+            units.append(" ".join(cur))
+            cur, n = [], 0
+        cur.append(sent)
+        n += w
+    if cur:
+        units.append(" ".join(cur))
+    return units
+
+
+def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = None) -> None:
+    """Speak *text* as a pipeline of short units: a worker synthesizes
+    unit N+1 while unit N plays. Blocking; returns when done or aborted."""
+    import queue
+    import threading
+
+    from oracle.audio import play_audio
+
+    units = speech_units(text)
+    if not units:
+        return
+    q: queue.Queue = queue.Queue(maxsize=prefetch or settings.reading_prefetch_units)
+    stop = threading.Event()
+
+    def aborted() -> bool:
+        return stop.is_set() or bool(should_abort and should_abort())
+
+    def produce() -> None:
+        try:
+            for u in units:
+                if aborted():
+                    return
+                try:
+                    q.put(tts.synthesize(u))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"TTS failed on a unit: {e}")
+        finally:
+            q.put(None)
+
+    worker = threading.Thread(target=produce, name="say-tts", daemon=True)
+    worker.start()
+    try:
+        while True:
+            audio = q.get()
+            if audio is None:
+                break
+            if aborted():
+                break
+            play_audio(audio, tts.sample_rate, should_abort=should_abort)
+    finally:
+        stop.set()
+        try:
+            while q.get_nowait() is not None:
+                pass
+        except queue.Empty:
+            pass
+        worker.join(timeout=60)
+
+
 class KokoroTTS:
     """Kokoro TTS — in-process on the CPU, or via the GPU sidecar.
 
