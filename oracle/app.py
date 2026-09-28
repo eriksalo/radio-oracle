@@ -688,11 +688,15 @@ class OracleApp:
                     self._enter("radio")
             elif evt.kind == "short" and self._state == "radio":
                 if self._music_held:
-                    # A press while waiting quietly = "put the music on".
+                    # Waiting quietly: a press is push-to-talk, the same as
+                    # saying the wake word — never "put the music on"
+                    # (2026-09-28: Erik pressed to ask a question and got a
+                    # random album). Say "play music" to start music.
                     self._pending_short_press = None
-                    self._music_held = False
-                    self.leds.set_mode("radio")
-                    self._ensure_music()
+                    if self._wake_event is not None:
+                        logger.info("Button press while waiting — opening the mic")
+                        self.leds.set_mode("librarian")
+                        self._wake_event.set()
                     continue
                 if (
                     self._pending_short_press is not None
