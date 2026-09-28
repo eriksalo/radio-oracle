@@ -25,6 +25,7 @@ ORACLE_TTS_GPU_MEM_MB (CUDA arena cap; 0 = unlimited).
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 import time
@@ -80,6 +81,17 @@ def _load() -> None:
     )
 
 
+_LETTER_RE = re.compile(r"[A-Za-z0-9]")
+
+
+def _speakable(text: str) -> str:
+    """Strip leading punctuation/whitespace; "" when there is nothing to
+    voice (". " or "—" units made the CUDA graph fail on empty input)."""
+    t = text.strip()
+    t = re.sub(r"^[^A-Za-z0-9\(\[\"'$]+", "", t).strip()
+    return t if _LETTER_RE.search(t) else ""
+
+
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # quiet
         pass
@@ -103,17 +115,31 @@ class _Handler(BaseHTTPRequestHandler):
         voice = q.get("voice", ["am_michael"])[0]
         speed = float(q.get("speed", ["1.0"])[0])
         n = int(self.headers.get("Content-Length", "0"))
-        text = self.rfile.read(n).decode("utf-8")
-        try:
-            with _lock:
-                samples, sr = _kokoro.create(text, voice=voice, speed=speed)
-        except Exception as e:  # noqa: BLE001
-            self.send_error(500, str(e))
-            return
+        text = _speakable(self.rfile.read(n).decode("utf-8"))
+        sr = 24000
+        err = ""
+        if not text:
+            samples = np.zeros(int(0.15 * sr), dtype=np.float32)  # nothing to say
+        else:
+            try:
+                with _lock:
+                    samples, sr = _kokoro.create(text, voice=voice, speed=speed)
+            except Exception as e:  # noqa: BLE001
+                # A failed unit is a short silence, not a 500: the client
+                # must never abandon the GPU for the CPU over one bad input.
+                err = str(e).splitlines()[0][:200]
+                print(
+                    f"tts_server: synth failed for {text[:60]!r}: {err}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                samples = np.zeros(int(0.3 * sr), dtype=np.float32)
         body = np.asarray(samples, dtype="<f4").tobytes()
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("X-Sample-Rate", str(sr))
+        if err:
+            self.send_header("X-Error", err)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

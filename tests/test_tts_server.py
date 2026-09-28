@@ -13,6 +13,8 @@ from oracle.tts import KokoroTTS
 
 
 class _Resp:
+    headers: dict = {}
+
     def __init__(self, content=b"", text="ok CUDAExecutionProvider", status=200):
         self.content = content
         self.text = text
@@ -72,8 +74,26 @@ def test_unreachable_sidecar_falls_back_to_local(server_mode, monkeypatch):
     assert tts._server is None
 
 
+def test_unit_failure_keeps_sidecar_and_skips(server_mode, monkeypatch):
+    """A 5xx / X-Error for one unit yields a short silence; the sidecar stays."""
+    calls = _fake_httpx(monkeypatch, synth=[0.1])
+
+    class _Err(_Resp):
+        headers = {"X-Error": "boom"}
+        status_code = 500
+
+    import httpx as fake
+
+    fake.post = lambda url, params=None, content=None, timeout=None: _Err()
+    tts = KokoroTTS()
+    tts.load()
+    out = tts.synthesize("x")
+    assert tts._server is not None
+    assert len(out) > 0 and not out.any()
+
+
 def test_failed_remote_call_drops_to_local(server_mode, monkeypatch):
-    _fake_httpx(monkeypatch, synth=None)  # health ok, synth refused
+    _fake_httpx(monkeypatch, synth=None)  # health ok, connection refused on synth
     tts = KokoroTTS()
     tts.load()
     assert tts._server is not None

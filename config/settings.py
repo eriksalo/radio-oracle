@@ -167,10 +167,11 @@ class OracleSettings(BaseSettings):
     onnx_embedding_dirs: dict[str, str] = {
         "nomic-ai/nomic-embed-text-v1.5": "models/nomic-embed-text-v1.5-onnx",
     }
-    # fp32: cosine 1.0000 vs sentence-transformers, 64 ms/query, ~600 MB
-    # (Jetson 2026-09-27). model_int8.onnx: 23 ms but cos 0.97 — retrieval
-    # recall risk, and dynamic int8 is batch-dependent.
-    onnx_embedding_file: str = "model.onnx"
+    # fp16 export: cosine 1.0000 vs fp32 (max |diff| 0.003 on norm-23
+    # vectors), 85 vs 49 ms/query on the workstation, ~270 MB less RAM —
+    # chosen 2026-09-28 for memory headroom. model_int8.onnx: 23 ms but
+    # cos 0.97 — retrieval changes, rejected.
+    onnx_embedding_file: str = "model_fp16.onnx"
     onnx_embedding_threads: int = 4
     onnx_embedding_max_tokens: int = 512  # queries are a sentence; caps padding cost
     rag_top_k: int = 5
@@ -291,7 +292,7 @@ class OracleSettings(BaseSettings):
     # (sentence-aligned): the first word comes sooner and no single TTS
     # request is long. 60 (~22 s of speech) overflowed the GPU sidecar's
     # 1 GB CUDA arena on the Jetson; 30 (~11 s) fits.
-    reading_unit_max_words: int = 30
+    reading_unit_max_words: int = 24
     # Units synthesized ahead of playback in the reader pipeline.
     reading_prefetch_units: int = 3
     reading_chapter_pause: float = 2.0  # seconds between chapters

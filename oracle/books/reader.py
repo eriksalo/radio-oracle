@@ -31,12 +31,18 @@ class ReadingPosition:
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
+_LEADING_PUNCT_RE = re.compile(r"^[^A-Za-z0-9\(\[\"'$]+")
+
+
 def _group_units(sentences: list[str], max_words: int) -> list[str]:
     """Pack sentences into units of at most *max_words* (a long sentence
-    stays whole)."""
+    stays whole). Leading punctuation is dropped and units with nothing
+    voiceable are skipped (". LOOMINGS." made the GPU TTS fail)."""
     units: list[str] = []
     cur: list[str] = []
     n = 0
+    sentences = [_LEADING_PUNCT_RE.sub("", s).strip() for s in sentences]
+    sentences = [s for s in sentences if re.search(r"[A-Za-z0-9]", s)]
     for sent in sentences:
         w = len(sent.split())
         if cur and n + w > max_words:

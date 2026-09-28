@@ -115,16 +115,16 @@ else
 fi
 
 # Query-side embedder for ORACLE_EMBEDDING_RUNTIME=onnx: nomic-embed-text
-# v1.5 fp32 ONNX (~520MB; identical vectors to the sentence-transformers
-# build used for the FAISS indices) + tokenizer. model_int8.onnx (131MB)
-# is optional: 3x faster but cos 0.97 to the index vectors.
+# v1.5 fp16 ONNX (~260MB; cosine 1.0 to the fp32/sentence-transformers
+# vectors the FAISS indices were built with) + tokenizer. model.onnx (fp32,
+# 520MB) and model_int8.onnx (cos 0.97, rejected) are optional.
 NOMIC_DIR="$MODELS_DIR/nomic-embed-text-v1.5-onnx"
 NOMIC_BASE="https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main"
 if [[ "$DRY_RUN" == true ]]; then
     echo "  nomic ONNX embedder: $NOMIC_BASE/onnx/model.onnx (+tokenizer) -> $NOMIC_DIR"
 else
     mkdir -p "$NOMIC_DIR"
-    for f in onnx/model.onnx tokenizer.json tokenizer_config.json config.json special_tokens_map.json; do
+    for f in onnx/model_fp16.onnx tokenizer.json tokenizer_config.json config.json special_tokens_map.json; do
         if [[ ! -f "$NOMIC_DIR/$(basename "$f")" ]]; then
             echo "Downloading nomic $(basename "$f")..."
             wget -q --show-progress -O "$NOMIC_DIR/$(basename "$f")" "$NOMIC_BASE/$f"

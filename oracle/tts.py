@@ -85,6 +85,9 @@ class KokoroTTS:
             raise
 
     def _synth_remote(self, text: str) -> np.ndarray | None:
+        """None only when the sidecar itself is gone (connection error);
+        a per-unit synthesis failure (HTTP 5xx / X-Error) yields a short
+        silence so one bad input never demotes the session to CPU Kokoro."""
         import httpx
 
         try:
@@ -94,12 +97,18 @@ class KokoroTTS:
                 content=text.encode("utf-8"),
                 timeout=settings.tts_server_timeout,
             )
-            r.raise_for_status()
-            return np.frombuffer(r.content, dtype="<f4").astype(np.float32)
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"TTS sidecar failed ({e}); falling back to in-process Kokoro")
+            logger.warning(f"TTS sidecar unreachable ({e}); falling back to in-process Kokoro")
             self._server = None
             return None
+        if r.status_code >= 500 or r.headers.get("X-Error"):
+            logger.warning(
+                f"TTS sidecar could not voice {text[:60]!r}: "
+                f"{r.headers.get('X-Error') or r.status_code}; skipping the unit"
+            )
+            return np.zeros(int(0.3 * SAMPLE_RATE), dtype=np.float32)
+        r.raise_for_status()
+        return np.frombuffer(r.content, dtype="<f4").astype(np.float32)
 
     def synthesize(self, text: str) -> np.ndarray:
         """Synthesize text to float32 audio array at 24 kHz."""
