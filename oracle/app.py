@@ -386,7 +386,11 @@ class OracleApp:
                 if query:
                     book = session.find_book(query)
                     if book is None:
-                        await speak_text(voice_ctx, f"I couldn't find {query} in the archive.")
+                        await speak_text(
+                            voice_ctx,
+                            f"I couldn't find {query} in the archive. It holds public-domain "
+                            "books, mostly from Project Gutenberg.",
+                        )
                     elif not session.is_confident_match(query, book):
                         # A loose FTS hit must not start reading unasked.
                         if not await self._confirm_book(voice_ctx, book):
@@ -553,7 +557,11 @@ class OracleApp:
         logger.info(f"Book request: {text!r}")
         book = session.find_book(text)
         if book is None:
-            await speak_text(voice_ctx, f"I couldn't find {text.strip()} in the archive.")
+            await speak_text(
+                voice_ctx,
+                f"I couldn't find {text.strip()} in the archive. It holds public-domain "
+                "books, mostly from Project Gutenberg.",
+            )
             return None
         if not session.is_confident_match(text, book) and not await self._confirm_book(
             voice_ctx, book

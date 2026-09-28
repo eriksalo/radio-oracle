@@ -443,3 +443,34 @@ def test_describe_music_summary_and_filtered():
 )
 def test_play_music_by_artist_is_a_search(text, expected):
     assert commands._keyword_match(text) == expected
+
+
+async def test_followup_that_is_a_command_switches_channel(monkeypatch):
+    """ "Read me Moby Dick" said inside the question window opens the book
+    instead of being chatted about."""
+    from oracle import core as core_mod
+
+    turns: list[str] = []
+
+    async def fake_voice_turn(vc, leds=None, should_abort=None, pre_text=None):
+        turns.append(pre_text)
+        return True
+
+    recordings = [np.ones(100, dtype=np.float32)]
+
+    def fake_listen(stt, **kwargs):
+        return recordings.pop(0), "read me Moby Dick"
+
+    async def fake_classify(vc, text):
+        return ("read_book", "Moby Dick")
+
+    vc = _FakeVC()
+    vc.stt_fast = object()
+    monkeypatch.setattr(core_mod, "voice_turn", fake_voice_turn)
+    monkeypatch.setattr(commands, "listen", fake_listen)
+    monkeypatch.setattr(commands, "classify", fake_classify)
+    monkeypatch.setattr(commands, "_play_thinking_ack", lambda vc, should_abort=None: None)
+
+    out = await commands._question_turns(vc, "who wrote moby dick?", None, None)
+    assert turns == ["who wrote moby dick?"]
+    assert out is not None and out.next_mode == "reader" and out.reader_query == "Moby Dick"

@@ -311,7 +311,11 @@ async def _question_turns(
     leds: StatusLEDs | None,
     should_abort: AbortCheck,
     window: float | None = None,
-) -> None:
+    player: Player | None = None,
+    catalog: Catalog | None = None,
+    context: Channel = "music",
+    reader=None,
+) -> DispatchResult | None:
     """Answer a question, then hold the mic open for follow-ups.
 
     Each answer overlaps a canned 'checking the archives' ack with the
@@ -343,7 +347,7 @@ async def _question_turns(
                 await ack
 
         if window <= 0 or aborted():
-            return
+            return None
         if leds is not None:
             leds.set_mode("librarian")  # solid blue: still listening
         # A follow-up is a turn of its own for timing purposes: the
@@ -363,8 +367,26 @@ async def _question_turns(
             return
         if aborted() or not text.strip():
             timing.clear()
-            return  # no follow-up — the channel resumes
+            return None  # no follow-up — the channel resumes
         logger.info(f"Follow-up: {text!r}")
+        # A follow-up may be a command ("read me Moby Dick", "play some
+        # jazz", "next song"): act on it instead of chatting about it.
+        action, query = await classify(vc, text)
+        if action not in ("question", "none"):
+            from oracle.activity import emit
+
+            emit("decided", action=action, query=query)
+            return _do_action(
+                action,
+                query,
+                player,
+                catalog,
+                vc,
+                should_abort,
+                context=context,
+                reader=reader,
+                raw_text=text,
+            )
 
 
 def _play_query(player: Player, catalog: Catalog, query: str) -> str | None:
@@ -384,6 +406,33 @@ def _play_query(player: Player, catalog: Catalog, query: str) -> str | None:
     player.play(track=track)
     label = track.artist or track.album or track.title
     return label
+
+
+async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
+    """Keyword table → question heuristic → LLM intent. Used for wake-word
+    commands and for follow-ups in the question window alike, so "read me
+    Moby Dick" said as a follow-up opens the book instead of being chatted
+    about (2026-09-28: the LLM replied that it can't read books aloud)."""
+    action = _keyword_match(text)
+    query: str | None = None
+    if action is None and _looks_like_question(text):
+        # Interrogative and not a music/book keyword → straight to the
+        # oracle, no LLM-intent round trip.
+        action = "question"
+        logger.info("Question detected (regex)")
+    elif action is None:
+        # Falling through to the LLM — free STT RAM first.
+        vc.stt_fast.unload()
+        action, query = await _llm_intent(text)
+        logger.info(f"LLM intent: action={action} query={query!r}")
+        # Reload eagerly so the *next* command (almost always keyword-
+        # matched) doesn't pay the reload itself.
+        vc.stt_fast.load()
+    else:
+        if action == "play_qualified":
+            action, query = "play", _extract_qualifier(text)
+        logger.info(f"Keyword intent: action={action} query={query!r}")
+    return action, query
 
 
 async def dispatch_radio_command(
@@ -450,25 +499,7 @@ async def dispatch_radio_command(
         await observe(vc, audio_in, reader=reader)
 
     # 3. Classify.
-    action = _keyword_match(text)
-    query: str | None = None
-    if action is None and _looks_like_question(text):
-        # Interrogative and not a music/book keyword → straight to the
-        # oracle, no LLM-intent round trip.
-        action = "question"
-        logger.info("Question detected (regex)")
-    elif action is None:
-        # Falling through to the LLM — free STT RAM first.
-        vc.stt_fast.unload()
-        action, query = await _llm_intent(text)
-        logger.info(f"LLM intent: action={action} query={query!r}")
-        # Reload eagerly so the *next* command (almost always keyword-
-        # matched) doesn't pay the reload itself.
-        vc.stt_fast.load()
-    else:
-        if action == "play_qualified":
-            action, query = "play", _extract_qualifier(text)
-        logger.info(f"Keyword intent: action={action} query={query!r}")
+    action, query = await classify(vc, text)
 
     from oracle.activity import emit
 
@@ -482,7 +513,18 @@ async def dispatch_radio_command(
         # the mic open for wake-word-free follow-ups, then let the
         # channel resume. voice_turn inherits this timer and finishes it.
         timer.label = "question"
-        await _question_turns(vc, text, leds, should_abort)
+        switched = await _question_turns(
+            vc,
+            text,
+            leds,
+            should_abort,
+            player=player,
+            catalog=catalog,
+            context=context,
+            reader=reader,
+        )
+        if switched is not None:
+            return switched
         if context == "music" and not aborted():
             await maybe_ask(vc)
         return DispatchResult(here)
@@ -493,13 +535,19 @@ async def dispatch_radio_command(
         _speak(vc, "What would you like to know?", should_abort)
         opening = await _listen_once(vc, onset_timeout=max(settings.followup_window_s * 2, 8.0))
         if opening:
-            await _question_turns(
+            switched = await _question_turns(
                 vc,
                 opening,
                 leds,
                 should_abort,
                 window=max(settings.followup_window_s * 2, 8.0),
+                player=player,
+                catalog=catalog,
+                context=context,
+                reader=reader,
             )
+            if switched is not None:
+                return switched
         return DispatchResult(here)
 
     if leds is not None:
