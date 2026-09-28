@@ -36,9 +36,9 @@
       font-family: 'VT323', 'Share Tech Mono', 'Courier New', monospace;
       color: var(--grn);
       margin: 0;
-      padding: 18px;
-      font-size: 18px;
-      line-height: 1.35;
+      padding: 12px;
+      font-size: 15px;
+      line-height: 1.3;
       text-shadow: 0 0 4px var(--grn-glow);
       min-height: 100vh;
       background:
@@ -47,7 +47,7 @@
       position: relative;
       overflow-x: hidden;
     }
-    @media (max-width: 600px) { body { padding: 10px; font-size: 16px; } }
+    @media (max-width: 600px) { body { padding: 8px; font-size: 14px; } }
     /* CRT scan lines */
     body::before {
       content: '';
@@ -86,20 +86,20 @@
     .header {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 12px;
       border: 2px solid var(--grn);
-      padding: 10px 14px;
+      padding: 6px 12px;
       box-shadow: 0 0 12px var(--grn-glow), inset 0 0 12px rgba(61,255,122,0.08);
-      margin-bottom: 14px;
+      margin-bottom: 10px;
       flex-wrap: wrap;
     }
     .header svg { flex: 0 0 auto; filter: drop-shadow(0 0 5px var(--grn-glow)); }
     .header .title { flex: 1 1 240px; }
     .header h1 {
-      margin: 0; font-size: 26px; letter-spacing: 0.08em;
+      margin: 0; font-size: 20px; letter-spacing: 0.08em; line-height: 1.1;
     }
     .header .sub {
-      font-size: 15px; color: var(--grn-dim); letter-spacing: 0.1em;
+      font-size: 12px; color: var(--grn-dim); letter-spacing: 0.1em;
     }
     .header .clock {
       text-align: right; font-size: 14px; color: var(--grn-dim);
@@ -110,7 +110,7 @@
     .header .clock .poll.paused { color: var(--amber); }
 
     /* status pills under the title */
-    .pills { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 6px; font-size: 14px; }
+    .pills { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; font-size: 12px; }
     .pill {
       border: 1px solid var(--grn-dim); padding: 1px 8px; letter-spacing: 0.06em;
       color: var(--grn-dim); white-space: nowrap;
@@ -122,9 +122,9 @@
 
     .banner {
       border: 1px dashed var(--grn-dim);
-      padding: 6px 10px;
-      margin-bottom: 14px;
-      font-size: 15px;
+      padding: 3px 8px;
+      margin-bottom: 10px;
+      font-size: 13px;
       color: var(--grn-dim);
     }
     .banner::before { content: '! '; color: var(--grn); }
@@ -134,41 +134,43 @@
 
     .addressbar {
       display: flex; align-items: center; gap: 10px;
-      padding: 6px 10px; margin-bottom: 14px;
+      padding: 3px 8px; margin-bottom: 10px;
       border: 1px solid var(--grn-dim);
       background: rgba(0,0,0,0.25);
       flex-wrap: wrap;
     }
-    .addressbar input { flex: 0 1 220px; padding: 4px 8px; font-size: 16px; }
+    .addressbar input { flex: 0 1 180px; padding: 2px 6px; font-size: 14px; }
     .addressbar label { margin: 0; }
 
-    .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
     .card {
       background: linear-gradient(180deg, var(--bg-2), var(--bg));
       border: 2px solid var(--grn);
-      padding: 12px 14px 14px;
+      padding: 8px 10px 10px;
       box-shadow: 0 0 8px rgba(61,255,122,0.18), inset 0 0 8px rgba(61,255,122,0.04);
       position: relative;
       min-width: 0;
     }
     .card.wide { grid-column: 1 / -1; }
+    .card.w2 { grid-column: span 2; }
+    @media (max-width: 660px) { .card.w2 { grid-column: auto; } }
     h2 {
-      margin: 0 0 10px;
-      font-size: 18px;
+      margin: 0 0 6px;
+      font-size: 15px;
       letter-spacing: 0.1em;
       border-bottom: 1px solid var(--grn-dim);
-      padding-bottom: 4px;
+      padding-bottom: 2px;
     }
     h2::before { content: '> '; color: var(--grn); }
-    h2 .tag { float: right; font-size: 13px; color: var(--grn-dim); letter-spacing: 0.08em; }
+    h2 .tag { float: right; font-size: 11px; color: var(--grn-dim); letter-spacing: 0.08em; }
 
     button {
       font-family: inherit;
-      font-size: 17px;
+      font-size: 14px;
       background: transparent;
       color: var(--grn);
       border: 2px solid var(--grn);
-      padding: 4px 14px;
+      padding: 2px 10px;
       cursor: pointer;
       letter-spacing: 0.08em;
       text-shadow: 0 0 4px var(--grn-glow);
@@ -189,16 +191,16 @@
       background: rgba(0,0,0,0.4);
       color: var(--grn);
       border: 1px solid var(--grn-dim);
-      padding: 8px 10px;
+      padding: 5px 8px;
       font: inherit;
       text-shadow: 0 0 3px var(--grn-glow);
       caret-color: var(--grn);
     }
-    textarea { min-height: 64px; resize: vertical; }
+    textarea { min-height: 44px; resize: vertical; }
     textarea:focus, input:focus { outline: 0; border-color: var(--grn); box-shadow: 0 0 8px var(--grn-glow); }
     textarea::placeholder, input::placeholder { color: var(--grn-dim); }
 
-    label { font-size: 15px; color: var(--grn-dim); display: block; margin: 10px 0 4px; letter-spacing: 0.05em; }
+    label { font-size: 13px; color: var(--grn-dim); display: block; margin: 6px 0 3px; letter-spacing: 0.05em; }
     label.inline {
       display: inline-flex; align-items: center; gap: 6px;
       margin: 0; cursor: pointer;
@@ -206,7 +208,7 @@
     /* terminal-style checkbox */
     input[type=checkbox] {
       appearance: none; -webkit-appearance: none;
-      width: 18px; height: 18px;
+      width: 15px; height: 15px;
       border: 1px solid var(--grn-dim);
       background: transparent;
       position: relative; cursor: pointer;
@@ -217,27 +219,27 @@
       content: 'X';
       position: absolute; inset: 0;
       display: flex; align-items: center; justify-content: center;
-      color: var(--grn); font-size: 16px; line-height: 1;
+      color: var(--grn); font-size: 13px; line-height: 1;
       text-shadow: 0 0 4px var(--grn-glow);
     }
 
-    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-    .hint { color: var(--grn-dim); font-size: 14px; margin-top: 6px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+    .hint { color: var(--grn-dim); font-size: 12px; margin-top: 4px; }
     .answer {
       background: rgba(0,0,0,0.4);
       border: 1px solid var(--grn-dim);
-      padding: 10px 12px;
+      padding: 6px 8px;
       white-space: pre-wrap;
-      max-height: 320px;
+      max-height: 160px;
       overflow: auto;
-      min-height: 50px;
-      font-size: 17px;
+      min-height: 36px;
+      font-size: 14px;
     }
     .answer:empty::before { content: '[ awaiting query ]'; color: var(--grn-dim); }
 
     .stat-row {
       display: flex; justify-content: space-between; gap: 10px;
-      padding: 2px 0; font-size: 16px;
+      padding: 1px 0; font-size: 14px;
       font-variant-numeric: tabular-nums;
     }
     .stat-row span:first-child { color: var(--grn-dim); white-space: nowrap; }
@@ -247,9 +249,9 @@
     .bar {
       background: rgba(0,0,0,0.5);
       border: 1px solid var(--grn-dim);
-      height: 16px;
+      height: 12px;
       overflow: hidden;
-      margin: 3px 0;
+      margin: 2px 0;
       position: relative;
     }
     .bar > div {
@@ -275,62 +277,62 @@
     }
     .meter-label {
       display: flex; justify-content: space-between;
-      font-size: 14px; color: var(--grn-dim);
-      margin-bottom: 2px; letter-spacing: 0.05em;
+      font-size: 12px; color: var(--grn-dim);
+      margin-bottom: 1px; letter-spacing: 0.05em;
     }
 
     /* stacked memory bar */
-    .stack { display: flex; height: 18px; border: 1px solid var(--grn-dim); background: rgba(0,0,0,0.5); overflow: hidden; margin: 4px 0 8px; }
+    .stack { display: flex; height: 14px; border: 1px solid var(--grn-dim); background: rgba(0,0,0,0.5); overflow: hidden; margin: 3px 0 5px; }
     .stack > div { height: 100%; transition: width 0.3s; min-width: 0; }
     .s0 { background: var(--grn); }
     .s1 { background: var(--grn-dim); }
     .s2 { background: var(--amber); }
     .s3 { background: #7a5cff; }
     .s4 { background: rgba(61,255,122,0.25); }
-    .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; color: var(--grn-dim); }
+    .legend { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--grn-dim); }
     .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: middle; }
 
     /* last-turn stage bars */
     .stages { margin-top: 6px; }
-    .stage { display: grid; grid-template-columns: 90px 1fr 64px; gap: 8px; align-items: center; font-size: 14px; }
+    .stage { display: grid; grid-template-columns: 78px 1fr 56px; gap: 6px; align-items: center; font-size: 12px; }
     .stage .n { color: var(--grn-dim); letter-spacing: 0.05em; }
     .stage .v { text-align: right; font-variant-numeric: tabular-nums; }
-    .stage .bar { height: 10px; margin: 0; }
+    .stage .bar { height: 8px; margin: 0; }
     .big {
-      font-size: 44px; line-height: 1; letter-spacing: 0.04em;
-      font-variant-numeric: tabular-nums; margin: 4px 0 2px;
+      font-size: 32px; line-height: 1; letter-spacing: 0.04em;
+      font-variant-numeric: tabular-nums; margin: 2px 0;
     }
-    .big small { font-size: 16px; color: var(--grn-dim); letter-spacing: 0.1em; }
-    .ttfa-hist { display: flex; gap: 3px; align-items: flex-end; height: 34px; margin-top: 6px; }
+    .big small { font-size: 12px; color: var(--grn-dim); letter-spacing: 0.1em; }
+    .ttfa-hist { display: flex; gap: 2px; align-items: flex-end; height: 24px; margin-top: 4px; }
     .ttfa-hist > div { flex: 1; background: var(--grn-dim); min-height: 2px; }
     .ttfa-hist > div.last { background: var(--grn); box-shadow: 0 0 6px var(--grn-glow); }
 
     audio {
-      width: 100%; margin-top: 8px;
+      width: 100%; margin-top: 6px; height: 32px;
       filter: hue-rotate(85deg) saturate(2) brightness(1.1) sepia(0.4);
     }
 
-    .status { font-size: 14px; color: var(--grn-dim); }
+    .status { font-size: 12px; color: var(--grn-dim); }
     .status.ok { color: var(--grn); }
     .status.err { color: var(--red); text-shadow: 0 0 4px rgba(255,80,80,0.6); }
     .status:not(:empty)::before { content: '> '; }
 
-    .cpu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; margin-top: 6px; }
+    .cpu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 3px; margin-top: 4px; }
     .cpu-cell {
       background: rgba(0,0,0,0.4);
       border: 1px solid var(--grn-dim);
-      padding: 3px 2px;
-      font-size: 13px;
+      padding: 1px 2px;
+      font-size: 11px;
       text-align: center;
       font-variant-numeric: tabular-nums;
       letter-spacing: 0.04em;
     }
-    .cpu-cell .v { font-size: 16px; color: var(--grn); }
+    .cpu-cell .v { font-size: 13px; color: var(--grn); }
 
     /* Health dots */
     .dot {
       display: inline-block;
-      width: 10px; height: 10px; border-radius: 50%;
+      width: 8px; height: 8px; border-radius: 50%;
       background: var(--grn-dim);
       box-shadow: 0 0 6px transparent;
       margin-right: 8px; vertical-align: middle;
@@ -340,17 +342,17 @@
     .dot.warn{ background: #f5c518;      box-shadow: 0 0 8px rgba(245,197,24,0.55); }
     .health-row {
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
-      padding: 4px 0; border-bottom: 1px dashed rgba(31,138,63,0.25);
-      font-size: 16px;
+      padding: 2px 0; border-bottom: 1px dashed rgba(31,138,63,0.25);
+      font-size: 14px;
     }
     .health-row:last-child { border-bottom: 0; }
     .health-row .name { color: var(--grn-dim); letter-spacing: 0.06em; white-space: nowrap; }
-    .health-row .detail { color: var(--grn); font-size: 14px; max-width: 65%;
+    .health-row .detail { color: var(--grn); font-size: 12px; max-width: 65%;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* Log tail */
-    .log-tabs { display: flex; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-    .log-tabs button { padding: 2px 10px; font-size: 14px; }
+    .log-tabs { display: flex; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
+    .log-tabs button { padding: 1px 8px; font-size: 12px; }
     .log-tabs button.active {
       background: var(--grn); color: var(--bg);
       text-shadow: none; box-shadow: 0 0 12px var(--grn-glow);
@@ -358,10 +360,10 @@
     .log {
       background: rgba(0,0,0,0.55);
       border: 1px solid var(--grn-dim);
-      padding: 6px 8px;
-      max-height: 280px;
+      padding: 4px 6px;
+      max-height: 200px;
       overflow: auto;
-      font-size: 13px;
+      font-size: 11px;
       line-height: 1.25;
       font-family: 'Share Tech Mono', 'Courier New', monospace;
       white-space: pre;
@@ -370,15 +372,15 @@
     .log .lvl-ERROR, .log .lvl-CRITICAL { color: var(--red); }
     .log .lvl-DEBUG { color: var(--grn-dim); }
 
-    .feed { margin-top: 8px; max-height: 340px; overflow-y: auto; font-size: 13px; line-height: 1.55; }
+    .feed { margin-top: 4px; max-height: 210px; overflow-y: auto; font-size: 12px; line-height: 1.45; }
     .feed .t { color: var(--grn-dim); }
-    .feed .k { display: inline-block; min-width: 76px; color: var(--amber); }
+    .feed .k { display: inline-block; min-width: 66px; color: var(--amber); }
     .feed .k.err { color: var(--red); }
 
     .footer {
-      margin-top: 18px;
+      margin-top: 12px;
       text-align: center;
-      font-size: 14px;
+      font-size: 12px;
       color: var(--grn-dim);
       letter-spacing: 0.15em;
     }
@@ -392,7 +394,7 @@
   <div class="header">
     <!-- Original retro tin-robot mascot — own design, no franchise IP.
          Mid-century atomic-age styling, monochrome phosphor green w/ yellow accents. -->
-    <svg width="84" height="108" viewBox="0 0 100 130" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <svg width="54" height="70" viewBox="0 0 100 130" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
         <radialGradient id="eye">
           <stop offset="0%" stop-color="#bfffd4"/>
@@ -497,7 +499,6 @@
         <div class="stat-row"><span>last heard</span><span id="lsLastTx">—</span></div>
         <div class="stat-row"><span>updated</span><span id="lsUpdated">—</span></div>
       </div>
-      <div class="hint">Published by <code>radio-oracle.service</code> on every transition.</div>
     </div>
 
     <!-- Last turn timing -->
@@ -507,7 +508,6 @@
       <div class="ttfa-hist" id="ttfaHist" title="ttfa of recent turns"></div>
       <div class="stages" id="turnStages"></div>
       <div class="stat-row" style="margin-top:6px"><span>decode</span><span id="turnDecode">—</span></div>
-      <div class="hint">From the <code>timing</code> activity event. Target: under 5 s.</div>
     </div>
 
     <!-- Memory budget -->
@@ -517,23 +517,20 @@
       <div class="stack" id="memStack"></div>
       <div class="legend" id="memLegend"></div>
       <div id="procRows" style="margin-top:8px"></div>
-      <div class="hint">Per-service cgroup memory. Resident + swapped, so a service that has been paged out still shows its true size.</div>
     </div>
 
     <!-- Live activity feed -->
-    <div class="card wide">
+    <div class="card w2">
       <h2>[ * ] LIVE ACTIVITY</h2>
       <div class="stat-row"><span>doing</span><span id="actPhase">—</span></div>
       <div class="stat-row"><span>now playing</span><span id="actMedia">—</span></div>
       <div class="feed" id="actFeed"></div>
-      <div class="hint">Everything the oracle hears, decides, and says — live
-        from <code>radio-oracle.service</code>.</div>
     </div>
 
     <!-- Hardware I/O -->
-    <div class="card wide">
+    <div class="card w2">
       <h2>[ ! ] HARDWARE I/O <span class="tag">every 1 s</span></h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
         <div>
           <div class="meter-label"><span>MOMENTARY (AIN<span id="hwBtnPin">—</span>)</span><span id="hwBtnLevel">—</span></div>
           <div class="stat-row"><span>state</span><span id="hwBtnState">—</span></div>
@@ -551,7 +548,7 @@
           <div class="stat-row"><span>voltage</span><span id="hwPotV">—</span></div>
         </div>
         <div>
-          <div class="meter-label"><span>RGB LED</span><span id="hwLedSwatch" style="display:inline-block;width:18px;height:14px;border:1px solid var(--grn-dim);background:#000;vertical-align:middle"></span></div>
+          <div class="meter-label"><span>RGB LED</span><span id="hwLedSwatch" style="display:inline-block;width:16px;height:12px;border:1px solid var(--grn-dim);background:#000;vertical-align:middle"></span></div>
           <div class="row" style="margin-top:4px">
             <label class="inline"><input type="checkbox" id="hwLedR" /> R</label>
             <label class="inline"><input type="checkbox" id="hwLedG" /> G</label>
@@ -564,7 +561,6 @@
           <span class="status" id="hwLedStatus"></span>
         </div>
       </div>
-      <div class="hint">While the radio runs, readings come from its telemetry (the ADS1115 has one mux register and can't be shared). Its own LED writes will win over yours.</div>
       <div class="status" id="hwInputsStatus"></div>
     </div>
 
@@ -573,7 +569,7 @@
       <h2>[ 1 ] AUDIO INPUT TEST</h2>
       <div class="row">
         <button id="recBtn">[ RECORD ]</button>
-        <span class="status" id="recStatus">Captures until silence detected.</span>
+        <span class="status" id="recStatus"></span>
       </div>
       <audio id="recPlayer" controls></audio>
     </div>
@@ -589,11 +585,10 @@
         <span class="status" id="ttsStatus"></span>
       </div>
       <audio id="ttsPlayer" controls></audio>
-      <div class="hint">Runs Kokoro on the CPU in a worker subprocess (the GPU sidecar belongs to the radio).</div>
     </div>
 
     <!-- Ask -->
-    <div class="card wide">
+    <div class="card w2">
       <h2>[ 3 ] ORACLE QUERY (LLM + RAG)</h2>
       <textarea id="askText" placeholder="State your inquiry..."></textarea>
       <div class="row">
@@ -602,15 +597,14 @@
         <label class="inline"><input type="checkbox" id="speakAnswerChk" /> VOICE RESPONSE</label>
         <span class="status" id="askStatus"></span>
       </div>
-      <label>RESPONSE</label>
-      <div class="answer" id="answer"></div>
+      <div class="answer" id="answer" style="margin-top:6px"></div>
       <div class="hint" id="ragSources"></div>
     </div>
 
     <!-- Stats -->
-    <div class="card wide">
+    <div class="card w2">
       <h2>[ 4 ] VITALS <span class="tag">every 3 s</span></h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
         <div>
           <div class="meter-label"><span>CPU LOAD</span><span id="cpuPct">—</span></div>
           <div class="bar"><div id="cpuBar" style="width:0%"></div></div>
@@ -641,7 +635,7 @@
     </div>
 
     <!-- Logs -->
-    <div class="card wide">
+    <div class="card w2">
       <h2>[ 5 ] TELEMETRY LOG</h2>
       <div class="log-tabs">
         <button id="tabDiag" class="active">[ DIAG ]</button>
