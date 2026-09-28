@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import functools
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +25,19 @@ _CHAPTER_RE = re.compile(
     r"^(?:chapter|book|part|act|section|canto)\s+[\dIVXLCDMivxlcdm]+",
     re.IGNORECASE | re.MULTILINE,
 )
+
+
+def _synchronized(method):
+    """Serialize access to the shared sqlite connection: the reader loop
+    runs in a worker thread (asyncio.to_thread) while buttons/voice act
+    from the event-loop thread. Reentrant, so methods may call each other."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 @dataclass
@@ -49,10 +64,14 @@ class Library:
     def __init__(self, db_path: Path | None = None) -> None:
         self._db_path = db_path or settings.books_db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path))
+        # check_same_thread=False + _lock: created on the event-loop thread,
+        # used from the reader worker thread (2026-09-27 crash in book mode).
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
+    @_synchronized
     def _init_schema(self) -> None:
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS books (
@@ -87,14 +106,17 @@ class Library:
 
     # ---------------------------------------------------------------- query
 
+    @_synchronized
     def list_books(self) -> list[Book]:
         rows = self._conn.execute("SELECT * FROM books ORDER BY title").fetchall()
         return [Book(**dict(r)) for r in rows]
 
+    @_synchronized
     def get_book(self, book_id: int) -> Book | None:
         row = self._conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
         return Book(**dict(row)) if row else None
 
+    @_synchronized
     def search(self, query: str) -> list[Book]:
         """Title/author search — FTS5 (voice-friendly, word-based) with a
         LIKE fallback for substrings and for SQLite builds without FTS5."""
@@ -110,6 +132,7 @@ class Library:
         ).fetchall()
         return [Book(**dict(r)) for r in rows]
 
+    @_synchronized
     def _search_fts(self, query: str) -> list[Book]:
         terms = re.findall(r"\w+", query)
         if not terms:
@@ -129,6 +152,7 @@ class Library:
             logger.debug(f"FTS search unavailable ({e}); falling back to LIKE")
             return []
 
+    @_synchronized
     def _ensure_fts(self) -> None:
         """Create and populate the FTS index on first use (one-time cost)."""
         self._conn.execute(
@@ -144,6 +168,7 @@ class Library:
             self._conn.execute("INSERT INTO books_fts(books_fts) VALUES('rebuild')")
             self._conn.commit()
 
+    @_synchronized
     def get_chapter(self, book_id: int, chapter_idx: int) -> Chapter | None:
         row = self._conn.execute(
             "SELECT * FROM chapters WHERE book_id = ? AND chapter_idx = ?",
@@ -163,6 +188,7 @@ class Library:
             text=full_text,
         )
 
+    @_synchronized
     def get_paragraph(self, book_id: int, chapter_idx: int, para_idx: int) -> str | None:
         row = self._conn.execute(
             "SELECT text FROM paragraphs WHERE book_id = ? AND chapter_idx = ? AND para_idx = ?",
@@ -170,10 +196,12 @@ class Library:
         ).fetchone()
         return row["text"] if row else None
 
+    @_synchronized
     def count_books(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) AS cnt FROM books").fetchone()
         return row["cnt"]
 
+    @_synchronized
     def sample_authors(self, n: int = 5) -> list[str]:
         rows = self._conn.execute(
             "SELECT DISTINCT author FROM books WHERE author != '' ORDER BY RANDOM() LIMIT ?",
@@ -181,6 +209,7 @@ class Library:
         ).fetchall()
         return [r["author"] for r in rows]
 
+    @_synchronized
     def get_paragraph_count(self, book_id: int, chapter_idx: int) -> int:
         row = self._conn.execute(
             "SELECT COUNT(*) as cnt FROM paragraphs WHERE book_id = ? AND chapter_idx = ?",
@@ -190,6 +219,7 @@ class Library:
 
     # ---------------------------------------------------------------- ingest
 
+    @_synchronized
     def index_directory(self, books_dir: Path | None = None) -> int:
         """Scan a directory for .txt files and index them. Returns count added."""
         d = books_dir or settings.books_path
@@ -211,10 +241,12 @@ class Library:
         logger.info(f"Indexed {added} new books from {d} ({len(txt_files)} total files)")
         return added
 
+    @_synchronized
     def _already_indexed(self, path: str) -> bool:
         row = self._conn.execute("SELECT id FROM books WHERE path = ?", (path,)).fetchone()
         return row is not None
 
+    @_synchronized
     def _index_txt(self, path: Path) -> None:
         """Parse a plain-text book and insert into the database."""
         raw = path.read_text(encoding="utf-8", errors="replace")
@@ -260,6 +292,7 @@ class Library:
         self._conn.commit()
         logger.info(f"Indexed: {title} — {len(chapters)} chapters, {total_paras} paragraphs")
 
+    @_synchronized
     def close(self) -> None:
         self._conn.close()
 
