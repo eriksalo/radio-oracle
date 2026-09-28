@@ -23,7 +23,7 @@ Environment=ORACLE_TTS_PROVIDER=CUDAExecutionProvider
 # Arena *cap*, not a reservation (kSameAsRequested grows on demand). 512
 # was too small: the LSTM node failed to allocate on longer units
 # (harness crash 2026-09-27), and the fallback is slow CPU synthesis.
-Environment=ORACLE_TTS_GPU_MEM_MB=768
+Environment=ORACLE_TTS_GPU_MEM_MB=1024
 # Belt and braces: never let kokoro-onnx pick TensorRT on its own.
 Environment=ONNX_PROVIDER=CUDAExecutionProvider
 # GPU device nodes are group video/render (oracle was added 2026-09-27).

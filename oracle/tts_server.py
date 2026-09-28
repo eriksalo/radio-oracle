@@ -39,6 +39,10 @@ MODEL = os.environ.get("ORACLE_TTS_MODEL_PATH", "models/kokoro-v1.0.fp16.onnx")
 VOICES = os.environ.get("ORACLE_TTS_VOICES_PATH", "models/voices-v1.0.bin")
 PROVIDER = os.environ.get("ORACLE_TTS_PROVIDER", "CUDAExecutionProvider")
 GPU_MEM_MB = int(os.environ.get("ORACLE_TTS_GPU_MEM_MB", "0"))
+# kSameAsRequested fragmented the arena: after three differently sized
+# units the fourth failed to allocate under the cap even though each unit
+# synthesized fine on its own (2026-09-28). kNextPowerOfTwo reuses blocks.
+ARENA_STRATEGY = os.environ.get("ORACLE_TTS_ARENA_STRATEGY", "kNextPowerOfTwo")
 
 _lock = threading.Lock()
 _kokoro = None
@@ -63,7 +67,7 @@ def _load() -> None:
         opts: dict[str, object] = {
             "device_id": 0,
             "cudnn_conv_algo_search": "HEURISTIC",
-            "arena_extend_strategy": "kSameAsRequested",
+            "arena_extend_strategy": ARENA_STRATEGY,
         }
         if GPU_MEM_MB:
             opts["gpu_mem_limit"] = GPU_MEM_MB * 1024 * 1024

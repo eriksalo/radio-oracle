@@ -33,11 +33,16 @@ def main() -> None:
     text = describe_device(None)
     units = speech_units(text)
     print(f"{len(text)} chars → {len(units)} units, max {max(len(u.split()) for u in units)} words")
-    t = time.monotonic()
-    say(tts, text)
-    print(f"spoke {len(played)} units, {sum(played):.1f}s of audio, in {time.monotonic() - t:.1f}s wall")
-    silent = [p for p in played if p <= 0.35]
-    print(f"silent (failed) units: {len(silent)}; warnings: {len(warnings)}")
+    for rnd in range(3):
+        played.clear()
+        t = time.monotonic()
+        say(tts, text)
+        silent = [p for p in played if p <= 0.35]
+        print(
+            f"round {rnd + 1}: spoke {len(played)} units, {sum(played):.1f}s of audio, "
+            f"in {time.monotonic() - t:.1f}s wall; failed units: {len(silent)}"
+        )
+    print(f"warnings: {len(warnings)}")
     for w in warnings[:3]:
         print("  ", w.strip()[:160])
 
