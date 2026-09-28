@@ -292,6 +292,8 @@ class OracleSettings(BaseSettings):
     # request is long. 60 (~22 s of speech) overflowed the GPU sidecar's
     # 1 GB CUDA arena on the Jetson; 30 (~11 s) fits.
     reading_unit_max_words: int = 30
+    # Units synthesized ahead of playback in the reader pipeline.
+    reading_prefetch_units: int = 3
     reading_chapter_pause: float = 2.0  # seconds between chapters
 
     # Mode

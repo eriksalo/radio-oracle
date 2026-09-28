@@ -220,7 +220,11 @@ class Reader:
         self,
         should_stop: Callable[[], bool] | None = None,
     ) -> None:
-        """Read paragraphs in a loop until stopped or book ends.
+        """Read until stopped or the book ends: one continuous audio
+        pipeline across paragraphs *and* chapters (a producer thread keeps
+        the next units synthesized while the current one plays), so there
+        is no per-paragraph start-up gap. Pause/stop/jump end the
+        pipeline; it restarts from the saved position.
 
         Args:
             should_stop: callback returning True to interrupt reading
@@ -238,14 +242,114 @@ class Reader:
                     self._save_bookmark()
                     return
 
-                text = self.read_paragraph()
-                if text is None:
-                    break
-
-                # Pause between paragraphs
-                time.sleep(settings.reading_paragraph_pause)
+                self._run_pipeline()
         finally:
             self._should_stop = None
+
+    def _run_pipeline(self) -> None:
+        """Speak from the current position until interrupted, jumped, or the
+        book ends. The producer walks paragraphs/chapters ahead of playback
+        without touching ``self._position``; the position (and bookmark)
+        only advance when a paragraph has fully played."""
+        import queue
+        import threading
+
+        from oracle.audio import play_audio
+
+        tts = self._get_tts()
+        current = self._position
+        if current is None:
+            return
+        q: queue.Queue = queue.Queue(maxsize=settings.reading_prefetch_units)
+        stop_flag = threading.Event()
+
+        def produce() -> None:
+            pos = current
+            try:
+                while not stop_flag.is_set():
+                    text = self._library.get_paragraph(pos.book_id, pos.chapter_idx, pos.para_idx)
+                    if text is None:
+                        nxt = pos.chapter_idx + 1
+                        if nxt >= pos.total_chapters:
+                            q.put(("end", None, None))
+                            return
+                        label = self._library.chapter_label(pos.book_id, nxt) or f"chapter {nxt}"
+                        q.put(("chapter", nxt, tts.synthesize(f"Chapter: {label}")))
+                        pos = ReadingPosition(pos.book_id, nxt, 0, pos.total_chapters)
+                        continue
+                    sentences = [x.strip() for x in _SENTENCE_SPLIT_RE.split(text) if x.strip()]
+                    units = _group_units(sentences, settings.reading_unit_max_words) or [text]
+                    for i, unit in enumerate(units):
+                        if stop_flag.is_set():
+                            return
+                        try:
+                            audio = tts.synthesize(unit)
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(f"Reader TTS failed on a unit: {e}")
+                            continue
+                        q.put(("unit", pos if i == len(units) - 1 else None, audio))
+                    pos = ReadingPosition(
+                        pos.book_id, pos.chapter_idx, pos.para_idx + 1, pos.total_chapters
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Reader producer failed: {e}")
+            finally:
+                q.put(("done", None, None))
+
+        worker = threading.Thread(target=produce, name="reader-tts", daemon=True)
+        worker.start()
+        try:
+            while True:
+                kind, payload, audio = q.get()
+                if kind == "done":
+                    break
+                if kind == "end":
+                    self.stop(finished=True)
+                    break
+                if self._interrupted() or self._position is not current:
+                    break  # paused/stopped, or jumped (goto/next chapter)
+                if kind == "chapter":
+                    nxt = payload
+                    logger.info(
+                        f"Chapter {nxt}: {self._library.chapter_label(current.book_id, nxt)}"
+                    )
+                    from oracle.activity import emit
+
+                    emit(
+                        "reading",
+                        chapter=nxt,
+                        chapter_title=self._library.chapter_label(current.book_id, nxt),
+                    )
+                    play_audio(audio, tts.sample_rate, should_abort=self._interrupted)
+                    if self._interrupted():
+                        break
+                    current = ReadingPosition(current.book_id, nxt, 0, current.total_chapters)
+                    self._position = current
+                    self._save_bookmark()
+                    time.sleep(settings.reading_chapter_pause)
+                    continue
+                play_audio(audio, tts.sample_rate, should_abort=self._interrupted)
+                if self._interrupted():
+                    break
+                if payload is not None:
+                    # Paragraph fully played: advance and bookmark.
+                    current = ReadingPosition(
+                        payload.book_id,
+                        payload.chapter_idx,
+                        payload.para_idx + 1,
+                        payload.total_chapters,
+                    )
+                    self._position = current
+                    self._save_bookmark()
+                    time.sleep(settings.reading_paragraph_pause)
+        finally:
+            stop_flag.set()
+            try:
+                while q.get_nowait()[0] != "done":
+                    pass
+            except queue.Empty:
+                pass
+            worker.join(timeout=60)
 
     def _advance_chapter(self) -> bool:
         """Move to the first paragraph of the next chapter. Returns False if at end."""

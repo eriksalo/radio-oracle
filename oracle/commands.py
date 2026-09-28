@@ -421,10 +421,11 @@ async def dispatch_radio_command(
         return DispatchResult(here)
     logger.info(f"Voice command ({context}): {text!r}")
 
-    # Who is this? (~80 ms; asks "Is this Erik?" once per session if unsure.)
-    from oracle.speaker import check_in
+    # Who is this? Silent (~100 ms); an unknown voice gets asked *after*
+    # the command completes (see the end of this function), never mid-turn.
+    from oracle.speaker import maybe_ask, observe
 
-    await check_in(vc, audio_in, reader=reader)
+    await observe(vc, audio_in, reader=reader)
 
     # 3. Classify.
     action = _keyword_match(text)
@@ -460,6 +461,8 @@ async def dispatch_radio_command(
         # channel resume. voice_turn inherits this timer and finishes it.
         timer.label = "question"
         await _question_turns(vc, text, leds, should_abort)
+        if context == "music" and not aborted():
+            await maybe_ask(vc)
         return DispatchResult(here)
 
     if action == "mode_librarian":
@@ -480,7 +483,7 @@ async def dispatch_radio_command(
     if leds is not None:
         leds.set_mode("speaking")
     try:
-        return _do_action(
+        result = _do_action(
             action,
             query,
             player,
@@ -495,6 +498,10 @@ async def dispatch_radio_command(
         timer.mark("act")
         timer.finish()
         timing.clear()
+    # A book resumes right after its command; ask on the music side only.
+    if context == "music" and result.next_mode == "radio" and action != "none" and not aborted():
+        await maybe_ask(vc)
+    return result
 
 
 async def _listen_once(vc: VoiceContext, onset_timeout: float) -> str | None:

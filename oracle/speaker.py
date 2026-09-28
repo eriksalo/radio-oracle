@@ -103,6 +103,11 @@ class SpeakerSession:
     enroll_pending: int = 0
     last_score: float = 0.0
     identified: bool = False
+    # Set by observe() when the voice is unknown: ask at the next natural
+    # moment (after the command completes), not in the middle of it.
+    pending_candidate: str | None = None
+    pending_audio: np.ndarray | None = None
+    pending: bool = False
 
 
 def _long_enough(audio: np.ndarray) -> bool:
@@ -116,10 +121,14 @@ async def _speak(vc: VoiceContext, text: str) -> None:
 
 
 async def _ask(vc: VoiceContext, prompt: str) -> str:
-    """Say *prompt*, listen for a short answer. "" on silence/abort."""
+    """Say *prompt*, chime, listen for a short answer. "" on silence/abort."""
     from oracle.stt import listen
 
     await _speak(vc, prompt)
+    if settings.wake_chime:
+        from oracle.chime import play_wake_chime
+
+        await asyncio.to_thread(play_wake_chime)
     try:
         _audio, text = await asyncio.to_thread(
             listen, vc.stt_fast, onset_timeout=settings.speaker_answer_timeout
@@ -140,9 +149,10 @@ def apply_user(vc: VoiceContext, name: str, reader=None) -> None:
         reader.set_user(name)
 
 
-async def check_in(vc: VoiceContext, audio: np.ndarray, reader=None, allow_ask: bool = True) -> str:
-    """Identify the speaker of *audio* (a command just transcribed) and, if
-    unknown and not yet asked this session, ask. Returns the user in effect."""
+async def observe(vc: VoiceContext, audio: np.ndarray, reader=None) -> str:
+    """Identify the speaker of *audio* silently. A recognised voice switches
+    the session; an unknown one is remembered for ``maybe_ask``. Returns
+    the user in effect."""
     sp = vc.speaker
     sid = vc.speaker_id
     if sp is None or sid is None or not settings.speaker_id_enabled or not _long_enough(audio):
@@ -165,18 +175,35 @@ async def check_in(vc: VoiceContext, audio: np.ndarray, reader=None, allow_ask: 
         if name != sp.user or not sp.identified:
             apply_user(vc, name, reader)
             logger.info(f"Speaker identified: {name} ({score:.2f})")
+        sp.pending = False
         return sp.user
 
-    if sp.asked or not allow_ask:
-        return sp.user
+    if not sp.asked and not sp.pending:
+        nobody_enrolled = sid.users.voiceprint_count(settings.default_user) == 0
+        candidate = None
+        if name is not None and score >= settings.speaker_ask_threshold:
+            candidate = name
+        elif nobody_enrolled:
+            candidate = settings.default_user
+        sp.pending = True
+        sp.pending_candidate = candidate
+        sp.pending_audio = audio
+    return sp.user
+
+
+async def maybe_ask(vc: VoiceContext, reader=None) -> str:
+    """If observe() flagged an unknown voice, ask now — once per session."""
+    sp = vc.speaker
+    sid = vc.speaker_id
+    if sp is None or sid is None or not sp.pending or sp.asked:
+        return sp.user if sp is not None else settings.default_user
     sp.asked = True
-
-    nobody_enrolled = sid.users.voiceprint_count(settings.default_user) == 0
-    candidate = None
-    if name is not None and score >= settings.speaker_ask_threshold:
-        candidate = name
-    elif nobody_enrolled:
-        candidate = settings.default_user
+    sp.pending = False
+    audio = sp.pending_audio
+    candidate = sp.pending_candidate
+    sp.pending_audio = None
+    if audio is None:
+        return sp.user
 
     if candidate is not None:
         answer = await _ask(vc, f"Is this {candidate.title()}?")
@@ -201,3 +228,11 @@ async def check_in(vc: VoiceContext, audio: np.ndarray, reader=None, allow_ask: 
     apply_user(vc, new_name, reader)
     await _speak(vc, f"Nice to meet you, {new_name.title()}.")
     return sp.user
+
+
+async def check_in(vc: VoiceContext, audio: np.ndarray, reader=None, allow_ask: bool = True) -> str:
+    """observe() and, when allowed, maybe_ask() right away."""
+    user = await observe(vc, audio, reader)
+    if allow_ask:
+        user = await maybe_ask(vc, reader)
+    return user

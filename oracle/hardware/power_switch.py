@@ -11,6 +11,7 @@ JP 6.2.x.
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 
 from loguru import logger
@@ -18,6 +19,11 @@ from loguru import logger
 from oracle.hardware.switch_adc import make_power_switch_switch
 
 _DEBOUNCE_S = 0.05
+# A new state must hold for this long before it counts. The ADS1115 is
+# shared with the pot and the button (mux switching); a single stray
+# sample read "off" and dropped the radio into standby mid-book
+# (2026-09-28: reader -> radio -> standby -> radio within a second).
+_CONFIRM_S = 0.4
 
 
 class PowerSwitch:
@@ -72,10 +78,17 @@ class PowerSwitch:
                 self._stop.wait(self._poll)
                 continue
             if new_state != self._is_on:
-                self._stop.wait(_DEBOUNCE_S)
-                if self._stop.is_set():
-                    return
-                if self._read() == new_state:
+                # Confirm: every sample over _CONFIRM_S must agree.
+                deadline = time.monotonic() + _CONFIRM_S
+                confirmed = True
+                while time.monotonic() < deadline:
+                    self._stop.wait(_DEBOUNCE_S)
+                    if self._stop.is_set():
+                        return
+                    if self._read() != new_state:
+                        confirmed = False
+                        break
+                if confirmed:
                     self._is_on = new_state
                     logger.info(f"Power switch: {'on' if new_state else 'off'}")
                     for cb in list(self._listeners):
