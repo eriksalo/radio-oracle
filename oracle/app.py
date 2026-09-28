@@ -249,10 +249,10 @@ class OracleApp:
             self._pending_book_chapter = result.reader_chapter
             self._enter(result.next_mode)
             return
-        self.leds.set_mode("radio")
-        if result is not None and not result.resume_channel:
-            # "pause" / "quiet" at power-on: hold the music until asked for.
-            self._music_held = True
+        # Music only when asked for: otherwise blink blue and wait for the
+        # wake word or the button.
+        self._music_held = not (result is not None and result.starts_music)
+        self.leds.set_mode("waiting" if self._music_held else "radio")
 
     async def _radio_wait(self, voice_ctx) -> None:
         """Wait for wake word, button, or power-off in radio mode."""
@@ -314,9 +314,10 @@ class OracleApp:
                         self._wakeword.unmute()
 
                 if result.next_mode == "radio":
-                    self.leds.set_mode("radio")
-                    if result.resume_channel:
+                    if result.starts_music:
                         self._music_held = False
+                    self.leds.set_mode("waiting" if self._music_held else "radio")
+                    if result.resume_channel and not self._music_held:
                         self._resume_music()
                 else:
                     self._pending_book_query = result.reader_query
@@ -653,7 +654,7 @@ class OracleApp:
             self._stop_music()
             self.leds.set_mode("off")
         elif state == "radio":
-            self.leds.set_mode("radio")
+            self.leds.set_mode("waiting" if self._music_held else "radio")
             if old == "reader":
                 self._resume_music()
         elif state == "reader":
@@ -686,6 +687,13 @@ class OracleApp:
                 elif self._state == "reader":
                     self._enter("radio")
             elif evt.kind == "short" and self._state == "radio":
+                if self._music_held:
+                    # A press while waiting quietly = "put the music on".
+                    self._pending_short_press = None
+                    self._music_held = False
+                    self.leds.set_mode("radio")
+                    self._ensure_music()
+                    continue
                 if (
                     self._pending_short_press is not None
                     and now - self._pending_short_press < self._double_press_window

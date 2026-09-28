@@ -17,7 +17,7 @@ from loguru import logger
 
 from config.settings import settings
 
-Mode = Literal["off", "radio", "librarian", "reader", "thinking", "speaking", "error"]
+Mode = Literal["off", "radio", "librarian", "reader", "thinking", "speaking", "error", "waiting"]
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,9 @@ MODE_COLORS: dict[str, Color] = {
     "thinking": Color(False, False, True),  # blue — blinks
     "speaking": Color(False, False, True),  # blue — solid
     "error": Color(True, False, False),  # red — blinks
+    "waiting": Color(
+        False, False, True
+    ),  # blue — slow blink: on, silent, listening for the wake word
 }
 
 # Blink full period (seconds) per mode; absent = solid. Thinking blinks
@@ -44,6 +47,7 @@ MODE_COLORS: dict[str, Color] = {
 _BLINK_PERIOD_S: dict[str, float] = {
     "error": 0.6,
     "thinking": 0.5,
+    "waiting": 2.0,
 }
 
 

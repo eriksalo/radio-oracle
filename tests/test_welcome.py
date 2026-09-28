@@ -53,7 +53,7 @@ async def test_input_right_after_chime_dispatches_without_prompts():
 async def test_silence_then_greeting_then_options_then_music():
     h = _Harness(["", "", ""])
     out = await welcome.run_welcome(h.speak, h.chime, h.listen, h.dispatch)
-    assert h.spoken == [welcome.GREETING, welcome.OPTIONS, welcome.FALLBACK]
+    assert h.spoken == [welcome.GREETING, welcome.OPTIONS]  # then silence: blink and wait
     assert h.waits == [7.0, 5.0, 5.0] and h.chimes == 3
     assert out.heard is None and out.dispatched is None and out.steps == 2
 
@@ -74,7 +74,7 @@ async def test_power_off_aborts_quietly():
         h.speak, h.chime, h.listen, h.dispatch, should_abort=lambda: next(flips)
     )
     assert h.spoken == [welcome.GREETING]  # second step started, then power went off
-    assert out.dispatched is None and welcome.FALLBACK not in h.spoken
+    assert out.dispatched is None
 
 
 @pytest.mark.parametrize(
@@ -157,3 +157,42 @@ async def test_dispatch_accepts_pre_text(monkeypatch):
         None, None, _VC(), pre_text="tell me about this device", pre_audio=None
     )
     assert out.next_mode == "radio" and spoken == ["I'm the Librarian."]
+
+
+@pytest.mark.parametrize(
+    "action,starts",
+    [
+        ("music_on", True),
+        ("play", True),
+        ("next", True),
+        ("resume", True),
+        ("pause", False),
+        ("stop", False),
+        ("none", False),
+    ],
+)
+def test_dispatch_result_marks_explicit_music_requests(monkeypatch, action, starts):
+    monkeypatch.setattr(commands, "_speak", lambda *a, **k: None)
+    monkeypatch.setattr(commands, "_play_query", lambda p, c, q: "Pink Floyd")
+
+    class P:
+        def next(self):
+            pass
+
+        def next_album(self):
+            pass
+
+        def resume(self):
+            pass
+
+        def pause(self):
+            pass
+
+        def stop(self):
+            pass
+
+    class VC:
+        tts = None
+
+    out = commands._do_action(action, "pink floyd", P(), object(), VC(), None)
+    assert out.starts_music is starts

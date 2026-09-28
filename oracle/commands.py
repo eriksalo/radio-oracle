@@ -59,6 +59,9 @@ class DispatchResult:
     # A chapter reference to apply once the book is open ("go to chapter
     # three" said while music plays → resume the current book there).
     reader_chapter: str | None = None
+    # The user explicitly asked for music (play / music on / next…): the
+    # only thing that lifts the power-on "wait quietly" hold.
+    starts_music: bool = False
 
 
 _LLM_SYSTEM_PROMPT = """You are a strict voice-command parser for a radio. \
@@ -751,14 +754,14 @@ def _do_action(
     if action == "music_on":
         if context == "book":
             _speak(vc, "Back to the music.", should_abort)
-            return DispatchResult("radio", resume_channel=False)
+            return DispatchResult("radio", resume_channel=False, starts_music=True)
         if player is not None:
             player.resume()
-        return DispatchResult("radio")
+        return DispatchResult("radio", starts_music=True)
     if action == "play" and context == "book":
         # A specific music request mid-book: bookmark and switch.
         _speak(vc, "Switching to music.", should_abort)
-        return DispatchResult("radio", resume_channel=False, play_query=query)
+        return DispatchResult("radio", resume_channel=False, play_query=query, starts_music=True)
 
     # ---- exploration ------------------------------------------------------
     if action == "list_music":
@@ -861,4 +864,4 @@ def _do_action(
     else:
         # "none" or unknown — quietly drop back to the channel.
         logger.debug(f"No-op action {action!r}")
-    return DispatchResult("radio")
+    return DispatchResult("radio", starts_music=action in ("next", "next_album", "resume", "play"))

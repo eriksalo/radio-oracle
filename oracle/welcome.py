@@ -8,7 +8,8 @@ Instead of going straight to music when the radio is switched on:
   3. nothing → the four options (ask a question / play or explore the
      music / read or explore the books / about this device), chime,
      listen ``welcome_third_wait`` seconds;
-  4. nothing → "I'll put some music on." and the radio behaves as before.
+  4. nothing → say nothing more; the LED blinks blue slowly and the radio
+     waits for the wake word or the button. Music only starts when asked.
 
 Anything heard at any step goes through the normal command dispatcher.
 The flow takes its side effects (speak, listen, dispatch) as callables so
@@ -30,7 +31,6 @@ OPTIONS = (
     "You can ask me a question, play or explore the music, "
     "read or explore the books, or ask me about this device."
 )
-FALLBACK = "I'll put some music on."
 
 
 @dataclass
@@ -76,6 +76,4 @@ async def run_welcome(
             out.heard = text
             out.dispatched = await dispatch(text, audio)
             return out
-    if not aborted():
-        await speak(FALLBACK)
     return out
