@@ -536,13 +536,19 @@ class _HardwareInputs:
     """
 
     def __init__(self) -> None:
-        from oracle.hardware.switch_adc import (
-            make_action_button_switch,
-            make_power_switch_switch,
-        )
+        # Direct one-shot readers, NO poller: the app's factories
+        # (make_action_button_switch / make_power_switch_switch) register a
+        # SharedAdcPoller that auto-starts a background thread and polls the
+        # chip for the life of the process. In the dashboard that thread
+        # interleaved with the radio's own poller for hours — phantom button
+        # presses cutting the radio off mid-sentence (2026-09-28).
+        from config.settings import settings
+        from oracle.hardware.switch_adc import DigitalSwitch, shared_adc
 
-        self._button = make_action_button_switch()
-        self._power = make_power_switch_switch()
+        self._button = DigitalSwitch(
+            channel=settings.action_button_ads1115_channel, adc=shared_adc()
+        )
+        self._power = DigitalSwitch(channel=settings.power_switch_ads1115_channel, adc=shared_adc())
 
     def read(self) -> dict:
         if not self._button.available:
