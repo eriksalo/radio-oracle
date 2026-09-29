@@ -561,6 +561,10 @@
           <span class="status" id="hwLedStatus"></span>
         </div>
       </div>
+      <div class="row" style="margin-top:6px">
+        <label class="inline"><input type="checkbox" id="hwDirectChk" /> DIRECT ADS1115 READS</label>
+        <span class="tag">only with radio-oracle stopped; off after every restart</span>
+      </div>
       <div class="status" id="hwInputsStatus"></div>
     </div>
 
@@ -1049,13 +1053,27 @@ poll(async () => {
       setStatus(st, 'GPIO unavailable: ' + (j.detail || ''), 'err');
     } else if (j.via_app) {
       setStatus(st, 'via radio-oracle telemetry' + (j.stale_s ? ` (stale ${j.stale_s}s)` : ''));
+    } else if (j.direct === false) {
+      setStatus(st, 'radio-oracle stopped; direct reads are off (tick the box to read the chip)');
     } else {
-      setStatus(st, 'direct ADS1115 reads');
+      setStatus(st, 'direct ADS1115 reads', 'ok');
     }
   } catch (e) {
     setStatus(st, 'poll error: ' + e.message, 'err');
   }
 }, 1000);
+$('hwDirectChk').onchange = async () => {
+  const chk = $('hwDirectChk');
+  try {
+    const resp = await postJSON('/api/hardware/direct', { enabled: chk.checked });
+    const j = await resp.json();
+    chk.checked = !!j.enabled;
+  } catch (e) {
+    chk.checked = !chk.checked;
+    setStatus($('hwInputsStatus'), 'direct toggle error: ' + e.message, 'err');
+  }
+};
+fetch('/api/hardware/direct').then(r => r.json()).then(j => { $('hwDirectChk').checked = !!j.enabled; }).catch(() => {});
 function updateLedSwatch() {
   const r = $('hwLedR').checked, g = $('hwLedG').checked, b = $('hwLedB').checked;
   // Common-anode digital: each channel is on/off only (polarity handled server-side).

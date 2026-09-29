@@ -615,6 +615,29 @@ class LEDRequest(BaseModel):
 
 _proc_check: dict = {"ts": 0.0, "alive": False}
 
+# Direct ADS1115 reads from this process are OFF unless switched on from
+# the dashboard (and reset to off on every restart). Even a one-shot read
+# interleaves on the chip's single mux register with the radio's poller;
+# the radio's telemetry is the normal source, this is only for bench work
+# with the radio stopped.
+_direct_hw: dict = {"enabled": False}
+
+
+class DirectHwRequest(BaseModel):
+    enabled: bool = False
+
+
+@app.get("/api/hardware/direct")
+def hw_direct_get() -> dict:
+    return {"enabled": _direct_hw["enabled"]}
+
+
+@app.post("/api/hardware/direct")
+def hw_direct_set(req: DirectHwRequest) -> dict:
+    _direct_hw["enabled"] = bool(req.enabled)
+    logger.info(f"diag: direct ADS1115 reads {'ON' if req.enabled else 'off'}")
+    return {"enabled": _direct_hw["enabled"]}
+
 
 def _radio_process_running() -> bool:
     """Is the radio app itself running? Decided from the process table, not
@@ -684,7 +707,18 @@ def hw_inputs() -> dict:
             "button": {"channel": "-", "pressed": False},
         }
 
+    if not _direct_hw["enabled"]:
+        # Radio not running and direct reads not switched on: hands off.
+        return {
+            "available": True,
+            "via_app": False,
+            "direct": False,
+            "pot": {"available": False, "detail": "direct reads off"},
+            "switch": {"channel": "-", "on": None},
+            "button": {"channel": "-", "pressed": False},
+        }
     inputs = _get_inputs().read()
+    inputs["direct"] = True
     pot = _get_pot()
     if not pot.available:
         inputs["pot"] = {"available": False, "detail": pot.error or "unavailable"}

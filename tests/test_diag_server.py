@@ -96,3 +96,56 @@ def test_cgroup_memory_parses_v2_files(tmp_path, monkeypatch) -> None:
         "swap_mb": 1.0,
     }
     assert server._cgroup_memory("missing") == {"unit": "missing", "present": False}
+
+
+def test_hardware_inputs_never_touch_chip_unless_switched_on(
+    client: TestClient, monkeypatch
+) -> None:
+    """Radio stopped + direct reads off (the default) → no ADS1115 access.
+    Switching it on from the dashboard opens the one-shot readers."""
+    from oracle.diag import server
+
+    monkeypatch.setattr(server, "read_state", lambda: None)
+    monkeypatch.setattr(server, "_radio_process_running", lambda: False)
+    touched = []
+
+    class _Inputs:
+        def read(self):
+            touched.append("adc")
+            return {"available": True, "button": None, "switch": None}
+
+    class _Pot:
+        available = False
+        error = "n/a"
+
+    monkeypatch.setattr(server, "_get_inputs", lambda: _Inputs())
+    monkeypatch.setattr(server, "_get_pot", lambda: _Pot())
+    monkeypatch.setitem(server._direct_hw, "enabled", False)
+
+    j = client.get("/api/hardware/inputs").json()
+    assert j["direct"] is False and j["via_app"] is False and touched == []
+    assert client.get("/api/hardware/direct").json() == {"enabled": False}
+
+    assert client.post("/api/hardware/direct", json={"enabled": True}).json() == {"enabled": True}
+    j = client.get("/api/hardware/inputs").json()
+    assert j["direct"] is True and touched == ["adc"]
+
+    # The radio coming back always wins, whatever the toggle says.
+    monkeypatch.setattr(server, "_radio_process_running", lambda: True)
+    j = client.get("/api/hardware/inputs").json()
+    assert j["via_app"] is True and touched == ["adc"]
+    client.post("/api/hardware/direct", json={"enabled": False})
+
+
+def test_hardware_inputs_readers_have_no_poller() -> None:
+    """The dashboard's fallback readers must be plain one-shot DigitalSwitch
+    instances — never the app factories, which auto-start a SharedAdcPoller
+    thread that polls the chip for the life of the process."""
+    import inspect
+
+    from oracle.diag import server
+
+    src = inspect.getsource(server._HardwareInputs.__init__)
+    code = "\n".join(line for line in src.splitlines() if not line.strip().startswith("#"))
+    assert "make_action_button_switch" not in code and "make_power_switch_switch" not in code
+    assert "shared_adc_poller" not in code and "DigitalSwitch(" in code
