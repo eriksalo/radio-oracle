@@ -24,7 +24,7 @@ There are three major sections:
 | USB keyboard + HDMI monitor | For initial setup only. The Oracle runs headless after. |
 | Ethernet cable or WiFi adapter | For initial setup and downloading. Not needed after. |
 | PTT momentary button | Any normally-open momentary push button. Wired to GPIO. |
-| LEDs (3x) + resistors (3x 330ohm) | Status indicators: idle (green), listening (blue), thinking (yellow) |
+| RGB LED (common anode) + resistors (3x 330ohm) | Status indicator: colour = questions (blue) / music (green) / books (purple) / waiting (white), pattern = listening / thinking / speaking — see `docs/led-behaviour.md` |
 | Jumper wires | For GPIO connections |
 | Power supply | The Jetson kit includes one (19V barrel jack or USB-C depending on revision) |
 
@@ -235,9 +235,9 @@ The PTT button and status LEDs connect to the Jetson's 40-pin GPIO header.
 | Function | GPIO Pin | Physical Pin | Notes |
 |----------|----------|-------------|-------|
 | PTT Button | GPIO 18 | Pin 12 | Connect between pin 12 and GND (pin 6). Uses internal pull-up. |
-| LED: Idle | GPIO 23 | Pin 16 | Green LED + 330ohm resistor to GND |
-| LED: Listening | GPIO 24 | Pin 18 | Blue LED + 330ohm resistor to GND |
-| LED: Thinking | GPIO 25 | Pin 22 | Yellow LED + 330ohm resistor to GND |
+| RGB LED red | — | Pin 16 | via 330ohm; common-anode RGB LED, see `docs/wiring-diagram.md` |
+| RGB LED green | — | Pin 18 | via 330ohm |
+| RGB LED blue | — | Pin 22 | via 330ohm; what each colour/pattern means: `docs/led-behaviour.md` |
 | GND | — | Pin 6, 9, 14, 20, 25 | Any ground pin works |
 
 **PTT button wiring:**

@@ -27,7 +27,7 @@ make test       # pytest
 - `oracle/welcome.py` — power-on routine: chime + listen (7 s) → "This is the Librarian…" (5 s) → the four options (5 s) → music; anything heard goes through the dispatcher (`about_device` = who built it + live counts)
 - `oracle/speaker.py` — speaker identification (TitaNet via sherpa-onnx); asks "Is this Erik?" once per session when unsure and enrols the answer
 - `oracle/persona.py` — system prompt builder from persona config
-- `oracle/hardware/` — GPIO button, RGB LED, power switch, audio routing
+- `oracle/hardware/` — ADS1115 button / power switch / pot, RGB status LED (`leds.py`; scheme in `docs/led-behaviour.md`), audio routing
 - `oracle/music/` — music library + player (`mpg123` subprocess → PulseAudio speaker sink)
 - `oracle/books/` — book library + reader (FTS5 search, per-user bookmarks, chapter navigation by voice; fresh books start past the Gutenberg preamble; paragraphs spoken as ≤30-word pipelined units)
 - `oracle/diag/` — phosphor-CRT styled diagnostic web GUI (FastAPI, port 8000; page + favicon + fonts in `oracle/diag/static/`)
@@ -49,7 +49,17 @@ make test       # pytest
 - Query embedder on the Jetson is nomic-v1.5 fp32 ONNX via onnxruntime (`ORACLE_EMBEDDING_RUNTIME=onnx`, ~64 ms/query, no torch in the process); sentence-transformers stays the workstation/ingest path. The vectors are **un-normalized** mean-pooled outputs — the FAISS `score_scale`/distance gate are calibrated on that; never L2-normalize query vectors.
 - Audio architecture (see `docs/SETUP.md` §1.6): **asymmetric routing.** Mic capture goes through PulseAudio's `module-echo-cancel` (`aec_source`) for NS/AGC; music + TTS go *direct* to the real USB speaker sink at 48 kHz, bypassing AEC. Music is decoded by an `mpg123` subprocess at ~1 % CPU (the prior in-process miniaudio+scipy+sounddevice pipeline pegged 100 %+ and underran constantly). Trade-off: wake-word reliability degrades during music since AEC has no music reference; the action button is the reliable wake during playback. On-chip AEC on the XU316 doesn't apply either — separate USB devices, no shared reference. IC/NS/AGC/VNR on the XU316 still help (mic-input-only DSP). Pulse config tracked at `systemd/pulse-default.pa`; firmware bin + DFU procedure in `firmware/`.
 - Memory budget on the Jetson is the hard constraint (llama-server ~3.2 GB + TTS sidecar ~1 GB pinned; app ~2 GB). zram swap (`nvzramconfig`) is **disabled** — it held swapped pages compressed in RAM and starved the box; the 8 GB NVMe swapfile takes the overflow. Never add a resident model without measuring `free -m`.
-- The ADS1115 (pot, button, power switch) has ONE reader: the app's SharedAdcPoller. The dashboard only reads the chip when no `oracle --mode hardware` process exists — a second reader interleaves on the mux and yields another channel's voltage (phantom button presses, pot jumps). ADC probes: stop `radio-oracle-diag` too.
+- The ADS1115 (pot, button, power switch) has ONE reader: the app's SharedAdcPoller. A second reader interleaves on the mux and yields another channel's voltage (phantom button presses that cut speech off, pot jumps). The dashboard never touches the chip unless its "DIRECT ADS1115 READS" box is ticked (off after every restart, and only honoured while no `oracle --mode hardware` process exists); its readers are one-shot `DigitalSwitch` objects, never the `make_*_switch()` factories, which auto-start a poller thread. ADC probes: stop `radio-oracle-diag` too.
+- Status LED (`oracle/hardware/leds.py`, full table in `docs/led-behaviour.md`): colour = context, pattern = activity.
+
+  | | listen (mic open) | think | speak / output | idle |
+  |---|---|---|---|---|
+  | questions — **blue** | 1 s blink | 0.3 s blink | solid | — |
+  | music — **green** | 1 s blink | 0.3 s blink | solid (playing or announcing) | — |
+  | books — **purple** | 1 s blink | 0.3 s blink | solid (reading or announcing) | paused: 2 s blink |
+  | standby **off** · boot **amber** 2 s · waiting **white** 2 s · error **red** 0.5 s | | | | |
+
+  Modes are `q_/music_/book_` + `listen/think/speak`, plus `music_play`, `book_read`, `book_paused`, `boot`, `waiting`, `error`, `off`. The base colour is picked from the command's context (`commands.py`: reader → book, music playing → music, else q). Keep `Color` a dataclass — the table is built from it at import.
 - On-device probes must not leave state behind: use a scratch `ORACLE_DB_PATH`, and restore bookmarks (see `scripts/probe_reader.py`). A stray bookmark once made the radio resume a book nobody asked for.
 - Config via env vars with `ORACLE_` prefix (direnv-compatible). The Jetson's `/opt/radio-oracle/.env` sets `ORACLE_COLLECTION_BACKENDS` to route every collection to FAISS.
 

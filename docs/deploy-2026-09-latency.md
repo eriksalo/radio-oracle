@@ -417,3 +417,24 @@ Memory work, measured with `scripts/probe_memory.py`:
 The sidecar no longer returns 500 for a unit it can't voice (degenerate
 text → silence; synthesis error → 200 + `X-Error` + silence) and the
 client only falls back to CPU Kokoro when the sidecar is unreachable.
+
+
+## 2026-09-28 (evening) — welcome routine, LED scheme, and the phantom presses
+
+- Power-on is now chime → listen 7 s → "This is the Librarian. Can I help
+  you with something?" → 5 s → the four options → 5 s → wait quietly
+  (white slow blink). Music never starts unless asked (`oracle/welcome.py`).
+- LED scheme rewritten: colour per context (blue questions / green music /
+  purple books), pattern per activity (solid output, 0.3 s think, 1 s
+  listen, 2 s idle). Table in `docs/led-behaviour.md`.
+- "It stops after it says 'I am the Librarian'": the log was full of
+  `Button short-press during voice turn — interrupting` with nobody at the
+  radio. The dashboard's fallback ADC readers were built with the app's
+  `make_*_switch()` factories, which register a `SharedAdcPoller` that
+  auto-starts a thread; triggered once while the app was down, it polled
+  the chip ~10×/s for hours alongside the radio's own poller, and the
+  interleaved mux reads showed up as button presses. Fixed by making the
+  dashboard's readers plain one-shot `DigitalSwitch` objects and by making
+  direct reads an explicit toggle in the GUI (off by default, off after
+  every restart, ignored while the radio runs). TTS sidecar arena cap
+  1024 → 768 MB after its cgroup grew to 2 GB (box was at 90 MB free).
