@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -45,6 +46,23 @@ def clean_for_speech(text: str) -> str:
 
 # Sentence boundaries that keep the terminal punctuation (prosody).
 _SENTENCE_KEEP_RE = re.compile(r"(?<=[.!?])\s+")
+_DIGIT_RE = re.compile(r"\d")
+
+
+def spoken_words(text: str) -> int:
+    """How many words this will be *spoken* as, roughly: a token with
+    digits is read out ("60,030" → "sixty thousand and thirty", "11.5" →
+    "eleven point five"), so it counts as one word per digit plus one.
+    Units were sized by whitespace words; the device description's
+    number-heavy sentence became a 13 s unit that needed more GPU arena
+    than a whole paragraph of prose (2026-09-28)."""
+    n = 0
+    for tok in text.split():
+        d = len(_DIGIT_RE.findall(tok))
+        n += 1 + d if d else 1
+    return n
+
+
 _LEADING_PUNCT_RE = re.compile(r"^[^A-Za-z0-9\(\[\"'$]+")
 
 
@@ -67,7 +85,7 @@ def speech_units(text: str, max_words: int | None = None) -> list[str]:
     cur: list[str] = []
     n = 0
     for sent in pieces:
-        w = len(sent.split())
+        w = spoken_words(sent)
         if cur and n + w > limit:
             units.append(" ".join(cur))
             cur, n = [], 0
@@ -82,20 +100,28 @@ _CLAUSE_KEEP_RE = re.compile(r"(?<=[,;:—])\s+")
 
 
 def _split_long(sentence: str, limit: int) -> list[str]:
-    if len(sentence.split()) <= limit:
+    if spoken_words(sentence) <= limit:
         return [sentence]
     out: list[str] = []
     cur: list[str] = []
     n = 0
     for clause in _CLAUSE_KEEP_RE.split(sentence):
-        w = len(clause.split())
+        w = spoken_words(clause)
         if cur and n + w > limit:
             out.append(" ".join(cur))
             cur, n = [], 0
-        if w > limit:  # no punctuation to cut at: hard-split
-            words = clause.split()
-            for i in range(0, len(words), limit):
-                out.append(" ".join(words[i : i + limit]))
+        if w > limit:  # no punctuation to cut at: hard-split by spoken weight
+            run: list[str] = []
+            rn = 0
+            for word in clause.split():
+                ww = spoken_words(word)
+                if run and rn + ww > limit:
+                    out.append(" ".join(run))
+                    run, rn = [], 0
+                run.append(word)
+                rn += ww
+            if run:
+                out.append(" ".join(run))
             continue
         cur.append(clause)
         n += w
@@ -137,8 +163,15 @@ def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = Non
     worker = threading.Thread(target=produce, name="say-tts", daemon=True)
     worker.start()
     try:
-        while True:
+        for i in range(len(units) + 1):
+            t0 = time.monotonic()
             audio = q.get()
+            waited = time.monotonic() - t0
+            if i and waited > 0.5:
+                # The speaker sat silent waiting for synthesis: the sidecar
+                # is slow (memory pressure, arena rebuild) or the box is
+                # thrashing. Audible as a gap mid-sentence.
+                logger.warning(f"TTS pipeline stall: waited {waited:.1f}s for unit {i + 1}")
             if audio is done:
                 break
             if aborted():

@@ -171,11 +171,15 @@ def _stream_play(
     cursor = 0
     total = len(audio)
     finished = threading.Event()
+    underflows = 0
 
     def callback(outdata, frames, _time_info, status) -> None:
-        nonlocal cursor
+        nonlocal cursor, underflows
         if status:
-            logger.debug(f"playback status: {status}")
+            if status.output_underflow:
+                underflows += 1
+            else:
+                logger.debug(f"playback status: {status}")
         take = min(frames, total - cursor)
         if take > 0:
             chunk = audio[cursor : cursor + take]
@@ -202,6 +206,11 @@ def _stream_play(
                 logger.debug("Playback aborted")
                 return
             finished.wait(timeout=0.05)
+    if underflows:
+        # The callback was late: the process was starved (page faults
+        # under memory pressure, GIL held by a long C call). Heard as
+        # crackle / dropped words (1,765 in one turn, 2026-09-28).
+        logger.warning(f"Playback: {underflows} underflows in a {total / sample_rate:.1f}s clip")
 
 
 def _resolve_device(name: str, kind: str) -> int | None:

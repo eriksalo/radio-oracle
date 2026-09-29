@@ -438,3 +438,56 @@ client only falls back to CPU Kokoro when the sidecar is unreachable.
   direct reads an explicit toggle in the GUI (off by default, off after
   every restart, ignored while the radio runs). TTS sidecar arena cap
   1024 → 768 MB after its cgroup grew to 2 GB (box was at 90 MB free).
+
+
+## 2026-09-28 (night) — "tell me about the device petered out": the TTS arena
+
+Erik: the device description "petered out around when it was talking
+about the books". Two things in the logs.
+
+**The sidecar goes mute.** Every unit has a different input length, so
+the ONNX Runtime CUDA arena fragments; after a few long units it reports
+`Available memory of 0 is smaller than requested bytes` under the cap
+and *every later request fails* (silence + `X-Error`) until the sidecar
+is restarted. It happened with kNextPowerOfTwo at 1024 MB (18:11) and
+kSameAsRequested at 640 MB (yesterday's 500s). The description is the
+worst case: its number-heavy sentence ("60,030 books", "11.5 million
+passages") is 24 whitespace words but 13 s of speech, and needed more
+than 512 MB of arena on its own.
+
+Fixes (`oracle/tts_server.py`, `oracle/tts.py`):
+
+- arena shrinkage after every run (`memory.enable_memory_arena_shrinkage`
+  via a session proxy, with kSameAsRequested as ORT wants): 53 units of
+  the description, 0 failures, sidecar flat at ~0.9–1.0 GB;
+- if a unit still fails, rebuild the session once and retry (only when
+  something has succeeded since the last rebuild — a unit that simply
+  needs more than the cap fails fast). A first version patched
+  `sess.run` and leaked every dropped session (2.8 GB after six
+  rebuilds); the proxy has no cycle;
+- units are sized by *spoken* words: a token with digits counts one per
+  digit plus one, so the description becomes 5 units of ≤ 21 words
+  instead of 4 with a 13 s monster. With that, the cap goes 768 → **512
+  MB** and the sidecar sits at ~0.9 GB instead of 1.5;
+- `/health` now reports `units= fails= rebuilds=`.
+
+**Underruns at the end of the turn.** The 18:23 turn logged 1,765 ALSA
+underruns in its last five seconds, while the sidecar's cgroup grew
+1.0 → 1.3 GB (arena growth) with ~130 MB free: the app's pages were
+being evicted under it. A fresh process on the same pulse path played
+clean, and after the arena fix a triggered live turn (wake word + the
+question played through the speaker, `/tmp/trigger.py` pattern) spoke
+the whole description with 0 underruns. Two new WARNING lines make the
+next occurrence diagnosable without the ALSA spam: `Playback: N
+underflows in a X s clip` (`oracle/audio.py`) and `TTS pipeline stall:
+waited X s for unit N` (`oracle/tts.py`).
+
+Also fixed: `summarize_conversation()` never accepted the `activity`
+argument `finalize_session` passes, so every session summary failed on
+the device and nothing reached the long-term profile ("Catch-up
+summarize failed … unexpected keyword argument 'activity'").
+
+| resident set | before | after |
+|---|---|---|
+| TTS sidecar | 1.3–2.0 GB, then mute | ~0.9–1.0 GB, stable |
+| available memory (`free -m`) | 360–500 MB | ~1.0 GB |

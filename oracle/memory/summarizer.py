@@ -12,11 +12,21 @@ SUMMARIZE_PROMPT = (
 )
 
 
-async def summarize_conversation(messages: list[dict[str, str]]) -> str:
-    """Use the LLM to summarize a list of conversation messages."""
+async def summarize_conversation(messages: list[dict[str, str]], activity: str = "") -> str:
+    """Use the LLM to summarize a list of conversation messages.
+
+    ``activity`` is the session's journal (books started, music asked
+    for, questions) rendered by ``journal.session_activity_text``; it goes
+    in alongside the transcript so the profile learns what the user did,
+    not only what they said.
+    """
     conversation_text = "\n".join(
         f"{m['role'].upper()}: {m['content']}" for m in messages if m["role"] != "system"
     )
+    if activity:
+        conversation_text = (
+            f"What happened this session:\n{activity}\n\nConversation:\n{conversation_text}"
+        ).strip()
 
     summary_messages = [
         {"role": "system", "content": SUMMARIZE_PROMPT},

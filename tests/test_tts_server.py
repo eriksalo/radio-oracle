@@ -190,7 +190,7 @@ def test_speech_units_never_exceed_limit(monkeypatch):
     units = speech_units(long)
     assert all(len(u.split()) <= 6 for u in units)
     assert " ".join(units).split() == long.split()
-    nopunct = " ".join(f"w{i}" for i in range(15))
+    nopunct = " ".join(chr(ord("a") + i) * 2 for i in range(15))  # letters only: digits weigh more
     assert [len(u.split()) for u in speech_units(nopunct)] == [6, 6, 3]
 
 
@@ -215,3 +215,109 @@ def test_speech_units_use_clean_text(monkeypatch):
     from oracle.tts import speech_units
 
     assert speech_units("Read *Moby Dick*. It's **great**.") == ["Read Moby Dick. It's great."]
+
+
+# --- the sidecar process itself (oracle/tts_server.py, no project deps) ---
+
+
+def _fresh_server(monkeypatch):
+    import importlib
+
+    import oracle.tts_server as srv
+
+    importlib.reload(srv)
+    return srv
+
+
+def test_sidecar_shrinks_arena_on_every_run(monkeypatch):
+    """kokoro-onnx calls sess.run(None, feed): the wrapper must inject the
+    arena-shrink run option so memory goes back after each unit."""
+    srv = _fresh_server(monkeypatch)
+    seen = {}
+
+    class _RO:
+        def __init__(self):
+            self.entries = {}
+
+        def add_run_config_entry(self, k, v):
+            self.entries[k] = v
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(RunOptions=_RO))
+
+    class _Sess:
+        def run(self, names, feed, run_options=None):
+            seen["ro"] = run_options
+            return [np.zeros(3)]
+
+        def get_inputs(self):
+            return ["tokens"]
+
+    sess = srv._shrinking(_Sess())
+    sess.run(None, {"x": 1})
+    assert seen["ro"].entries == {"memory.enable_memory_arena_shrinkage": "gpu:0"}
+    assert sess.get_inputs() == ["tokens"]  # everything else passes through
+    assert srv.ARENA_STRATEGY == "kSameAsRequested"  # what shrinkage wants
+
+
+def test_sidecar_rebuilds_session_and_retries_once(monkeypatch, capsys):
+    """An arena failure must cost one rebuild, not a mute radio: the unit
+    is retried on a fresh session and reported as synthesized."""
+    srv = _fresh_server(monkeypatch)
+    builds = []
+
+    class _Kokoro:
+        def __init__(self, fail_first):
+            self.fail_first = fail_first
+
+        def create(self, text, voice="am_michael", speed=1.0):
+            if self.fail_first:
+                self.fail_first = False
+                raise RuntimeError("bfc_arena.cc: Available memory of 0 is smaller than requested")
+            return np.ones(24, dtype=np.float32), 24000
+
+    def fake_load():
+        builds.append(1)
+        srv._kokoro = _Kokoro(fail_first=False)
+
+    monkeypatch.setattr(srv, "_load", fake_load)
+    srv._kokoro = _Kokoro(fail_first=True)
+    samples, sr = srv._synth("The book collection has 60,030 books.", "am_michael", 1.0)
+    assert sr == 24000 and len(samples) == 24 and builds == [1]
+    assert srv._stats["rebuilds"] == 1 and srv._stats["fails"] == 0
+    assert "rebuilding the session" in capsys.readouterr().err
+
+    # A unit that fails even on a fresh session propagates (the handler
+    # answers with silence + X-Error and counts the failure) — and the
+    # next failure does NOT rebuild again until something has succeeded:
+    # a unit that needs more than the cap must not cost a rebuild each.
+    class _Broken:
+        def create(self, *a, **k):
+            raise RuntimeError("still broken")
+
+    srv._kokoro = _Broken()
+    monkeypatch.setattr(srv, "_load", lambda: None)
+    with pytest.raises(RuntimeError):
+        srv._synth("x", "am_michael", 1.0)
+    assert srv._stats["rebuilds"] == 2
+    with pytest.raises(RuntimeError):
+        srv._synth("y", "am_michael", 1.0)
+    assert srv._stats["rebuilds"] == 2  # no third rebuild
+
+
+def test_speech_units_weigh_numbers_as_spoken(monkeypatch):
+    from oracle.tts import speech_units, spoken_words
+
+    assert spoken_words("The book collection has 60,030 books.") == 5 + 6
+    assert spoken_words("about 11.5 million passages") == 1 + 4 + 2
+    monkeypatch.setattr(settings, "reading_unit_max_words", 12)
+    text = (
+        "The knowledge base has about 11.5 million passages from Wikipedia, "
+        "plus about 10.3 million passages from the Project Gutenberg books, "
+        "plus iFixit repair guides."
+    )
+    units = speech_units(text)
+    assert len(units) >= 3 and all(spoken_words(u) <= 12 for u in units)
+    # prose is unchanged: 12 plain words stay one unit
+    assert speech_units("one two three four five six seven eight nine ten eleven twelve") == [
+        "one two three four five six seven eight nine ten eleven twelve"
+    ]

@@ -213,3 +213,24 @@ async def test_finalize_session_passes_activity(tmp_path, monkeypatch):
     assert "book started: Moby-Dick" in seen["activity"]
     assert store.get_summary(s) == "summary"
     store.close()
+
+
+@pytest.mark.asyncio
+async def test_summarize_conversation_accepts_activity(monkeypatch):
+    """finalize_session passes activity=…; the real summarizer must take it
+    (on the device every catch-up summary failed with an unexpected kwarg,
+    so no session ever reached the profile)."""
+    from oracle.memory import summarizer
+
+    seen = {}
+
+    async def fake_chat(messages):
+        seen["prompt"] = messages[-1]["content"]
+        return "summary"
+
+    monkeypatch.setattr(summarizer, "chat", fake_chat)
+    out = await summarizer.summarize_conversation(
+        [{"role": "user", "content": "hi"}], activity="book started: Moby-Dick"
+    )
+    assert out == "summary"
+    assert "book started: Moby-Dick" in seen["prompt"] and "USER: hi" in seen["prompt"]

@@ -24,6 +24,7 @@ ORACLE_TTS_GPU_MEM_MB (CUDA arena cap; 0 = unlimited).
 
 from __future__ import annotations
 
+import gc
 import os
 import re
 import sys
@@ -39,14 +40,56 @@ MODEL = os.environ.get("ORACLE_TTS_MODEL_PATH", "models/kokoro-v1.0.fp16.onnx")
 VOICES = os.environ.get("ORACLE_TTS_VOICES_PATH", "models/voices-v1.0.bin")
 PROVIDER = os.environ.get("ORACLE_TTS_PROVIDER", "CUDAExecutionProvider")
 GPU_MEM_MB = int(os.environ.get("ORACLE_TTS_GPU_MEM_MB", "0"))
-# kSameAsRequested fragmented the arena: after three differently sized
-# units the fourth failed to allocate under the cap even though each unit
-# synthesized fine on its own (2026-09-28). kNextPowerOfTwo reuses blocks.
-ARENA_STRATEGY = os.environ.get("ORACLE_TTS_ARENA_STRATEGY", "kNextPowerOfTwo")
+# The CUDA arena and variable-length inputs (2026-09-28): every unit has
+# a different shape, so the BFC arena fragments and, whatever the extend
+# strategy, after a few long units (the device description: numbers,
+# 8 s of audio per unit) it reports "Available memory of 0" under the
+# cap and *every* later request fails — the radio goes silent until the
+# sidecar is restarted. Two defences:
+#   1. shrink the arena after every run (ORT run option
+#      memory.enable_memory_arena_shrinkage, which wants kSameAsRequested):
+#      memory beyond the initial chunk goes back to the system per unit;
+#   2. if a unit still fails, rebuild the session once and retry it —
+#      the failure is then one delayed unit, never a mute radio.
+ARENA_SHRINK = os.environ.get("ORACLE_TTS_ARENA_SHRINK", "1") == "1"
+ARENA_STRATEGY = os.environ.get(
+    "ORACLE_TTS_ARENA_STRATEGY", "kSameAsRequested" if ARENA_SHRINK else "kNextPowerOfTwo"
+)
 
 _lock = threading.Lock()
 _kokoro = None
 _provider_used = "?"
+_stats = {"units": 0, "fails": 0, "rebuilds": 0}
+# A rebuild only helps when the arena has gone bad *since* it last worked
+# (fragmentation). A unit that fails right after a rebuild simply needs
+# more than the cap: fail it fast instead of rebuilding for every unit.
+_ok_since_rebuild = True
+
+
+class _ShrinkingSession:
+    """Stand-in for the InferenceSession that passes the arena-shrink run
+    option on every ``run`` (kokoro-onnx calls ``sess.run(None, feed)``
+    and offers no hook). A proxy rather than a patched bound method: the
+    patch made a reference cycle that kept a dropped session — and its
+    whole arena — alive across rebuilds (2.8 GB after six)."""
+
+    def __init__(self, sess, run_options):
+        self._sess = sess
+        self._ro = run_options
+
+    def run(self, output_names, input_feed, run_options=None):
+        return self._sess.run(output_names, input_feed, run_options or self._ro)
+
+    def __getattr__(self, name):
+        return getattr(self._sess, name)
+
+
+def _shrinking(sess):
+    import onnxruntime as ort
+
+    ro = ort.RunOptions()
+    ro.add_run_config_entry("memory.enable_memory_arena_shrinkage", "gpu:0")
+    return _ShrinkingSession(sess, ro)
 
 
 def _load() -> None:
@@ -55,6 +98,8 @@ def _load() -> None:
     from kokoro_onnx import Kokoro
 
     t = time.monotonic()
+    _kokoro = None  # drop the old session (and its arena) before building a new one
+    gc.collect()
     so = ort.SessionOptions()
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     so.log_severity_level = 3
@@ -73,16 +118,47 @@ def _load() -> None:
             opts["gpu_mem_limit"] = GPU_MEM_MB * 1024 * 1024
         providers = [(PROVIDER, opts), "CPUExecutionProvider"]
     sess = ort.InferenceSession(MODEL, so, providers=providers)
-    k = Kokoro.from_session(sess, VOICES)
     _provider_used = sess.get_providers()[0]
+    if ARENA_SHRINK and _provider_used == "CUDAExecutionProvider":
+        sess = _shrinking(sess)
+    k = Kokoro.from_session(sess, VOICES)
     # Warm the CUDA kernels / cuDNN algo search so the first turn doesn't pay it.
     k.create("The library is open.", voice=os.environ.get("ORACLE_TTS_VOICE", "am_michael"))
     _kokoro = k
     print(
-        f"tts_server: {MODEL} on {_provider_used} ready in {time.monotonic() - t:.1f}s",
+        f"tts_server: {MODEL} on {_provider_used} ready in {time.monotonic() - t:.1f}s "
+        f"(arena {ARENA_STRATEGY}, shrink={'on' if ARENA_SHRINK else 'off'}, "
+        f"cap {GPU_MEM_MB or 'none'} MB)",
         file=sys.stderr,
         flush=True,
     )
+
+
+def _synth(text: str, voice: str, speed: float):
+    """One unit, serialized; on failure rebuild the session and retry once
+    (only if something has synthesized since the last rebuild)."""
+    global _ok_since_rebuild
+    with _lock:
+        _stats["units"] += 1
+        try:
+            out = _kokoro.create(text, voice=voice, speed=speed)
+            _ok_since_rebuild = True
+            return out
+        except Exception as e:  # noqa: BLE001
+            first = str(e).splitlines()[0][:200]
+            if not _ok_since_rebuild:
+                raise
+            print(
+                f"tts_server: synth failed for {text[:60]!r}: {first}; rebuilding the session",
+                file=sys.stderr,
+                flush=True,
+            )
+            _stats["rebuilds"] += 1
+            _ok_since_rebuild = False
+            _load()
+            out = _kokoro.create(text, voice=voice, speed=speed)
+            _ok_since_rebuild = True
+            return out
 
 
 _LETTER_RE = re.compile(r"[A-Za-z0-9]")
@@ -102,7 +178,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if urlparse(self.path).path == "/health":
-            body = f"ok {_provider_used}".encode()
+            body = (
+                f"ok {_provider_used} units={_stats['units']} "
+                f"fails={_stats['fails']} rebuilds={_stats['rebuilds']}"
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -126,11 +205,11 @@ class _Handler(BaseHTTPRequestHandler):
             samples = np.zeros(int(0.15 * sr), dtype=np.float32)  # nothing to say
         else:
             try:
-                with _lock:
-                    samples, sr = _kokoro.create(text, voice=voice, speed=speed)
+                samples, sr = _synth(text, voice, speed)
             except Exception as e:  # noqa: BLE001
                 # A failed unit is a short silence, not a 500: the client
                 # must never abandon the GPU for the CPU over one bad input.
+                _stats["fails"] += 1
                 err = str(e).splitlines()[0][:200]
                 print(
                     f"tts_server: synth failed for {text[:60]!r}: {err}",
