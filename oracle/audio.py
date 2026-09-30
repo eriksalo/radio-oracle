@@ -150,6 +150,17 @@ def _resample_to_playback(audio: np.ndarray, src_sr: int) -> tuple[np.ndarray, i
     return out, dst_sr
 
 
+# Speech playback buffers this much audio inside PortAudio. The Python
+# interpreter feeding the stream stalls for tens of milliseconds at a time
+# (GIL held by a fork, a numpy call, a page fault under memory pressure);
+# the USB DAC's own "high" latency is 32 ms, so a callback-driven stream
+# underran on nearly every stall ("Tell me about this device": 1,018
+# underflows in a 9 s clip, 2026-09-30). Blocking writes into a quarter
+# second of buffer ride those out, and no Python runs on the audio thread.
+_PLAYBACK_LATENCY_S = 0.25
+_PLAYBACK_CHUNK_S = 0.05
+
+
 def _stream_play(
     audio: np.ndarray,
     sample_rate: int,
@@ -159,57 +170,56 @@ def _stream_play(
     PulseAudio *sink* (oracle.volume_bridge), which scales every stream —
     music, speech, chime — once and live. Applying pot gain here too made
     speech quieter than music by roughly the knob position squared.
+
+    Blocking-write mode: PortAudio's own thread drains its ring buffer; this
+    thread just keeps it topped up in 50 ms chunks and checks for abort in
+    between.
     """
     import sounddevice as sd
 
     audio = np.ascontiguousarray(audio, dtype=np.float32)
+    channels = 1 if audio.ndim == 1 else audio.shape[1]
     if audio.ndim == 1:
-        channels = 1
-    else:
-        channels = audio.shape[1]
-
-    cursor = 0
+        audio = audio.reshape(-1, 1)
     total = len(audio)
-    finished = threading.Event()
+    if total == 0:
+        return
+    chunk = max(1, int(sample_rate * _PLAYBACK_CHUNK_S))
     underflows = 0
-
-    def callback(outdata, frames, _time_info, status) -> None:
-        nonlocal cursor, underflows
-        if status:
-            if status.output_underflow:
-                underflows += 1
-            else:
-                logger.debug(f"playback status: {status}")
-        take = min(frames, total - cursor)
-        if take > 0:
-            chunk = audio[cursor : cursor + take]
-            if channels == 1:
-                outdata[:take, 0] = chunk
-            else:
-                outdata[:take] = chunk
-            cursor += take
-        if take < frames:
-            outdata[take:] = 0
-            raise sd.CallbackStop()
+    cursor = 0
 
     stream = sd.OutputStream(
         samplerate=sample_rate,
         channels=channels,
         dtype="float32",
         device=_get_output_device(),
-        callback=callback,
-        finished_callback=finished.set,
+        latency=_PLAYBACK_LATENCY_S,
     )
-    with stream:
-        while not finished.is_set():
+    try:
+        # PortAudio refuses writes before start(); the first write goes in
+        # right after, as large as the ring buffer will take, so the DAC
+        # never sees an empty period while the loop is spinning up. The
+        # flag from that first write only says the buffer began empty.
+        stream.start()
+        first = max(chunk, min(total, int(stream.write_available or 0)))
+        stream.write(audio[:first])
+        cursor = first
+        while cursor < total:
             if should_abort and should_abort():
                 logger.debug("Playback aborted")
+                stream.abort()
                 return
-            finished.wait(timeout=0.05)
+            end = min(total, cursor + chunk)
+            if stream.write(audio[cursor:end]):
+                underflows += 1
+            cursor = end
+        stream.stop()  # drains what is buffered
+    finally:
+        stream.close()
     if underflows:
-        # The callback was late: the process was starved (page faults
-        # under memory pressure, GIL held by a long C call). Heard as
-        # crackle / dropped words (1,765 in one turn, 2026-09-28).
+        # The feeder fell more than the whole buffer behind: the process was
+        # starved (page faults under memory pressure, GIL held by a long C
+        # call). Heard as crackle / dropped words.
         logger.warning(f"Playback: {underflows} underflows in a {total / sample_rate:.1f}s clip")
 
 

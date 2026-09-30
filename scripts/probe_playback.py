@@ -30,24 +30,25 @@ def main() -> None:
 
     from config.settings import settings
     from oracle import audio
+
+    if os.environ.get("ORACLE_TTS_BACKEND") is None:
+        # Match the radio: the GPU sidecar, not a second CPU Kokoro (~600 MB).
+        settings.tts_backend = "server"
     from oracle.tts import KokoroTTS, speech_units
 
     settings.tts_peak = 0.15
+    # Playback is blocking-write now (no callback to wrap): count the
+    # underflow flags PortAudio hands back from each write(), plus the
+    # warning the app itself logs, so this probe stays honest with the path.
     flags = {"n": 0}
     orig = sd.OutputStream
 
     class CountingStream(orig):  # type: ignore[misc,valid-type]
-        def __init__(self, *a, **k):
-            cb = k.get("callback")
-
-            def wrapped(outdata, frames, t, status):
-                if status.output_underflow:
-                    flags["n"] += 1
-                return cb(outdata, frames, t, status)
-
-            if cb is not None:
-                k["callback"] = wrapped
-            super().__init__(*a, **k)
+        def write(self, data):
+            underflowed = super().write(data)
+            if underflowed:
+                flags["n"] += 1
+            return underflowed
 
     sd.OutputStream = CountingStream
     tts = KokoroTTS()
