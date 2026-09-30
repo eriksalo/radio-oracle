@@ -48,8 +48,8 @@ ol.todo { padding-left: 1.3rem; } ol.todo li { margin: .6rem 0; max-width: 68ch;
 <div class="wrap">
   <div class="eyebrow">Radio Oracle · 30 September 2026 · before and after</div>
   <h1>How well does the Librarian answer, play, and read?</h1>
-  <p class="lede">The same 310 spoken requests, run through the real pipeline on the Jetson four times: once before any change, then after each of three fix passes. Knowledge answers were graded by hand every time; commands are graded against the catalogs.</p>
-  <div class="meta"><span class="pill">Qwen3-4B via llama-server</span><span class="pill">6 FAISS collections</span><span class="pill">4 runs · 1,240 graded answers</span></div>
+  <p class="lede">The same 310 spoken requests, run through the real pipeline on the Jetson five times: once before any change, then after each of four fix passes. Knowledge answers were graded by hand every time; commands are graded against the catalogs.</p>
+  <div class="meta"><span class="pill">Qwen3-4B via llama-server</span><span class="pill">6 FAISS collections</span><span class="pill">5 runs · 1,550 graded answers</span></div>
 
   <div class="tiles">
     <div class="tile"><div class="eyebrow">Librarian answers, hand grade</div>
@@ -73,6 +73,7 @@ ol.todo { padding-left: 1.3rem; } ol.todo li { margin: .6rem 0; max-width: 68ch;
   <tr><td>Pass 1</td><td>book ranking, command routing, retrieval weighting, prompt (memory only when asked, no clock, offline premise), output hygiene</td><td class="n">2.78</td><td class="n">83</td><td class="n">12</td><td class="n">5</td><td class="n">72</td><td class="n">21</td><td class="n">24</td></tr>
   <tr><td>Pass 2</td><td>stronger offline wording, plot questions pull 5 chunks from Gutenberg + Wikipedia only, reply cap 140 → 120 tokens</td><td class="n">2.72</td><td class="n">76</td><td class="n">20</td><td class="n">4</td><td class="n">70</td><td class="n">21</td><td class="n">24</td></tr>
   <tr><td>Pass 3</td><td>offline wording softened again (never mention doctors, neither to recommend nor to say they're gone)</td><td class="n">2.69</td><td class="n">75</td><td class="n">19</td><td class="n">6</td><td class="n">66</td><td class="n">21</td><td class="n">24</td></tr>
+  <tr><td>Pass 4</td><td>temperature 0.6 → 0.4; checked plot summaries for 68 canonical works; book confirmation offers up to three candidates</td><td class="n">2.71</td><td class="n">75</td><td class="n">21</td><td class="n">4</td><td class="n">66</td><td class="n">21</td><td class="n">24</td></tr>
   </tbody></table></div>
   <p style="margin-top:1rem">Pass 1 did the work. Passes 2 and 3 were prompt tuning against the two problems that survived it, and they moved the score less than the run-to-run noise of a 4B model sampling at temperature 0.6: the musketeers answer was wrong, then right, then wrong again across the last three runs with no relevant change in between.</p>
 
@@ -94,18 +95,19 @@ ol.todo { padding-left: 1.3rem; } ol.todo li { margin: .6rem 0; max-width: 68ch;
 
   <h2>What still misses</h2>
   <div class="causes">
-    <div class="cause open"><h3>Plot facts from a 4B model</h3><p>"What happens at the end of A Tale of Two Cities" and "Summarize Treasure Island" are wrong in every run, even with the right article and the book's own text retrieved. The musketeers flip between runs. This is model capacity, not retrieval. Options: a larger model for literature questions only, or a per-book plot summary pre-computed on the workstation and indexed as its own passage.</p></div>
+    <div class="cause"><h3>Plot facts: fixed in pass 4</h3><p>A hand-written, checked summary of each of 68 canonical works (characters and ending) is now the first passage whenever a question names one. The plot questions that were wrong in every earlier run are right:</p>
+      <div class="tablewrap"><table><thead><tr><th>question</th><th>Before</th><th>Pass 1</th><th>Pass 2</th><th>Pass 3</th><th>Pass 4</th></tr></thead><tbody><tr><td>Tell me about the whaling ship in Moby Dick.</td><td class="n">2</td><td class="n">2</td><td class="n">3</td><td class="n">3</td><td class="n">3</td></tr><tr><td>Who was the captain?</td><td class="n">3</td><td class="n">3</td><td class="n">3</td><td class="n">3</td><td class="n">3</td></tr><tr><td>What happens at the end of A Tale of Two Cities?</td><td class="n">1</td><td class="n">1</td><td class="n">1</td><td class="n">1</td><td class="n">3</td></tr><tr><td>Summarize the plot of Treasure Island.</td><td class="n">1</td><td class="n">1</td><td class="n">1</td><td class="n">1</td><td class="n">3</td></tr><tr><td>Who were the three musketeers?</td><td class="n">1</td><td class="n">1</td><td class="n">3</td><td class="n">1</td><td class="n">3</td></tr></tbody></table></div></div>
     <div class="cause open"><h3>Medical answers and "seek help"</h3><p>Three wordings were tried. Too strong and the model turns fatalistic ("no doctor, no hospital, wait for help that doesn't exist"). Too soft and "seek medical help" creeps back into a few answers. The current wording gives steps first and keeps the referral to a mild aside in five answers; the bone-setting question still gets a refusal plus splint steps.</p></div>
     <div class="cause open"><h3>Length</h3><p>The prompt asks for forty to fifty words; the model gives about seventy. The 120-token cap trims the longest to a clean sentence, so the median is 66 words now (was 72). Going shorter means cutting content, not style.</p></div>
-    <div class="cause open"><h3>Sampling noise</h3><p>At temperature 0.6 the same question gets a different answer each run, and about one in twenty flips between right and wrong. For a factual librarian, 0.3 to 0.4 would make answers repeatable; not changed here so the measured runs stay comparable.</p></div>
+    <div class="cause open"><h3>Sampling noise and stubborn facts</h3><p>Temperature is now 0.4. The overall grade stayed at 2.71: the plot fixes were offset by different small slips elsewhere. Three errors repeat in every run regardless of wording or temperature: the First World War "starting" on 4 August (Britain's entry, not 28 July), Pride and Prejudice invented as a serial, and a refusal to describe setting a bone. Those come from the model and the passages retrieved, and would need a curated passage each, like the plot summaries.</p></div>
   </div>
 
-  <h2>Recommended next</h2>
+  <h2>Done in pass 4, and what is left</h2>
   <ol class="todo">
-    <li><b>Lower the temperature to 0.4</b> and rerun once to confirm it reduces the flip-flops.</li>
-    <li><b>Pre-computed plot summaries</b> for the canonical works, indexed as one passage each, so plot questions retrieve a summary instead of the book's first chapter.</li>
-    <li><b>Try the 8B model for literature only</b> if memory allows a swap on demand; the 4B model's plots are unreliable regardless of context.</li>
-    <li><b>Ask for confirmation</b> before opening any book the confidence check rejects; it now rejects the look-alikes correctly.</li>
+    <li><b>Temperature 0.4.</b> Deployed. It did not raise the average on its own; answers are steadier but the same few slips recur.</li>
+    <li><b>Plot summaries.</b> Deployed for 68 works; the plot questions went from wrong in every run to right.</li>
+    <li><b>Book confirmation.</b> "Did you mean X, by Y?" now offers up to three candidates, and "no, the one by Thoreau" searches again with the correction.</li>
+    <li><b>Next, if wanted:</b> a small curated fact file in the same style as the plot summaries for the handful of answers that stay wrong (war dates, first-aid procedures such as splinting and setting a limb), rather than more prompt tuning.</li>
   </ol>
   <p style="color:var(--muted);font-size:.9rem;margin-top:2rem">Question sets, all four runs' raw results and hand grades are in <code>docs/eval/results/</code>; rerun with <code>scripts/eval_quality.py</code>.</p>
 </div>

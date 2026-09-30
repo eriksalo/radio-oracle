@@ -1,0 +1,29 @@
+{
+  "started": "2026-09-30T17:40:22",
+  "domains": {
+    "music": {
+      "n": 100,
+      "action_pass": 100,
+      "resolve_pass": 60,
+      "resolve_n": 60,
+      "llm_intent": 66,
+      "wall_s": 61.4
+    },
+    "books": {
+      "n": 110,
+      "action_pass": 110,
+      "resolve_pass": 86,
+      "resolve_n": 87,
+      "confident": 75,
+      "llm_intent": 82,
+      "wall_s": 81.5
+    },
+    "librarian": {
+      "n": 100,
+      "keyword_pass": 97,
+      "errors": 0,
+      "no_rag": 0,
+      "wall_s": 846.4
+    }
+  }
+}
