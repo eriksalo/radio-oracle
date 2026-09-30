@@ -95,7 +95,7 @@ class OracleSettings(BaseSettings):
     tts_server_timeout: float = 30.0
     tts_model_path: Path = Path("models/kokoro-v1.0.onnx")
     tts_voices_path: Path = Path("models/voices-v1.0.bin")
-    tts_voice: str = "am_michael"  # American male, natural
+    tts_voice: str = "am_eric"  # American male; Erik switched from am_michael 2026-09-30
     tts_speed: float = 1.0
     # Peak level speech is normalized to (0-1; 0 disables). Kokoro output
     # is well below full scale — unnormalized it sits quiet next to
