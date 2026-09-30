@@ -59,7 +59,9 @@ def main() -> None:
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--mode", default="snappy", choices=["snappy", "deep"])
     p.add_argument(
-        "--min-recall", type=float, default=0.0,
+        "--min-recall",
+        type=float,
+        default=0.0,
         help="Exit 1 if overall recall@k is below this (ship gate)",
     )
     args = p.parse_args()
@@ -86,22 +88,22 @@ def main() -> None:
         )
         dt = time.perf_counter() - t0
         latencies.append(dt)
-        ok = any(
-            _hit(r, case["expect"], case.get("in", "title_or_text"))
-            for r in results
-        )
+        ok = any(_hit(r, case["expect"], case.get("in", "title_or_text")) for r in results)
         hits += ok
-        top = (results[0].get("metadata") or {}).get("title") or (
-            results[0]["text"][:60] if results else "—"
-        ) if results else "—"
-        print(f"  [{'HIT ' if ok else 'MISS'}] {dt*1000:6.0f}ms  {q!r}  top: {top!r}")
+        top = (
+            (results[0].get("metadata") or {}).get("title")
+            or (results[0]["text"][:60] if results else "—")
+            if results
+            else "—"
+        )
+        print(f"  [{'HIT ' if ok else 'MISS'}] {dt * 1000:6.0f}ms  {q!r}  top: {top!r}")
 
     recall = hits / len(cases)
     lat = sorted(latencies)
     print(
         f"\nrecall@{args.k}: {recall:.2%} ({hits}/{len(cases)})   "
-        f"latency p50 {lat[len(lat)//2]*1000:.0f}ms  "
-        f"max {lat[-1]*1000:.0f}ms   mode={args.mode}"
+        f"latency p50 {lat[len(lat) // 2] * 1000:.0f}ms  "
+        f"max {lat[-1] * 1000:.0f}ms   mode={args.mode}"
     )
     if recall < args.min_recall:
         logger.error(f"recall {recall:.2%} below gate {args.min_recall:.2%}")

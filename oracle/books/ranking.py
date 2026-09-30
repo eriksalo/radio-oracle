@@ -498,6 +498,11 @@ def is_confident_match(query: str, book: _BookLike) -> bool:
     if not q_title:
         # Pure author request ("something by Twain"): any book of theirs.
         return True
+    # "Jane Austen" → "Pride and Prejudice" with a blank author field: the
+    # flagship table vouches for it.
+    for surname, flag in AUTHOR_FLAGSHIP.items():
+        if surname in q_words and flag in title_n:
+            return True
     for seg in title_segments(book.title):
         pl = _placement(q_title, seg)
         if pl is None:

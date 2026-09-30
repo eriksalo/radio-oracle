@@ -171,12 +171,13 @@ _BIAS: dict[QuestionType, dict[str, float]] = {
         "gutenberg": 0.08,
     },
     "literature": {
+        # Only the two shelves that hold books; the rest are effectively out.
         "gutenberg": -0.02,
-        "wikipedia": -0.02,
-        "wikibooks": 0.04,
-        "crashcourse": 0.04,
-        "wikimed": 0.08,
-        "ifixit": 0.10,
+        "wikipedia": -0.03,
+        "wikibooks": 0.30,
+        "crashcourse": 0.30,
+        "wikimed": 0.50,
+        "ifixit": 0.50,
     },
     "factual": {
         "wikipedia": -0.03,

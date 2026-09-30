@@ -277,7 +277,9 @@ async def _run_music(items: list[dict], out: Path, limit: int | None) -> dict:
                 summary["llm_intent"] += 1
             if action == "play":
                 if query:
-                    hits = catalog.search(query)
+                    hint = commands._play_hint(item["text"]) or commands._play_hint(query)
+                    hits, tier = catalog.search_ranked(query, hint=hint)
+                    rec["tier"] = tier
                     artists = sorted({t.artist for t in hits if t.artist})
                     rec["hits"] = len(hits)
                     rec["hit_artists"] = artists[:8]

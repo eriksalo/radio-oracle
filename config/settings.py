@@ -35,7 +35,7 @@ class OracleSettings(BaseSettings):
     # and the user can always ask for more. A reply that hits the cap has
     # its unfinished last sentence dropped rather than spoken. Applies to
     # stream_chat only — summarizer/intent calls stay uncapped.
-    ollama_num_predict: int = 140
+    ollama_num_predict: int = 120
     # Follow-up query rewrite: model (None = main model; a small resident
     # model would avoid evicting the main model's prefix cache) and output
     # cap — a search query is a dozen tokens.
@@ -204,6 +204,8 @@ class OracleSettings(BaseSettings):
     # Weight collections by question type when merging hits (oracle/rag/router.py).
     # Off = pure distance merge, which let 10 M Gutenberg chunks dominate.
     rag_collection_bias: bool = True
+    # Plot/character questions pull more chunks from Gutenberg + Wikipedia.
+    rag_literature_top_k: int = 5
     # Kill-switch for cross-encoder reranking (deep mode) if it proves too
     # slow on the Jetson CPU.
     rag_rerank_enabled: bool = True

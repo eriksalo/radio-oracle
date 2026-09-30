@@ -73,7 +73,10 @@ def main() -> None:
         finish_ms.append((time.monotonic() - t) * 1000)
         hit = p.lower().rstrip("?.").split()[-1] in text.lower()
         ok += hit
-        print(f"  {'ok ' if hit else 'MISS'} {p!r:55s} -> {text!r}  (partial before flush: {partial!r})", flush=True)
+        print(
+            f"  {'ok ' if hit else 'MISS'} {p!r:55s} -> {text!r}  (partial before flush: {partial!r})",
+            flush=True,
+        )
     print(
         f"streaming: {ok}/{len(PHRASES)} keyword hits; per-100ms-block feed "
         f"p50 {statistics.median(block_ms):.0f} ms, max {max(block_ms):.0f} ms; "

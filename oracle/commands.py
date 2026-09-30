@@ -728,11 +728,19 @@ _CHAPTER_SPEC_RE = re.compile(
 _FRONT_MATTER_RE = re.compile(r"\b(front\s+matter|preface|preamble|introduction)\b", re.IGNORECASE)
 
 
+_ORDINAL_CHAPTER_RE = re.compile(r"\b(last|final|first|next|previous)\s+chapter\b", re.IGNORECASE)
+
+
 def _extract_chapter_spec(text: str) -> str | None:
-    """ "go to chapter twenty one" → "twenty one"; "read the preface" → "preface"."""
+    """ "go to chapter twenty one" → "twenty one"; "read the preface" →
+    "preface"; "skip to the last chapter" → "last"."""
     m = _CHAPTER_SPEC_RE.search(text)
     if m:
         return m.group(1).strip()
+    m = _ORDINAL_CHAPTER_RE.search(text)
+    if m:
+        word = m.group(1).lower()
+        return "last" if word == "final" else word
     m = _FRONT_MATTER_RE.search(text)
     return m.group(1) if m else None
 

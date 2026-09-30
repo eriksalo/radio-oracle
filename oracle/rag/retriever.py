@@ -159,6 +159,12 @@ class Retriever:
             logger.warning("No collections available for RAG query")
             return []
 
+        if (
+            settings.rag_collection_bias
+            and top_k is None
+            and question_type(query_text) == "literature"
+        ):
+            per_coll_k = max(per_coll_k, settings.rag_literature_top_k)
         hits: list[Hit] = []
         for name in collection_names:
             try:
@@ -184,6 +190,10 @@ class Retriever:
         # take every slot while another has a hit under the gate.
         bias = bias_for(query_text) if settings.rag_collection_bias else {}
         qtype = question_type(query_text)
+        if qtype == "literature" and top_k is None and settings.rag_collection_bias:
+            # Plot and character facts live deep in the article or the book
+            # itself; the lead chunk alone had the 4B model inventing endings.
+            final_k = max(final_k, settings.rag_literature_top_k)
         hits.sort(key=lambda h: h.distance + bias.get(h.source, 0.0))
         if len(hits) > final_k and len({h.source for h in hits}) > 1:
             cap = max(1, final_k - 1)
@@ -214,7 +224,11 @@ class Retriever:
     def format_context(self, results: list[dict]) -> str:
         if not results:
             return ""
-        parts = ["=== Retrieved Knowledge ==="]
+        parts = [
+            "=== Retrieved Knowledge ===",
+            "(Where a passage says to seek medical help or call emergency services, there is "
+            "none here: give the steps the user can take and the signs it is beyond them.)",
+        ]
         limit = settings.rag_chunk_char_limit
         for i, r in enumerate(results, 1):
             source = r.get("source", "unknown")

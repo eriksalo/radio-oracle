@@ -69,6 +69,12 @@ def test_qualifier_stops_before_trailing_question():
     assert commands._extract_qualifier("play music by Bob Dylan.") == "Bob Dylan"
 
 
+def test_chapter_spec_ordinals():
+    assert commands._extract_chapter_spec("Skip to the last chapter.") == "last"
+    assert commands._extract_chapter_spec("Go to the final chapter") == "last"
+    assert commands._extract_chapter_spec("go to chapter twenty one") == "twenty one"
+
+
 def test_extract_play_object():
     assert commands._extract_play_object("Can you play Mark Knopfler?") == "Mark Knopfler"
     assert commands._extract_play_object("Would you play some Aerosmith please") == "Aerosmith"

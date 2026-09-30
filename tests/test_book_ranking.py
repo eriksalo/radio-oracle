@@ -112,6 +112,7 @@ def test_subtitles_and_editions_still_exact():
             True,
         ),
         ("Read Jekyll", _B("Jekyll-Hyde Planet", "Jack Lewis"), False),
+        ("Read me a book by Jane Austen", _B("Pride and Prejudice", ""), True),
     ],
 )
 def test_confidence(query, book, ok):

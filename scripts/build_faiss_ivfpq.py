@@ -39,17 +39,15 @@ def load_vectors(path: Path, dim: int) -> np.ndarray:
         raise FileNotFoundError(path)
     size = path.stat().st_size
     if size % (dim * 4) != 0:
-        raise RuntimeError(
-            f"{path} size {size} is not a multiple of dim*4 ({dim*4})"
-        )
+        raise RuntimeError(f"{path} size {size} is not a multiple of dim*4 ({dim * 4})")
     n = size // (dim * 4)
-    logger.info(f"Memory-mapping {path.name}: {n:,} vectors x {dim} dim ({size/1024/1024/1024:.2f} GB)")
+    logger.info(
+        f"Memory-mapping {path.name}: {n:,} vectors x {dim} dim ({size / 1024 / 1024 / 1024:.2f} GB)"
+    )
     return np.memmap(path, dtype=np.float32, mode="r", shape=(n, dim))
 
 
-def build_index(
-    vectors: np.ndarray, nlist: int, pq_m: int, pq_bits: int, train_sample: int
-):
+def build_index(vectors: np.ndarray, nlist: int, pq_m: int, pq_bits: int, train_sample: int):
     import faiss
 
     n, dim = vectors.shape
@@ -68,7 +66,7 @@ def build_index(
         logger.info(f"Training IVF-PQ on {len(sample):,} vectors (dim={dim})")
         t0 = time.time()
         index.train(sample)
-        logger.info(f"Training done in {time.time()-t0:.1f}s")
+        logger.info(f"Training done in {time.time() - t0:.1f}s")
 
     t0 = time.time()
     chunk = 200_000
@@ -79,7 +77,7 @@ def build_index(
             elapsed = time.time() - t0
             rate = end / elapsed if elapsed > 0 else 0
             logger.info(f"  added {end:,}/{n:,} ({rate:.0f}/s)")
-    logger.info(f"Added {n:,} vectors in {time.time()-t0:.1f}s")
+    logger.info(f"Added {n:,} vectors in {time.time() - t0:.1f}s")
     return index
 
 
@@ -110,15 +108,11 @@ def write_idmap_sqlite(out_path: Path, in_path: Path) -> None:
         for r in rows:
             batch.append(r)
             if len(batch) >= 10_000:
-                con_out.executemany(
-                    "INSERT INTO faiss_idmap VALUES (?,?,?,?,?,?,?)", batch
-                )
+                con_out.executemany("INSERT INTO faiss_idmap VALUES (?,?,?,?,?,?,?)", batch)
                 total += len(batch)
                 batch.clear()
         if batch:
-            con_out.executemany(
-                "INSERT INTO faiss_idmap VALUES (?,?,?,?,?,?,?)", batch
-            )
+            con_out.executemany("INSERT INTO faiss_idmap VALUES (?,?,?,?,?,?,?)", batch)
             total += len(batch)
         con_out.commit()
         logger.info(f"Wrote {out_path} ({total:,} rows)")
@@ -134,10 +128,12 @@ def main() -> None:
     p.add_argument("--out-dir", default="data/faiss")
     p.add_argument("--dim", type=int, default=768)
     p.add_argument(
-        "--nlist", type=int, default=0,
+        "--nlist",
+        type=int,
+        default=0,
         help="IVF cluster count. 0 = auto: clamp(sqrt(n), 64, 4096). "
-             "For < 500K vectors a small nlist (~sqrt(n)) gives better recall "
-             "than the 4096 we use for 11M+ wiki.",
+        "For < 500K vectors a small nlist (~sqrt(n)) gives better recall "
+        "than the 4096 we use for 11M+ wiki.",
     )
     p.add_argument("--pq-m", type=int, default=64)
     p.add_argument("--pq-bits", type=int, default=8)
@@ -158,9 +154,7 @@ def main() -> None:
         nlist = max(64, min(4096, int(round(n**0.5))))
         logger.info(f"--nlist auto: {nlist} (sqrt of {n:,} clamped to [64, 4096])")
 
-    index = build_index(
-        vectors, nlist, args.pq_m, args.pq_bits, args.train_sample
-    )
+    index = build_index(vectors, nlist, args.pq_m, args.pq_bits, args.train_sample)
 
     import faiss
 

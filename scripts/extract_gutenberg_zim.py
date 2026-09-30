@@ -143,7 +143,12 @@ def extract(zim_path: Path, output_dir: Path, dry_run: bool = False, limit: int 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extract Gutenberg books from ZIM")
     parser.add_argument("zim_path", type=Path, help="Path to gutenberg .zim file")
-    parser.add_argument("--output", type=Path, default=None, help="Output directory (default: data/books/gutenberg/)")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output directory (default: data/books/gutenberg/)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=0, help="Max books to extract (0 = all)")
     args = parser.parse_args()

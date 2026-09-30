@@ -39,6 +39,7 @@ from selectolax.parser import HTMLParser
 # ZIM reading
 # ---------------------------------------------------------------------------
 
+
 def iter_zim_articles(zim_path: str):
     """Yield (url, title, html) for every article in a ZIM file."""
     from libzim.reader import Archive  # type: ignore[import-untyped]
@@ -74,6 +75,7 @@ def iter_zim_articles(zim_path: str):
 # ---------------------------------------------------------------------------
 # Text extraction & chunking
 # ---------------------------------------------------------------------------
+
 
 def extract_text(html: str) -> str:
     """Strip HTML to clean text, removing scripts/styles/tables/footnotes."""
@@ -120,6 +122,7 @@ def make_doc_id(collection: str, url: str, chunk_idx: int) -> str:
 # ---------------------------------------------------------------------------
 # ChromaDB + embedding
 # ---------------------------------------------------------------------------
+
 
 def get_chroma_collection(db_path: str, collection_name: str):
     import chromadb
@@ -339,12 +342,14 @@ def _produce_batches(
 
                 batch_ids.append(doc_id)
                 batch_texts.append(chunk)
-                batch_metas.append({
-                    "source": collection_name,
-                    "title": title[:500],
-                    "url": url[:500],
-                    "chunk_index": idx,
-                })
+                batch_metas.append(
+                    {
+                        "source": collection_name,
+                        "title": title[:500],
+                        "url": url[:500],
+                        "chunk_index": idx,
+                    }
+                )
 
                 if len(batch_ids) >= batch_size:
                     out_queue.put((batch_ids, batch_texts, batch_metas))
@@ -519,18 +524,49 @@ def main() -> None:
     parser.add_argument("zim_file", nargs="?", help="Path to ZIM file")
     parser.add_argument("--collection", "-c", help="ChromaDB collection name")
     parser.add_argument("--all", action="store_true", help="Ingest all ZIM files in --zim-dir")
-    parser.add_argument("--zim-dir", default=".", help="Directory containing ZIM files (default: cwd)")
-    parser.add_argument("--db-path", default="data/chroma", help="ChromaDB path (default: data/chroma)")
-    parser.add_argument("--batch-size", type=int, default=2000, help="Chunks per ChromaDB upsert (default: 2000)")
-    parser.add_argument("--encode-batch-size", type=int, default=256, help="Sub-batch passed to model.encode (default: 256; try 512-1024 on RTX 4070+)")
-    parser.add_argument("--chunk-size", type=int, default=512, help="Words per chunk (default: 512)")
-    parser.add_argument("--chunk-overlap", type=int, default=64, help="Overlap between chunks (default: 64)")
-    parser.add_argument("--device", default="auto", help="Embedding device: auto | cpu | cuda | cuda:N (default: auto)")
+    parser.add_argument(
+        "--zim-dir", default=".", help="Directory containing ZIM files (default: cwd)"
+    )
+    parser.add_argument(
+        "--db-path", default="data/chroma", help="ChromaDB path (default: data/chroma)"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=2000, help="Chunks per ChromaDB upsert (default: 2000)"
+    )
+    parser.add_argument(
+        "--encode-batch-size",
+        type=int,
+        default=256,
+        help="Sub-batch passed to model.encode (default: 256; try 512-1024 on RTX 4070+)",
+    )
+    parser.add_argument(
+        "--chunk-size", type=int, default=512, help="Words per chunk (default: 512)"
+    )
+    parser.add_argument(
+        "--chunk-overlap", type=int, default=64, help="Overlap between chunks (default: 64)"
+    )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="Embedding device: auto | cpu | cuda | cuda:N (default: auto)",
+    )
     fp16_group = parser.add_mutually_exclusive_group()
-    fp16_group.add_argument("--fp16", dest="fp16", action="store_true", default=True, help="Use FP16 weights on CUDA (default: on)")
-    fp16_group.add_argument("--no-fp16", dest="fp16", action="store_false", help="Disable FP16, use FP32")
-    parser.add_argument("--queue-depth", type=int, default=4, help="Producer/consumer queue depth (default: 4)")
-    parser.add_argument("--dry-run", action="store_true", help="Count chunks without embedding/storing")
+    fp16_group.add_argument(
+        "--fp16",
+        dest="fp16",
+        action="store_true",
+        default=True,
+        help="Use FP16 weights on CUDA (default: on)",
+    )
+    fp16_group.add_argument(
+        "--no-fp16", dest="fp16", action="store_false", help="Disable FP16, use FP32"
+    )
+    parser.add_argument(
+        "--queue-depth", type=int, default=4, help="Producer/consumer queue depth (default: 4)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Count chunks without embedding/storing"
+    )
     args = parser.parse_args()
 
     if args.all:
@@ -543,7 +579,8 @@ def main() -> None:
             logger.info(f"  {Path(path).name} -> {coll}")
         for path, coll in zims:
             ingest_zim(
-                path, coll,
+                path,
+                coll,
                 db_path=args.db_path,
                 batch_size=args.batch_size,
                 chunk_size=args.chunk_size,
@@ -560,7 +597,8 @@ def main() -> None:
             logger.error("Cannot auto-detect collection name. Use --collection <name>")
             sys.exit(1)
         ingest_zim(
-            args.zim_file, collection,
+            args.zim_file,
+            collection,
             db_path=args.db_path,
             batch_size=args.batch_size,
             chunk_size=args.chunk_size,

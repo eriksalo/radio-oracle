@@ -93,7 +93,9 @@ def main() -> None:
             rows = c.execute(
                 "SELECT id, path FROM books WHERE title LIKE ? LIMIT 3", (f"%{ptitle[:20]}%",)
             ).fetchall()
-            print(f"  paragraphs of id {bid} match books rows: {[(r[0], Path(r[1]).name) for r in rows]}")
+            print(
+                f"  paragraphs of id {bid} match books rows: {[(r[0], Path(r[1]).name) for r in rows]}"
+            )
 
 
 if __name__ == "__main__":

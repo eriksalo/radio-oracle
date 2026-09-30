@@ -50,7 +50,9 @@ def main() -> None:
         }
     t = time.monotonic()
     sid.embed(clips["am_michael"]["enroll"])
-    print(f"embed {(time.monotonic() - t) * 1000:.0f} ms for a {len(clips['am_michael']['enroll']) / 16000:.1f}s clip")
+    print(
+        f"embed {(time.monotonic() - t) * 1000:.0f} ms for a {len(clips['am_michael']['enroll']) / 16000:.1f}s clip"
+    )
     for v in voices:
         sid.enroll(v, clips[v]["enroll"], "probe")
     ok = 0

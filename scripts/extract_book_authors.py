@@ -95,12 +95,34 @@ def clean_author(raw: str) -> str | None:
 
 
 _BY_STANDALONE = re.compile(r"^\s*by\s*$", re.IGNORECASE)
-_COPYRIGHT_LINE = re.compile(r"copyright|published|press of|printed|entered according", re.IGNORECASE)
+_COPYRIGHT_LINE = re.compile(
+    r"copyright|published|press of|printed|entered according", re.IGNORECASE
+)
 _PUBLISHER_WORDS = {
-    "company", "co.", "inc.", "inc", "ltd", "ltd.", "press", "publishers",
-    "publishing", "sons", "brothers", "bros", "house", "books", "edition",
-    "editions", "library", "society", "association", "institute", "university",
-    "printshop", "printer", "printers",
+    "company",
+    "co.",
+    "inc.",
+    "inc",
+    "ltd",
+    "ltd.",
+    "press",
+    "publishers",
+    "publishing",
+    "sons",
+    "brothers",
+    "bros",
+    "house",
+    "books",
+    "edition",
+    "editions",
+    "library",
+    "society",
+    "association",
+    "institute",
+    "university",
+    "printshop",
+    "printer",
+    "printers",
 }
 
 
@@ -152,7 +174,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Extract author metadata from Gutenberg books")
     parser.add_argument("--dry-run", action="store_true", help="Preview without updating DB")
     parser.add_argument("--stats", action="store_true", help="Show current author stats")
-    parser.add_argument("--limit", type=int, default=0, help="Limit number of books to process (0=all)")
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Limit number of books to process (0=all)"
+    )
     args = parser.parse_args()
 
     db_path = settings.books_db_path
@@ -160,7 +184,9 @@ def main() -> None:
 
     if args.stats:
         total = conn.execute("SELECT count(*) FROM books").fetchone()[0]
-        with_author = conn.execute("SELECT count(*) FROM books WHERE author IS NOT NULL AND author != ''").fetchone()[0]
+        with_author = conn.execute(
+            "SELECT count(*) FROM books WHERE author IS NOT NULL AND author != ''"
+        ).fetchone()[0]
         without = total - with_author
         print(f"Total books:    {total}")
         print(f"With author:    {with_author}")
@@ -207,7 +233,7 @@ def main() -> None:
         conn.commit()
 
     print(f"\nProcessed: {len(rows)}")
-    print(f"Authors found: {found} ({100*found/max(len(rows),1):.1f}%)")
+    print(f"Authors found: {found} ({100 * found / max(len(rows), 1):.1f}%)")
     if args.dry_run:
         print("(dry run — no changes written)")
     else:

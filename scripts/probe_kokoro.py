@@ -42,7 +42,10 @@ def bench(label: str, k: Kokoro, n: int = 2) -> None:
             dt = time.monotonic() - t
             best = min(best, dt)
             secs = len(samples) / sr
-        print(f"{label:34s} {len(text):4d} chars -> {secs:5.2f}s audio in {best:5.2f}s  RTF {best / secs:4.2f}", flush=True)
+        print(
+            f"{label:34s} {len(text):4d} chars -> {secs:5.2f}s audio in {best:5.2f}s  RTF {best / secs:4.2f}",
+            flush=True,
+        )
 
 
 def phonemize_time(k: Kokoro) -> None:
@@ -76,7 +79,9 @@ def main() -> None:
     so2.intra_op_num_threads = os.cpu_count() or 6
     so2.execution_mode = ort.ExecutionMode.ORT_PARALLEL
     so2.inter_op_num_threads = 2
-    k.sess = ort.InferenceSession("models/kokoro-v1.0.onnx", so2, providers=["CPUExecutionProvider"])
+    k.sess = ort.InferenceSession(
+        "models/kokoro-v1.0.onnx", so2, providers=["CPUExecutionProvider"]
+    )
     k.create("warm up.", voice="am_michael")
     bench("fp32 parallel-exec", k)
 

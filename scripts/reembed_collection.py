@@ -124,7 +124,7 @@ class FlatVectorStore:
         if existing_bytes % (dim * 4) != 0:
             raise RuntimeError(
                 f"{self.vec_path} size {existing_bytes} is not a multiple of "
-                f"dim*4 ({dim*4}); refusing to append to a corrupted file"
+                f"dim*4 ({dim * 4}); refusing to append to a corrupted file"
             )
         self.next_row = existing_bytes // (dim * 4)
         # check_same_thread=False so the upsert thread can use this connection
@@ -143,9 +143,7 @@ class FlatVectorStore:
                 chunk_index INTEGER
             )"""
         )
-        self._con.execute(
-            "CREATE INDEX IF NOT EXISTS chunks_chunk_id ON chunks (chunk_id)"
-        )
+        self._con.execute("CREATE INDEX IF NOT EXISTS chunks_chunk_id ON chunks (chunk_id)")
         self._con.commit()
 
     def append(
@@ -176,9 +174,7 @@ class FlatVectorStore:
             )
             for i in range(n)
         ]
-        self._con.executemany(
-            "INSERT OR IGNORE INTO chunks VALUES (?,?,?,?,?,?,?)", rows
-        )
+        self._con.executemany("INSERT OR IGNORE INTO chunks VALUES (?,?,?,?,?,?,?)", rows)
         self._con.commit()
         self.next_row += n
         return first_row
@@ -379,9 +375,7 @@ def build_embedder(
 
     resolved = resolve_device(device)
     logger.info(f"Loading {model_name} (device={resolved}, fp16={fp16}) ...")
-    model = SentenceTransformer(
-        model_name, device=resolved, trust_remote_code=trust_remote_code
-    )
+    model = SentenceTransformer(model_name, device=resolved, trust_remote_code=trust_remote_code)
     if max_seq_length is not None:
         prev = model.max_seq_length
         model.max_seq_length = max_seq_length
@@ -449,9 +443,7 @@ def reembed(
         logger.info(
             f"Output: {store.vec_path} (resume from row {store.next_row}) + {store.text_path}"
         )
-        model = build_embedder(
-            model_name, device=device, fp16=fp16, max_seq_length=max_seq_length
-        )
+        model = build_embedder(model_name, device=device, fp16=fp16, max_seq_length=max_seq_length)
 
     work_queue: mp.Queue = mp.Queue(maxsize=queue_depth)
     upsert_queue: queue.Queue = queue.Queue(maxsize=queue_depth)
@@ -469,8 +461,15 @@ def reembed(
         p = mp.Process(
             target=_producer_worker,
             args=(
-                wid, db_path, source, source_segment_id,
-                start, end, lookup_path, batch_size, work_queue,
+                wid,
+                db_path,
+                source,
+                source_segment_id,
+                start,
+                end,
+                lookup_path,
+                batch_size,
+                work_queue,
             ),
             name=f"reembed-prod-{wid}",
             daemon=True,
@@ -574,7 +573,7 @@ def reembed(
     rate = new_chunks / elapsed if elapsed > 0 else 0
     logger.info(
         f"=== Done: {target} ===  new={new_chunks} scanned={agg['scanned']} "
-        f"skipped={agg['skipped_existing']}  {elapsed/60:.1f} min  {rate:.0f}/sec"
+        f"skipped={agg['skipped_existing']}  {elapsed / 60:.1f} min  {rate:.0f}/sec"
     )
     if not dry_run and store is not None:
         logger.info(f"  Total rows in {store.vec_path.name}: {store.next_row}")
@@ -584,16 +583,16 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Re-embed a ChromaDB collection with a new model")
     p.add_argument("--source", required=True, help="Source collection name")
     p.add_argument("--target", required=True, help="Target collection name (must differ)")
+    p.add_argument("--model", default="nomic-ai/nomic-embed-text-v1.5", help="HF embedding model")
     p.add_argument(
-        "--model", default="nomic-ai/nomic-embed-text-v1.5", help="HF embedding model"
-    )
-    p.add_argument(
-        "--prefix", default="search_document: ",
+        "--prefix",
+        default="search_document: ",
         help="Per-text prefix required by some models (default for nomic-v1.5)",
     )
     p.add_argument("--db-path", default="data/chroma", help="Source chromadb persist dir")
     p.add_argument(
-        "--out-dir", default="data/embeddings",
+        "--out-dir",
+        default="data/embeddings",
         help="Where to write <target>.vectors.f32 and <target>.text.sqlite",
     )
     p.add_argument("--dim", type=int, default=768, help="Embedding dimension (nomic-v1.5 = 768)")
@@ -603,10 +602,12 @@ def main() -> None:
     p.add_argument("--queue-depth", type=int, default=8)
     p.add_argument("--device", default="auto")
     p.add_argument(
-        "--max-seq-length", type=int, default=512,
+        "--max-seq-length",
+        type=int,
+        default=512,
         help="Truncate inputs to this many tokens. nomic-v1.5 default is 8192; "
-             "capping at 512 makes encode ~2x faster with minimal recall loss "
-             "since our ~512-word chunks rarely exceed 700 tokens.",
+        "capping at 512 makes encode ~2x faster with minimal recall loss "
+        "since our ~512-word chunks rarely exceed 700 tokens.",
     )
     fp16 = p.add_mutually_exclusive_group()
     fp16.add_argument("--fp16", dest="fp16", action="store_true", default=True)

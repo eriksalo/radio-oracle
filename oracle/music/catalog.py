@@ -88,6 +88,7 @@ _BY_RE = re.compile(r"^(.*?)\s+by\s+(.+)$", re.IGNORECASE)
 # Nicknames people actually say. Normalised request → normalised artist.
 ALIASES: dict[str, str] = {
     "the boss": "bruce springsteen",
+    "boss": "bruce springsteen",
     "springsteen": "bruce springsteen",
     "the king": "elvis presley",
     "elvis": "elvis presley",

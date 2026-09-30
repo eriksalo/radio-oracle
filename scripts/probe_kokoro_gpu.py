@@ -49,7 +49,15 @@ def mem(tag: str) -> None:
 def main() -> None:
     model = os.environ.get("KOKORO_MODEL", "models/kokoro-v1.0.onnx")
     limit_mb = int(os.environ.get("GPU_MEM_LIMIT_MB", "0"))
-    print("onnxruntime", ort.__version__, "providers", ort.get_available_providers(), "model", model, flush=True)
+    print(
+        "onnxruntime",
+        ort.__version__,
+        "providers",
+        ort.get_available_providers(),
+        "model",
+        model,
+        flush=True,
+    )
     mem("start")
     from kokoro_onnx import Kokoro
 
@@ -65,8 +73,15 @@ def main() -> None:
     if limit_mb:
         cuda_opts["gpu_mem_limit"] = limit_mb * 1024 * 1024
     t = time.monotonic()
-    k.sess = ort.InferenceSession(model, so, providers=[("CUDAExecutionProvider", cuda_opts), "CPUExecutionProvider"])
-    print("session providers:", k.sess.get_providers(), f"load {time.monotonic() - t:.1f}s", flush=True)
+    k.sess = ort.InferenceSession(
+        model, so, providers=[("CUDAExecutionProvider", cuda_opts), "CPUExecutionProvider"]
+    )
+    print(
+        "session providers:",
+        k.sess.get_providers(),
+        f"load {time.monotonic() - t:.1f}s",
+        flush=True,
+    )
     mem("after CUDA session")
     k.create("warm up.", voice="am_michael")
     mem("after warm-up")
@@ -79,7 +94,10 @@ def main() -> None:
                 samples, sr = k.create(text, voice="am_michael", speed=1.0)
                 best = min(best, time.monotonic() - t)
                 secs = len(samples) / sr
-            print(f"{len(text):4d} chars -> {secs:5.2f}s audio in {best:5.2f}s  RTF {best / secs:4.2f}", flush=True)
+            print(
+                f"{len(text):4d} chars -> {secs:5.2f}s audio in {best:5.2f}s  RTF {best / secs:4.2f}",
+                flush=True,
+            )
         except Exception as e:  # noqa: BLE001
             print(f"{len(text):4d} chars -> FAILED: {e}", flush=True)
         mem(f"after {len(text)} chars")

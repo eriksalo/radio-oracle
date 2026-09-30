@@ -31,7 +31,9 @@ def main() -> None:
             print("No books indexed yet.")
             return
         for b in books:
-            print(f"  [{b.id:3d}] {b.title} — {b.author or 'Unknown'} ({b.total_chapters} ch, {b.total_paragraphs} para)")
+            print(
+                f"  [{b.id:3d}] {b.title} — {b.author or 'Unknown'} ({b.total_chapters} ch, {b.total_paragraphs} para)"
+            )
         print(f"\n{len(books)} books total")
         return
 

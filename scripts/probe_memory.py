@@ -53,8 +53,10 @@ def main() -> None:
     try:
         import sys as _s
 
-        print(f"   torch imported: {'torch' in _s.modules}; sentence_transformers: "
-              f"{'sentence_transformers' in _s.modules}")
+        print(
+            f"   torch imported: {'torch' in _s.modules}; sentence_transformers: "
+            f"{'sentence_transformers' in _s.modules}"
+        )
     except Exception:  # noqa: BLE001
         pass
     from oracle.stt import create_stt

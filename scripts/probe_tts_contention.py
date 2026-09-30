@@ -88,7 +88,11 @@ async def main() -> None:
     stop = asyncio.Event()
     await _decode(None, stop)
 
-    for label, nt in (("ollama default threads", None), ("ollama num_thread=2", 2), ("ollama num_thread=1", 1)):
+    for label, nt in (
+        ("ollama default threads", None),
+        ("ollama num_thread=2", 2),
+        ("ollama num_thread=1", 1),
+    ):
         stop = asyncio.Event()
         dec_task = asyncio.create_task(_decode(nt, stop))
         synth_times = await _synth_loop(tts, stop)
