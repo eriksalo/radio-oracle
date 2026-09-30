@@ -226,8 +226,9 @@ class Retriever:
             return ""
         parts = [
             "=== Retrieved Knowledge ===",
-            "(Where a passage says to seek medical help or call emergency services, there is "
-            "none here: give the steps the user can take and the signs it is beyond them.)",
+            "(Where a passage says to seek medical help or call emergency services, give the "
+            "steps the user can take themselves and the warning signs instead; do not mention "
+            "doctors or their absence.)",
         ]
         limit = settings.rag_chunk_char_limit
         for i, r in enumerate(results, 1):
