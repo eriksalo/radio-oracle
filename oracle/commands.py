@@ -690,73 +690,29 @@ def _describe_music(catalog: Catalog | None, query: str | None) -> str:
     )
 
 
-_KB_LABELS = {
-    "wikipedia": "Wikipedia",
-    "gutenberg": "the Project Gutenberg books",
-    "wikimed": "WikiMed",
-    "wikibooks": "Wikibooks",
-    "ifixit": "iFixit repair guides",
-    "crashcourse": "Crash Course",
-}
+DEVICE_DESCRIPTION = (
+    "Hello. I'm glad you found me. I am the Librarian. I was built by Erik Salo, "
+    "in Boulder, Colorado, in 2026. I don't know how long ago that was for you. "
+    "I hold the knowledge of the old world: more than eleven million passages of "
+    "encyclopedia, a medical reference, repair guides for the machines you'll find "
+    "lying around, and lessons on almost any subject you could want to learn. "
+    "If you're hurt, I can help you understand it. If something is broken, I can "
+    "help you fix it. If you're simply lost, I can help you think. "
+    "I also keep sixty thousand books, and four thousand songs from nearly "
+    "eighteen hundred artists. "
+    'Ask me anything. Or say "read a book," or "play some music." '
+    "I'm listening."
+)
 
 
-def _millions(n: int) -> str:
-    if n >= 1_000_000:
-        return f"about {n / 1_000_000:.1f} million"
-    if n >= 1_000:
-        return f"about {round(n / 1000)} thousand"
-    return str(n)
+def describe_device(catalog: Catalog | None = None) -> str:
+    """ "Tell me about this device" — Erik's fixed passage (2026-09-30).
 
-
-def describe_device(catalog: Catalog | None) -> str:
-    """ "Tell me about this device" — who built it and what it holds, with
-    live counts from the music catalog, the book library and the FAISS
-    collections."""
-    parts = [
-        "I'm the Librarian: an offline radio built by Erik Salo, started in April 2026, "
-        "running on a Jetson computer inside a vintage radio cabinet. Nothing I know comes "
-        "from the internet; it's all stored here."
-    ]
-    try:
-        if catalog is not None:
-            st = catalog.stats()
-            parts.append(
-                f"The music library holds {st['tracks']:,} songs from {st['artists']:,} artists "
-                f"across {st['albums']:,} albums."
-            )
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"music stats failed: {e}")
-    try:
-        from oracle.books.library import Library
-
-        lib = Library()
-        try:
-            parts.append(f"The book collection has {lib.count_books():,} books.")
-        finally:
-            lib.close()
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"book count failed: {e}")
-    try:
-        from oracle.core import _get_retriever
-
-        r = _get_retriever()
-        sizes = r.collection_sizes() if r else {}
-        sizes.pop("music", None)
-        if sizes:
-            big = [
-                f"{_millions(n)} passages from {_KB_LABELS.get(k, k)}"
-                for k, n in sorted(sizes.items(), key=lambda kv: -kv[1])
-                if n >= 1_000_000
-            ]
-            small = [_KB_LABELS.get(k, k) for k, n in sizes.items() if n < 1_000_000]
-            kb = "The knowledge base has " + ", ".join(big)
-            if small:
-                kb += ", plus " + ", ".join(small)
-            parts.append(kb + ".")
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"kb summary failed: {e}")
-    parts.append("Ask me anything, or say 'read a book' or 'play some music'.")
-    return " ".join(parts)
+    The counts are written out in words on purpose: they are spoken, and the
+    passage is addressed to whoever finds the radio, not to a spreadsheet.
+    *catalog* is accepted for the callers that still pass it.
+    """
+    return DEVICE_DESCRIPTION
 
 
 def _describe_books(query: str | None) -> str:

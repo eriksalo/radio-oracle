@@ -101,34 +101,14 @@ class _Catalog:
         return {"tracks": 4024, "artists": 312, "albums": 401, "hours": 250.0}
 
 
-def test_describe_device_counts(monkeypatch):
-    class _Lib:
-        def count_books(self):
-            return 60030
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("oracle.books.library.Library", _Lib)
-
-    class _Retriever:
-        def collection_sizes(self):
-            return {
-                "wikipedia": 11_476_000,
-                "gutenberg": 10_301_735,
-                "ifixit": 181_502,
-                "music": 4024,
-            }
-
-    monkeypatch.setattr("oracle.core._get_retriever", lambda: _Retriever())
+def test_describe_device_is_the_fixed_passage():
     text = commands.describe_device(_Catalog())
-    assert "built by Erik Salo" in text and "April 2026" in text
-    assert "4,024 songs from 312 artists across 401 albums" in text
-    assert "60,030 books" in text
-    assert "about 11.5 million passages from Wikipedia" in text
-    assert "about 10.3 million passages from the Project Gutenberg books" in text
-    kb = text.split("The knowledge base")[1].split("Ask me anything")[0]
-    assert "plus iFixit repair guides" in kb and "music" not in kb
+    assert text == commands.DEVICE_DESCRIPTION
+    assert text.startswith("Hello. I'm glad you found me. I am the Librarian.")
+    assert "built by Erik Salo, in Boulder, Colorado, in 2026" in text
+    assert text.endswith("I'm listening.")
+    # No live counts any more: nothing in it depends on the catalog.
+    assert commands.describe_device(None) == text
 
 
 @pytest.mark.asyncio
