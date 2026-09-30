@@ -153,7 +153,7 @@ async def test_dispatch_accepts_pre_text(monkeypatch):
 )
 def test_dispatch_result_marks_explicit_music_requests(monkeypatch, action, starts):
     monkeypatch.setattr(commands, "_speak", lambda *a, **k: None)
-    monkeypatch.setattr(commands, "_play_query", lambda p, c, q: "Pink Floyd")
+    monkeypatch.setattr(commands, "_play_query", lambda p, c, q, raw="": "Pink Floyd")
 
     class P:
         def next(self):

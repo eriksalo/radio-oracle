@@ -54,11 +54,12 @@ class ReaderSession:
     @staticmethod
     def is_confident_match(query: str, book: Book) -> bool:
         """Every meaningful word of the request appears in the title or
-        author — otherwise the app should confirm before reading aloud."""
-        stop = {"the", "a", "an", "of", "by", "and", "book", "me", "to", "read", "please"}
-        words = [w for w in re.findall(r"[a-z0-9]+", query.lower()) if w not in stop and len(w) > 1]
-        hay = f"{book.title} {book.author}".lower()
-        return bool(words) and all(w in hay for w in words)
+        author, with no other words in front of it and at most one after
+        (outside a subtitle) — otherwise the app confirms before reading
+        aloud. See ``oracle.books.ranking.is_confident_match``."""
+        from oracle.books.ranking import is_confident_match
+
+        return is_confident_match(query, book)
 
     def current_book(self) -> Book | None:
         """The most recently read book (freshest bookmark), if any."""

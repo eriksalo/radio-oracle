@@ -208,22 +208,62 @@ class Library:
 
     @_synchronized
     def search(self, query: str) -> list[Book]:
-        """Title/author search — FTS5 (voice-friendly, word-based) with a
-        LIKE fallback for substrings and for SQLite builds without FTS5."""
+        """Title/author search, ranked so the famous work wins.
+
+        Candidates come from FTS5 (voice-friendly, word-based) plus a LIKE
+        pass on title and author (substrings, and SQLite builds without
+        FTS5); ``oracle.books.ranking`` then orders them — exact title
+        first, no extra words before the request, books *by* an author
+        before books *about* them, a canonical-works table as tie-break.
+        """
         if not query.strip():
             return []
-        fts_hits = self._search_fts(query)
-        if fts_hits:
-            return fts_hits
+        from oracle.books import ranking
+
+        candidates: list[Book] = []
+        seen: set[int] = set()
+        for b in self._search_fts(query, limit=40):
+            if b.id not in seen:
+                candidates.append(b)
+                seen.add(b.id)
+        for b in self._search_like(query, limit=40):
+            if b.id not in seen:
+                candidates.append(b)
+                seen.add(b.id)
+        # "Read Walden" must still find Thoreau when FTS ranks Walter
+        # Walden's novel first: the canonical table knows the author.
+        canon = ranking.canonical_for(query)
+        if canon and canon[1]:
+            for b in self._search_like(canon[1], limit=60, author_only=True):
+                if b.id not in seen and canon[0] in ranking.normalize(b.title):
+                    candidates.append(b)
+                    seen.add(b.id)
+        # "Read me some Dickens": make sure the author's best-known novel is
+        # among the candidates even when they wrote 150 books.
+        flagship = ranking.flagship_for_author(query, candidates)
+        if flagship and flagship[1]:
+            for b in self._search_like(flagship[1].split()[-1], limit=60):
+                if b.id not in seen and flagship[1] in ranking.normalize(b.title):
+                    candidates.append(b)
+                    seen.add(b.id)
+        return ranking.rank(query, candidates)
+
+    @_synchronized
+    def _search_like(self, query: str, limit: int = 20, author_only: bool = False) -> list[Book]:
         pattern = f"%{query}%"
-        rows = self._conn.execute(
-            "SELECT * FROM books WHERE title LIKE ? OR author LIKE ? ORDER BY title",
-            (pattern, pattern),
-        ).fetchall()
+        if author_only:
+            rows = self._conn.execute(
+                "SELECT * FROM books WHERE author LIKE ? ORDER BY title LIMIT ?", (pattern, limit)
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM books WHERE title LIKE ? OR author LIKE ? ORDER BY title LIMIT ?",
+                (pattern, pattern, limit),
+            ).fetchall()
         return [Book(**dict(r)) for r in rows]
 
     @_synchronized
-    def _search_fts(self, query: str) -> list[Book]:
+    def _search_fts(self, query: str, limit: int = 20) -> list[Book]:
         terms = re.findall(r"\w+", query)
         if not terms:
             return []
@@ -234,8 +274,8 @@ class Library:
             match = " ".join(f'"{t}"' for t in terms)
             rows = self._conn.execute(
                 "SELECT b.* FROM books_fts f JOIN books b ON b.id = f.rowid "
-                "WHERE books_fts MATCH ? ORDER BY rank LIMIT 20",
-                (match,),
+                "WHERE books_fts MATCH ? ORDER BY rank LIMIT ?",
+                (match, limit),
             ).fetchall()
             return [Book(**dict(r)) for r in rows]
         except sqlite3.OperationalError as e:

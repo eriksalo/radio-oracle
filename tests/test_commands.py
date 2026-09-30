@@ -138,6 +138,10 @@ class _FakeCatalog:
         self.queries.append(q)
         return self._results
 
+    def search_ranked(self, q, hint=None):
+        self.queries.append(q)
+        return self._results, ("artist" if self._results else "none")
+
 
 class _FakeTrack:
     def __init__(self, artist="Pink Floyd", album="Wish You Were Here", title="Have a Cigar"):
@@ -419,15 +423,20 @@ class _StatsCatalog:
         class T:
             artist = "Pink Floyd"
             title = "Money"
+            album = "The Dark Side of the Moon"
 
         return [T(), T()] if q == "pink floyd" else []
+
+    def search_ranked(self, q, hint=None):
+        hits = self.search(q)
+        return hits, ("artist" if hits else "none")
 
 
 def test_describe_music_summary_and_filtered():
     text = commands._describe_music(_StatsCatalog(), None)
     assert "4024 tracks" in text and "Pink Floyd" in text
     text = commands._describe_music(_StatsCatalog(), "pink floyd")
-    assert "2 tracks match" in text
+    assert "2 tracks by Pink Floyd" in text
     text = commands._describe_music(_StatsCatalog(), "zzz")
     assert "Nothing" in text
 

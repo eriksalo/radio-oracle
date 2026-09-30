@@ -12,7 +12,19 @@ from oracle.rag.backends.chroma import ChromaBackend
 from oracle.rag.embedder import Embedder
 from oracle.rag.modes import RetrievalMode, params_for
 from oracle.rag.reranker import CrossEncoderReranker
+from oracle.rag.router import bias_for, question_type
 from oracle.rag.router import route as router_route
+
+# How a source is named inside the prompt: the model reads these, so they
+# carry what it needs to weigh the passage ("old book").
+_SOURCE_LABELS = {
+    "gutenberg": "gutenberg (a book from before 1930 — historical, check its advice)",
+    "wikimed": "wikimed (medical reference)",
+    "wikipedia": "wikipedia",
+    "ifixit": "ifixit (repair guide)",
+    "wikibooks": "wikibooks (textbook)",
+    "crashcourse": "crashcourse (lesson)",
+}
 
 
 class Retriever:
@@ -154,16 +166,41 @@ class Retriever:
             except Exception as e:
                 logger.warning(f"Backend '{name}' raised during query: {e}")
 
-        hits.sort(key=lambda h: h.distance)
-
-        # Relevance gate: better to inject nothing than off-topic chunks —
-        # the persona is instructed to say when the archives have no answer.
+        # Relevance gate on the *raw* distance: better to inject nothing
+        # than off-topic chunks — the persona is instructed to say when the
+        # archives have no answer.
         before = len(hits)
         hits = [h for h in hits if h.distance <= settings.rag_max_distance]
         if before and not hits:
             logger.info(
                 f"RAG: all {before} hits above distance gate "
                 f"{settings.rag_max_distance} — injecting nothing"
+            )
+
+        # Merge by biased distance: the question type says which shelves
+        # to trust (medical → WikiMed, how-to → iFixit/Wikibooks, plot →
+        # Gutenberg + Wikipedia); Gutenberg loses close races everywhere
+        # else. Then keep the top hits diverse: one collection may not
+        # take every slot while another has a hit under the gate.
+        bias = bias_for(query_text) if settings.rag_collection_bias else {}
+        qtype = question_type(query_text)
+        hits.sort(key=lambda h: h.distance + bias.get(h.source, 0.0))
+        if len(hits) > final_k and len({h.source for h in hits}) > 1:
+            cap = max(1, final_k - 1)
+            picked: list[Hit] = []
+            spill: list[Hit] = []
+            per: dict[str, int] = {}
+            for h in hits:
+                if per.get(h.source, 0) < cap:
+                    picked.append(h)
+                    per[h.source] = per.get(h.source, 0) + 1
+                else:
+                    spill.append(h)
+            hits = picked + spill
+        if hits:
+            logger.debug(
+                f"RAG[{qtype}]: "
+                + ", ".join(f"{h.source}@{h.distance:.2f}" for h in hits[:final_k])
             )
 
         if params.rerank_pool > 0 and hits and settings.rag_rerank_enabled:
@@ -185,7 +222,8 @@ class Retriever:
             # ("according to the Wikipedia entry on X") instead of just
             # naming the collection.
             title = (r.get("metadata") or {}).get("title") or ""
-            label = f"{source} — {title}" if title else source
+            shelf = _SOURCE_LABELS.get(source, source)
+            label = f"{shelf} — {title}" if title else shelf
             text = r["text"]
             if limit and len(text) > limit:
                 # Full 512-word chunks are ~3.3KB each; five of them cost

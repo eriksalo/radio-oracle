@@ -63,7 +63,9 @@ class ContextBuilder:
             logger.debug(f"recent activity unavailable: {e}")
             return None
         return (
-            f"What you remember doing with {self._user.title()} (from the log, reliable):\n{text}"
+            f"What you remember doing with {self._user.title()} (from the log, reliable; "
+            f"background only — bring it up when asked or when it is what the question "
+            f"is about):\n{text}"
             if text
             else None
         )
@@ -74,7 +76,10 @@ class ContextBuilder:
         try:
             profile = self._store.get_profile(self._user)
             if profile:
-                parts.append(f"What you remember about {self._user.title()}:\n{profile}")
+                parts.append(
+                    f"What you remember about {self._user.title()} (background; use only when "
+                    f"relevant to what they ask):\n{profile}"
+                )
             prior = self._store.latest_summarized_session(exclude=self._session_id, user=self._user)
             if prior:
                 when = _humanize_date(prior["started_at"])

@@ -76,7 +76,7 @@ def test_unreachable_sidecar_falls_back_to_local(server_mode, monkeypatch):
 
 def test_unit_failure_keeps_sidecar_and_skips(server_mode, monkeypatch):
     """A 5xx / X-Error for one unit yields a short silence; the sidecar stays."""
-    calls = _fake_httpx(monkeypatch, synth=[0.1])
+    _fake_httpx(monkeypatch, synth=[0.1])
 
     class _Err(_Resp):
         headers = {"X-Error": "boom"}
@@ -130,7 +130,7 @@ def test_speech_units_chunks_and_sanitizes(monkeypatch):
     from oracle.tts import speech_units
 
     monkeypatch.setattr(settings, "reading_unit_max_words", 8)
-    text = ". LOOMINGS. Call me Ishmael. Some years ago, never mind how long precisely, I sailed. — Yes!"
+    text = ". LOOMINGS. Call me Ishmael. Some years ago, never mind how long precisely, I sailed. — Yes!"  # noqa: E501
     units = speech_units(text)
     assert units[0] == "LOOMINGS. Call me Ishmael."
     assert all(len(u.split()) <= 8 for u in units)  # long sentences are cut at clauses
@@ -186,7 +186,7 @@ def test_speech_units_never_exceed_limit(monkeypatch):
     from oracle.tts import speech_units
 
     monkeypatch.setattr(settings, "reading_unit_max_words", 6)
-    long = "The knowledge base has about eleven million passages from Wikipedia, about ten million from Gutenberg, plus WikiMed and iFixit repair guides for everyone."
+    long = "The knowledge base has about eleven million passages from Wikipedia, about ten million from Gutenberg, plus WikiMed and iFixit repair guides for everyone."  # noqa: E501
     units = speech_units(long)
     assert all(len(u.split()) <= 6 for u in units)
     assert " ".join(units).split() == long.split()

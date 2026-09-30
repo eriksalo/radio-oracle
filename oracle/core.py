@@ -113,6 +113,49 @@ class SpeechSplitter:
         return tail
 
 
+# Scripts a Kokoro English voice cannot say. Qwen occasionally drops a
+# Chinese token into an English sentence ("Soap doesn't kill germs—它
+# works…", 2026-09-30); the TTS mangles it and the transcript keeps it.
+_FOREIGN_RE = re.compile(
+    "[\u0400-\u04ff\u0530-\u058f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0e7f\u1100-\u11ff"
+    "\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]+"
+)
+_SENTENCE_TERMINAL_RE = re.compile(r"[.!?…][\"'”’)]*\s*$")
+
+
+def strip_foreign(text: str) -> str:
+    """Drop runs of non-Latin script; collapse the whitespace they leave."""
+    if not _FOREIGN_RE.search(text):
+        return text
+    return re.sub(r"[ \t]{2,}", " ", _FOREIGN_RE.sub("", text))
+
+
+def trim_to_sentence_end(text: str) -> str:
+    """*text* cut back to its last complete sentence (all of it if it
+    already ends one, or if it has no sentence end at all)."""
+    stripped = text.rstrip()
+    if not stripped or _SENTENCE_TERMINAL_RE.search(stripped):
+        return stripped
+    parts = _SENTENCE_END_RE.split(stripped)
+    if len(parts) <= 1:
+        return stripped
+    return " ".join(p.strip() for p in parts[:-1] if p.strip())
+
+
+def units_beyond(units: list[str], kept: str) -> set[str]:
+    """Which of the emitted speech *units* fall past the end of *kept*
+    (the text we decided to speak): those are the unfinished tail."""
+    keep_words = len(kept.split())
+    seen = 0
+    beyond: set[str] = set()
+    for u in units:
+        n = len(u.split())
+        if seen >= keep_words:
+            beyond.add(u)
+        seen += n
+    return beyond
+
+
 async def _init_common() -> tuple[str, ConversationStore, str]:
     """Shared init: check Ollama, load persona, create session."""
     available = await check_ollama()
@@ -164,10 +207,12 @@ def _try_rag_query(user_input: str) -> str:
         return ""
     try:
         from oracle.rag.modes import detect_mode
+        from oracle.rag.router import augment_query
 
         # "tell me more" / "go deeper" style wording upgrades to deep mode:
-        # wider candidate pool + cross-encoder rerank.
-        results = retriever.query(user_input, mode=detect_mode(user_input))
+        # wider candidate pool + cross-encoder rerank. Plot questions get
+        # the words a plot summary would use appended (router.augment_query).
+        results = retriever.query(augment_query(user_input), mode=detect_mode(user_input))
         if results:
             from oracle.activity import emit
 
@@ -615,7 +660,9 @@ async def _voice_turn(
     # sentence). The first unit may be a clause so the first audio doesn't
     # wait for a whole sentence.
     text_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=8)
-    audio_q: asyncio.Queue[np.ndarray | None] = asyncio.Queue(maxsize=3)
+    audio_q: asyncio.Queue[tuple[str, np.ndarray] | None] = asyncio.Queue(maxsize=3)
+    enqueued: list[str] = []
+    skip: set[str] = set()  # units past a length cut-off, not yet spoken
 
     async def _synth_worker() -> None:
         while True:
@@ -623,16 +670,17 @@ async def _voice_turn(
             if unit is None:
                 await audio_q.put(None)
                 return
-            if aborted():
+            if aborted() or unit in skip:
                 continue  # keep draining so the producer never blocks
-            await audio_q.put(await asyncio.to_thread(vc.tts.synthesize, unit))
+            await audio_q.put((unit, await asyncio.to_thread(vc.tts.synthesize, unit)))
 
     async def _play_worker() -> None:
         while True:
-            audio_out = await audio_q.get()
-            if audio_out is None:
+            item = await audio_q.get()
+            if item is None:
                 return
-            if aborted():
+            unit, audio_out = item
+            if aborted() or unit in skip:
                 continue
             timer.mark_once("first_audio")
             await asyncio.to_thread(play_audio, audio_out, vc.tts.sample_rate, should_abort)
@@ -645,18 +693,30 @@ async def _voice_turn(
         async for token in stream_chat(messages, stats=stats):
             if aborted():
                 break
+            token = strip_foreign(token)
+            if not token:
+                continue
             response_parts.append(token)
             for unit in splitter.feed(token):
+                enqueued.append(unit)
                 await text_q.put(unit)
         if not aborted():
             tail = splitter.flush()
-            if tail and stats.get("done_reason") == "length" and _SENTENCE_END_RE.split(tail):
-                # Hit the token cap mid-sentence: don't speak a fragment
-                # that trails off; the stored reply keeps only what was said.
-                logger.info(f"Reply hit num_predict; dropping unfinished tail {tail[:40]!r}…")
-                spoken = "".join(response_parts)
-                response_parts[:] = [spoken[: len(spoken) - len(tail)].rstrip()]
-            elif tail:
+            if stats.get("done_reason") == "length":
+                # Hit the token cap: don't speak a sentence that trails off.
+                # Keep only complete sentences; a clause unit already cut
+                # from the unfinished sentence is skipped if it hasn't
+                # started playing yet.
+                full = "".join(response_parts)
+                kept = trim_to_sentence_end(full)
+                if kept != full.rstrip():
+                    dropped = full[len(kept) :][:60]
+                    logger.info(f"Reply hit num_predict; dropping unfinished tail {dropped!r}…")
+                    skip.update(units_beyond(enqueued, kept))
+                    response_parts[:] = [kept]
+                    tail = ""
+            if tail:
+                enqueued.append(tail)
                 await text_q.put(tail)
     finally:
         await text_q.put(None)
@@ -664,6 +724,7 @@ async def _voice_turn(
         await play
 
     response_text = "".join(response_parts)
+    timer.note(done_reason=stats.get("done_reason") or "stop")
     logger.info(f"Oracle: {response_text}")
     emit("answered", text=response_text)
     vc.store.add_message(vc.session_id, "assistant", response_text)

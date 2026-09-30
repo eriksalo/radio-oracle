@@ -201,6 +201,9 @@ class OracleSettings(BaseSettings):
     # searched via Catalog, not RAG — its rows polluted answers as
     # "Retrieved Knowledge").
     rag_exclude_collections: str = "music"
+    # Weight collections by question type when merging hits (oracle/rag/router.py).
+    # Off = pure distance merge, which let 10 M Gutenberg chunks dominate.
+    rag_collection_bias: bool = True
     # Kill-switch for cross-encoder reranking (deep mode) if it proves too
     # slow on the Jetson CPU.
     rag_rerank_enabled: bool = True

@@ -140,6 +140,10 @@ def _build_keyword_table() -> list[_KeywordRule]:
         (r"\b(?:play|put\s+on)\s+(?:the\s+|some\s+)?music\s+(?:by|from|like)\b", "play_qualified"),
         # Bare "play music" (utterance ends there) = resume/switch channel.
         (r"\b(?:play|back\s+to|put\s+on)\s+(?:the\s+|some\s+)?music[.!]?\s*$", "music_on"),
+        (r"\bturn\s+(?:the\s+)?(?:radio|music)\s+(?:back\s+)?on\b", "music_on"),
+        # "Can you play X" is a request, not a question for the oracle.
+        (r"^\s*(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:play|put\s+on)\b", "play_request"),
+        (r"\bi\s+don'?t\s+like\s+this\b|\bnot\s+this\s+(?:one|song)\b", "next"),
         # Exploration.
         (
             r"\bwhat\s+music\b|\bwhat\s+(?:songs|albums|artists)\s+(?:do|are)\b|\bexplore\s+(?:the\s+)?music\b",
@@ -148,6 +152,9 @@ def _build_keyword_table() -> list[_KeywordRule]:
         (r"\bwhat\s+books?\b|\bwhich\s+books?\b|\bexplore\s+(?:the\s+)?books?\b", "list_books"),
         # Chapter / track / album ops.
         (r"\bnext\s+chapter\b", "next_chapter"),
+        # "skip to the last chapter" is a jump; "the last chapter" alone is
+        # the one before this ("read the last chapter again").
+        (r"\b(?:skip|go|jump)\s+to\s+the\s+(?:last|final)\s+chapter\b", "goto_chapter"),
         (
             r"\b(?:previous|last|prior)\s+chapter\b|\b(?:go\s+)?back\s+(?:a|one)\s+chapter\b",
             "prev_chapter",
@@ -194,6 +201,74 @@ def _keyword_match(text: str) -> str | None:
         if rule.pattern.search(norm):
             return rule.action
     return None
+
+
+# Questions *about the catalog* ("Do you have any Springsteen?", "Any
+# albums by the Beatles?", "Is there any jazz?", "What kind of music is
+# there?") start with an interrogative and used to be swept into the
+# oracle as Wikipedia questions (quality eval 2026-09-30). They are
+# exploration commands; the channel is read from the nouns, and a bare
+# "Do you have any Springsteen?" goes to the LLM intent step instead of
+# the oracle.
+_CATALOG_Q_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:do|did|have)\s+(?:you|we)\s+(?:have|got|own|carry|keep)\b|"
+    r"(?:is|are)\s+there\s+(?:any|some|a|an)\b|"
+    r"(?:any|what|which|how\s+many)\s+(?:songs?|albums?|artists?|music|tracks?|tunes?|bands?|"
+    r"books?|novels?|stories|story|authors?|poems?|poetry|titles?)\b|"
+    r"what\s+kind\s+of\s+(?:music|songs?|books?|stories)\b|"
+    r"what\s+(?:music|books?)\s+(?:is|are)\s+(?:there|available)\b"
+    r")",
+    re.IGNORECASE,
+)
+_MUSIC_NOUN_RE = re.compile(
+    r"\b(?:songs?|albums?|artists?|music|tracks?|tunes?|bands?|singers?|records?|jazz|blues|rock|"
+    r"folk|country|classical|pop)\b",
+    re.IGNORECASE,
+)
+_BOOK_NOUN_RE = re.compile(
+    r"\b(?:books?|novels?|stories|story|authors?|poems?|poetry|titles?|read|reading|writers?)\b",
+    re.IGNORECASE,
+)
+_OBJECT_STRIP_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:do|did|have)\s+(?:you|we)\s+(?:have|got|own|carry|keep)|"
+    r"(?:is|are)\s+there|what\s+kind\s+of|how\s+many|what|which|any"
+    r")?\s*(?:any|some|a|an|the|more)?\s*"
+    r"(?:songs?|albums?|artists?|music|tracks?|tunes?|bands?|books?|novels?|stories|story|"
+    r"authors?|poems?|poetry|titles?)?\s*(?:by|from|of|about|like)?\s*",
+    re.IGNORECASE,
+)
+_OBJECT_TAIL_RE = re.compile(
+    r"\s*(?:(?:do|did|does)\s+(?:you|we|i)\s+(?:have|got|own|keep|carry)|(?:is|are)\s+there|"
+    r"have\s+you\s+got|in\s+(?:the\s+)?(?:library|archive|collection)|available|around|"
+    r"on\s+(?:this|the)\s+(?:radio|device|thing))?\s*[.?!]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _catalog_question(text: str) -> tuple[str, str | None] | None:
+    """(action, query) for a question about what the radio holds, or None.
+
+    Returns ``("list_music", q)`` / ``("list_books", q)`` when the nouns
+    say which shelf; ``("ask_llm", None)`` when they don't ("Do you have
+    any Springsteen?") so the caller skips the oracle and lets the LLM
+    intent step decide.
+    """
+    if not _CATALOG_Q_RE.match(text):
+        return None
+    music = bool(_MUSIC_NOUN_RE.search(text))
+    book = bool(_BOOK_NOUN_RE.search(text))
+    if re.search(r"\b(?:by|from|about)\b", text, re.IGNORECASE):
+        query = _extract_qualifier(text)
+    else:
+        obj = _OBJECT_TAIL_RE.sub("", _OBJECT_STRIP_RE.sub("", text, count=1)).strip(" ,")
+        query = obj or None
+    if music and not book:
+        return ("list_music", query)
+    if book and not music:
+        return ("list_books", query)
+    return ("ask_llm", None)
 
 
 # Cheap question detector — skips the LLM-intent round trip (~2-3s) for the
@@ -389,23 +464,30 @@ async def _question_turns(
             )
 
 
-def _play_query(player: Player, catalog: Catalog, query: str) -> str | None:
+def _play_query(player: Player, catalog: Catalog, query: str, raw_text: str = "") -> str | None:
     """Search and start playback. Returns a short human label on success."""
     import random
 
-    hits = catalog.search(query)
     from oracle.activity import emit
 
-    emit("music_request", query=query, hits=len(hits))
+    hint = _play_hint(raw_text) or _play_hint(query)
+    # "the album Harvest" → the words "the album" are the hint, not the name.
+    cleaned = re.sub(r"^\s*(?:the\s+)?(?:album|record|song|track|tune)\s+", "", query, flags=re.I)
+    hits, tier = catalog.search_ranked(cleaned or query, hint=hint)
+    emit("music_request", query=query, hits=len(hits), tier=tier)
     if not hits:
         return None
-    # Random hit, not hits[0]: "play Pink Floyd" should feel like tuning
-    # into that artist, not always the alphabetically first song.
+    # Random hit within the best tier, not hits[0]: "play Pink Floyd"
+    # should feel like tuning into that artist, not always the
+    # alphabetically first song.
     track = random.choice(hits)
     player.stop()
     player.play(track=track)
-    label = track.artist or track.album or track.title
-    return label
+    if tier in ("artist", "genre", "substring"):
+        return track.artist or track.album or track.title
+    if tier.startswith("album"):
+        return f"{track.album}, {track.artist}" if track.artist else track.album
+    return f"{track.title}, {track.artist}" if track.artist else track.title
 
 
 async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
@@ -415,7 +497,11 @@ async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
     about (2026-09-28: the LLM replied that it can't read books aloud)."""
     action = _keyword_match(text)
     query: str | None = None
-    if action is None and _looks_like_question(text):
+    catalog_q = _catalog_question(text) if action is None else None
+    if catalog_q is not None and catalog_q[0] != "ask_llm":
+        action, query = catalog_q
+        logger.info(f"Catalog question: action={action} query={query!r}")
+    elif action is None and catalog_q is None and _looks_like_question(text):
         # Interrogative and not a music/book keyword → straight to the
         # oracle, no LLM-intent round trip.
         action = "question"
@@ -431,6 +517,10 @@ async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
     else:
         if action == "play_qualified":
             action, query = "play", _extract_qualifier(text)
+        elif action == "play_request":
+            action, query = "play", _extract_play_object(text)
+        elif action in ("list_music", "list_books"):
+            query = _extract_qualifier(text)
         logger.info(f"Keyword intent: action={action} query={query!r}")
     return action, query
 
@@ -602,7 +692,34 @@ async def _listen_once(vc: VoiceContext, onset_timeout: float) -> str | None:
 
 # Pulls "…by Mark Twain" / "…about bees" out of keyword-matched
 # exploration phrases (the keyword table doesn't capture queries).
-_QUALIFIER_RE = re.compile(r"\b(?:by|from|about|like|of)\s+(.+?)[.?!]?\s*$", re.IGNORECASE)
+_QUALIFIER_RE = re.compile(
+    r"\b(?:by|from|about|like|of)\s+(.+?)"
+    r"(?:\s+(?:do|did|does)\s+(?:you|we|i)\s+(?:have|got|own|keep)|\s+(?:are|is)\s+there|"
+    r"\s+have\s+you\s+got)?[.?!]?\s*$",
+    re.IGNORECASE,
+)
+_PLAY_OBJECT_RE = re.compile(
+    r"\b(?:play|put\s+on)\s+(?:me\s+|us\s+)?(?:some\s+|a\s+little\s+|a\s+bit\s+of\s+)?(.+?)"
+    r"(?:\s+(?:for\s+me|please))?[.?!]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _extract_play_object(text: str) -> str | None:
+    """ "Can you play Mark Knopfler?" → "Mark Knopfler"."""
+    m = _PLAY_OBJECT_RE.search(text)
+    return m.group(1).strip() if m else None
+
+
+_HINT_RE = re.compile(r"\b(album|record|song|track|tune)\b", re.IGNORECASE)
+
+
+def _play_hint(raw_text: str) -> str | None:
+    m = _HINT_RE.search(raw_text)
+    if not m:
+        return None
+    w = m.group(1).lower()
+    return "album" if w in ("album", "record") else "song"
 
 
 _CHAPTER_SPEC_RE = re.compile(
@@ -675,12 +792,19 @@ def _describe_music(catalog: Catalog | None, query: str | None) -> str:
     if catalog is None:
         return "The music archive isn't available."
     if query:
-        hits = catalog.search(query)
+        hits, tier = catalog.search_ranked(query)
         if not hits:
             return f"Nothing in the music archive matches {query}."
-        artists = sorted({t.artist for t in hits if t.artist})[:4]
-        who = ", ".join(artists) if artists else hits[0].title
-        return f"{len(hits)} tracks match {query} — {who}. Say play and a name."
+        artists = sorted({t.artist for t in hits if t.artist})
+        albums = sorted({t.album for t in hits if t.album})
+        n = len(hits)
+        if tier == "artist" and len(artists) <= 2:
+            who = " and ".join(artists)
+            shelf = f", {len(albums)} album{'s' if len(albums) != 1 else ''}" if albums else ""
+            plural = "s" if n != 1 else ""
+            return f"Yes. {n} track{plural} by {who}{shelf}. Say play {artists[0]}."
+        who = ", ".join(artists[:4]) if artists else hits[0].title
+        return f"{n} tracks match {query} — {who}. Say play and a name."
     s = catalog.stats()
     sample = ", ".join(catalog.sample_artists(6))
     return (
@@ -869,7 +993,7 @@ def _do_action(
         if not query or catalog is None:
             _speak(vc, "What would you like to hear?", should_abort)
             return DispatchResult("radio")
-        label = _play_query(player, catalog, query)
+        label = _play_query(player, catalog, query, raw_text)
         if label is None:
             _speak(vc, f"I couldn't find anything for {query}.", should_abort)
         else:

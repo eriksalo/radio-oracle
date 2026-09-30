@@ -216,3 +216,40 @@ def test_splitter_flush_returns_tail_once():
     assert sp.feed("no punctuation here") == []
     assert sp.flush() == "no punctuation here"
     assert sp.flush() == ""
+
+
+# ---------------------------------------------------------------- hygiene
+
+
+def test_strip_foreign_drops_cjk_run_and_keeps_latin():
+    from oracle.core import strip_foreign
+
+    assert strip_foreign("Soap doesn't kill germs—它 works by breaking") == (
+        "Soap doesn't kill germs— works by breaking"
+    )
+    assert strip_foreign("Café déjà vu, naïve π") == "Café déjà vu, naïve π"
+    assert strip_foreign("") == ""
+
+
+def test_trim_to_sentence_end():
+    from oracle.core import trim_to_sentence_end
+
+    assert trim_to_sentence_end("One. Two. He doesn't claim immortality,") == "One. Two."
+    assert trim_to_sentence_end("Complete sentence.") == "Complete sentence."
+    assert trim_to_sentence_end("Ends with a quote.”") == "Ends with a quote.”"
+    assert trim_to_sentence_end("no terminator at all") == "no terminator at all"
+
+
+def test_units_beyond_marks_the_unfinished_tail():
+    from oracle.core import units_beyond
+
+    units = ["He treats death as natural,", "like birth.", "He doesn't claim immortality,"]
+    kept = "He treats death as natural, like birth."
+    assert units_beyond(units, kept) == {"He doesn't claim immortality,"}
+    assert units_beyond(units, " ".join(units)) == set()
+
+
+def test_clean_for_speech_drops_foreign_script():
+    from oracle.tts import clean_for_speech
+
+    assert clean_for_speech("germs—它 works") == "germs— works"

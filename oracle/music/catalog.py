@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +61,60 @@ def _resolve_track_path(stored: str) -> Path:
     return p.resolve()
 
 
+_QUOTES_RE = re.compile("[\u2018\u2019\u201a\u201b\u2032']")
+_NONWORD_RE = re.compile(r"[^a-z0-9]+")
+
+
+def norm(text: str | None) -> str:
+    """Fold a tag or a request so they compare the way people say them:
+    ASCII-folded, lowercase, ``&`` ↔ ``and``, apostrophes dropped (the
+    tag "Maybe I’m Amazed" carries a curly one), other punctuation to
+    spaces. Registered as the SQLite function ``norm`` so LIKE sees it."""
+    t = unicodedata.normalize("NFKD", text or "")
+    t = "".join(c for c in t if not unicodedata.combining(c)).lower()
+    t = t.replace("&", " and ").replace("+", " and ")
+    t = _QUOTES_RE.sub("", t)
+    return " ".join(_NONWORD_RE.sub(" ", t).split())
+
+
+def _word_match(needle: str, hay: str) -> bool:
+    """*needle* appears in *hay* as whole words ("ryan adams" is not in
+    "bryan adams"; "dylan" is in "bob dylan")."""
+    return bool(needle) and bool(re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", hay))
+
+
+_BY_RE = re.compile(r"^(.*?)\s+by\s+(.+)$", re.IGNORECASE)
+
+# Nicknames people actually say. Normalised request → normalised artist.
+ALIASES: dict[str, str] = {
+    "the boss": "bruce springsteen",
+    "springsteen": "bruce springsteen",
+    "the king": "elvis presley",
+    "elvis": "elvis presley",
+    "the fab four": "the beatles",
+    "beatles": "the beatles",
+    "the stones": "the rolling stones",
+    "zeppelin": "led zeppelin",
+    "zep": "led zeppelin",
+    "floyd": "pink floyd",
+    "the dead": "grateful dead",
+    "the who": "the who",
+    "bob marley": "bob marley and the wailers",
+    "ccr": "creedence clearwater revival",
+    "creedence": "creedence clearwater revival",
+    "csny": "crosby stills nash and young",
+    "elo": "electric light orchestra",
+    "the boss man": "bruce springsteen",
+    "cash": "johnny cash",
+    "dylan": "bob dylan",
+    "emmylou": "emmylou harris",
+    "knopfler": "mark knopfler",
+    "cohen": "leonard cohen",
+    "the piano man": "billy joel",
+}
+_MUSIC_SUFFIX_RE = re.compile(r"\s+(?:music|songs?|tracks?|tunes?|stuff)$")
+
+
 class Catalog:
     """SQLite-backed music catalog with tag extraction."""
 
@@ -67,6 +123,7 @@ class Catalog:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.create_function("norm", 1, norm, deterministic=True)
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -121,14 +178,86 @@ class Catalog:
         return _row_to_track(row) if row else None
 
     def search(self, query: str) -> list[Track]:
-        """Case-insensitive search across title, artist, album, genre."""
-        pattern = f"%{query}%"
+        """Loose search: the normalised request as a substring of the
+        normalised title, artist, album or genre. ``&``/``and``, curly
+        quotes and accents never get in the way. Ordered by artist, title."""
+        pattern = f"%{norm(query)}%"
+        if pattern == "%%":
+            return []
         rows = self._conn.execute(
-            f"{_TRACK_SELECT} WHERE title LIKE ? OR artist LIKE ? "
-            "OR album LIKE ? OR genre LIKE ? ORDER BY artist, title",
+            f"{_TRACK_SELECT} WHERE norm(title) LIKE ? OR norm(artist) LIKE ? "
+            "OR norm(album) LIKE ? OR norm(genre) LIKE ? ORDER BY artist, title",
             (pattern, pattern, pattern, pattern),
         ).fetchall()
         return [_row_to_track(r) for r in rows]
+
+    def search_ranked(self, query: str, hint: str | None = None) -> tuple[list[Track], str]:
+        """What "play <query>" should tune to: the best *tier* of matches
+        and its name.
+
+        "Song by Artist" is split and both halves must match. Then, in
+        order: the request is a genre word (whole word in some genre);
+        whole-word artist match ("dylan" → Bob Dylan and Dylan, not
+        "Bryan Adams" for "Ryan Adams"); exact album; exact title;
+        whole-word album; whole-word title; finally the loose substring
+        search. *hint* ("album", "song") from the spoken sentence moves
+        that field's tiers to the front ("play the album Harvest" must
+        not tune to Barclay James Harvest). Substring collisions had the
+        wrong artist playing a good share of the time (eval 2026-09-30).
+        """
+        q = norm(query)
+        if not q:
+            return [], "none"
+        m = _BY_RE.match(query.strip())
+        if m:
+            what, who = norm(m.group(1)), norm(m.group(2))
+            who = ALIASES.get(who, who)
+            if what and who:
+                by_artist = [t for t in self.search(who) if _word_match(who, norm(t.artist))]
+                both = [
+                    t
+                    for t in by_artist
+                    if _word_match(what, norm(t.title)) or _word_match(what, norm(t.album))
+                ]
+                if both:
+                    return both, "title+artist"
+                if by_artist:
+                    # The song isn't here but the artist is: tune to them
+                    # rather than answer "couldn't find anything".
+                    return by_artist, "artist"
+        loose = self.search(q)
+        if not loose and q in ALIASES:
+            q = ALIASES[q]
+            loose = self.search(q)
+        if not loose and _MUSIC_SUFFIX_RE.search(q):
+            # "folk music", "country songs": the noun is the request's, not the tag's.
+            q = _MUSIC_SUFFIX_RE.sub("", q)
+            loose = self.search(q)
+        if not loose:
+            return [], "none"
+        # A nickname that also happens to be a substring somewhere ("the
+        # boss" inside a title) still means the artist.
+        alias = ALIASES.get(q)
+        if alias and not any(_word_match(q, norm(t.artist)) for t in loose):
+            aliased = [t for t in self.search(alias) if _word_match(alias, norm(t.artist))]
+            if aliased:
+                return aliased, "artist"
+        tiers: list[tuple[str, list[Track]]] = [
+            ("genre", [t for t in loose if _word_match(q, norm(t.genre))]),
+            ("artist", [t for t in loose if _word_match(q, norm(t.artist))]),
+            ("album", [t for t in loose if norm(t.album) == q]),
+            ("title", [t for t in loose if norm(t.title) == q]),
+            ("album-word", [t for t in loose if _word_match(q, norm(t.album))]),
+            ("title-word", [t for t in loose if _word_match(q, norm(t.title))]),
+        ]
+        if hint in ("album", "song", "track", "title"):
+            field = "album" if hint == "album" else "title"
+            front = [tier for tier in tiers if tier[0].startswith(field)]
+            tiers = front + [tier for tier in tiers if not tier[0].startswith(field)]
+        for name, hits in tiers:
+            if hits:
+                return hits, name
+        return loose, "substring"
 
     def random_track(self) -> Track | None:
         row = self._conn.execute(f"{_TRACK_SELECT} ORDER BY RANDOM() LIMIT 1").fetchone()

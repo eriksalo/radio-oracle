@@ -30,11 +30,19 @@ _MD_BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+", re.MULTILINE)
 _MD_LEFTOVER_RE = re.compile(r"[*_`#~^|>]+")
 
 
+_FOREIGN_SCRIPT_RE = re.compile(
+    "[\u0400-\u04ff\u0530-\u058f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0e7f\u1100-\u11ff"
+    "\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]+"
+)
+
+
 def clean_for_speech(text: str) -> str:
     """Strip markdown the LLM likes to emit — *Moby Dick* was being read
     aloud as "asterisk Moby Dick asterisk" (2026-09-28). Emphasis, links,
-    headings, bullets and code ticks go; the words stay."""
-    t = _MD_LINK_RE.sub(r"\1", text)
+    headings, bullets and code ticks go; the words stay. Runs of a script
+    the English voice cannot say (a stray Chinese token, 2026-09-30) go too."""
+    t = _FOREIGN_SCRIPT_RE.sub("", text)
+    t = _MD_LINK_RE.sub(r"\1", t)
     t = _MD_HEADING_RE.sub("", t)
     t = _MD_BULLET_RE.sub("", t)
     for _ in range(2):  # nested ***bold italic***
