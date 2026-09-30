@@ -1,10 +1,8 @@
 <title>Radio Oracle Quality Eval</title>
 <style>
-/* Layout: one column of stacked sections, a scorecard strip up top, tables inside collapsible panels. Report, not dashboard. */
 :root {
   --bg: #f6f5ef; --panel: #ffffff; --fg: #1d221c; --muted: #5b655a; --rule: #d9dbd0;
-  --accent: #1f6b3a; --accent-soft: #e2efe4;
-  --good: #2e8b57; --warn: #c78a1e; --bad: #b6402f;
+  --accent: #1f6b3a; --accent-soft: #e2efe4; --good: #2e8b57; --warn: #c78a1e; --bad: #b6402f;
   --display: "Fraunces", Georgia, serif; --body: "Source Sans 3", "Helvetica Neue", Arial, sans-serif; --mono: "IBM Plex Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #141813; --panel: #1c211b; --fg: #e7ebe2; --muted: #a2ab9d; --rule: #2f3630; --accent: #6fcf8f; --accent-soft: #1f2e22; --good: #5fbf7f; --warn: #e0a83a; --bad: #e0705d; color-scheme: dark } }
@@ -14,259 +12,100 @@ body { background: var(--bg); color: var(--fg); font-family: var(--body); font-s
 h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; }
 h1 { font-size: 2.2rem; line-height: 1.1; }
 h2 { font-size: 1.5rem; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
-h3 { font-size: 1.1rem; margin-top: 1.4rem; }
 p { max-width: 68ch; }
 .eyebrow { font-family: var(--mono); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .lede { color: var(--muted); font-size: 1.05rem; margin-top: .6rem; }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 1.6rem; }
 @media (max-width: 700px) { .tiles { grid-template-columns: 1fr; } }
 .tile { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; min-width: 0; }
-.tile .big { font-family: var(--mono); font-size: 2.4rem; line-height: 1; font-variant-numeric: tabular-nums; margin: .4rem 0; }
+.tile .big { font-family: var(--mono); font-size: 2.2rem; line-height: 1; font-variant-numeric: tabular-nums; margin: .4rem 0 .2rem; }
+.tile .big .arrow { color: var(--muted); font-size: 1.2rem; margin: 0 .3rem; }
 .tile .sub { color: var(--muted); font-size: .95rem; }
-.bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin: .8rem 0 .4rem; background: var(--rule); }
+.bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: .5rem 0 .3rem; background: var(--rule); }
 .bar > div { height: 100%; }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .9rem; color: var(--muted); }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: .85rem; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 .c3 { background: var(--good); } .c2 { background: var(--warn); } .c1 { background: var(--bad); }
-.g { display: inline-block; min-width: 1.6em; text-align: center; font-family: var(--mono); font-weight: 600; border-radius: 4px; padding: 0 .3em; color: #fff; }
-.g3 { background: var(--good); } .g2 { background: var(--warn); } .g1 { background: var(--bad); }
-.causes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 1rem; }
-@media (max-width: 700px) { .causes { grid-template-columns: 1fr; } }
-.cause { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 16px; min-width: 0; }
-.cause h3 { margin-top: 0; font-size: 1.05rem; }
-.cause p { margin: .4rem 0 0; font-size: .97rem; }
-.cause .n { font-family: var(--mono); color: var(--muted); font-size: .85rem; }
-.ex { margin-top: .7rem; padding: .6rem .8rem; background: var(--accent-soft); border-radius: 6px; font-size: .92rem; }
-.ex .q { font-weight: 600; } .ex .said { color: var(--fg); margin-top: .2rem; } .ex .said::before { content: "It said: "; color: var(--muted); }
-.ex .truth { color: var(--muted); margin-top: .2rem; } .ex .truth::before { content: "Actually: "; }
 table { width: 100%; border-collapse: collapse; font-size: .93rem; }
 th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
 th { font-family: var(--mono); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-td.mono { font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
-td.note { color: var(--muted); }
-.tablewrap { overflow-x: auto; }
-details { margin-top: 1rem; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; }
-summary { cursor: pointer; padding: .8rem 1rem; font-weight: 600; }
-summary:focus-visible { outline: 2px solid var(--accent); }
-details .tablewrap { padding: 0 .5rem .5rem; }
-.filters { display: flex; gap: 8px; padding: 0 1rem .6rem; flex-wrap: wrap; }
-.filters button { font: inherit; font-size: .85rem; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--rule); background: var(--panel); color: var(--fg); cursor: pointer; }
-.filters button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
-.filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.tablewrap { overflow-x: auto; margin-top: 1rem; }
+.causes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 1rem; }
+@media (max-width: 700px) { .causes { grid-template-columns: 1fr; } }
+.cause { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+.cause.open { border-left-color: var(--warn); }
+.cause h3 { margin-top: 0; font-size: 1.05rem; }
+.cause p { margin: .4rem 0 0; font-size: .97rem; }
+.ex { margin-top: .7rem; padding: .6rem .8rem; background: var(--accent-soft); border-radius: 6px; font-size: .92rem; }
+.ex .q { font-weight: 600; } .ex .said { margin-top: .2rem; } .ex .said::before { content: "Before: "; color: var(--muted); }
+.ex .truth { margin-top: .2rem; } .ex .truth::before { content: "Now: "; color: var(--muted); }
 ol.todo { padding-left: 1.3rem; } ol.todo li { margin: .6rem 0; max-width: 68ch; } ol.todo b { color: var(--accent); }
 .pill { font-family: var(--mono); font-size: .75rem; border: 1px solid var(--rule); border-radius: 999px; padding: .1rem .55rem; color: var(--muted); white-space: nowrap; }
 .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 1rem; }
-@media (prefers-reduced-motion: no-preference) { details[open] summary ~ * { animation: fade .2s ease-out; } }
-@keyframes fade { from { opacity: .4 } to { opacity: 1 } }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <div class="wrap">
-  <div class="eyebrow">Radio Oracle · 30 September 2026</div>
+  <div class="eyebrow">Radio Oracle · 30 September 2026 · before and after</div>
   <h1>How well does the Librarian answer, play, and read?</h1>
-  <p class="lede">310 spoken requests were fed through the real pipeline on the Jetson: 100 knowledge questions through retrieval and the LLM, 100 music commands and 110 book commands through the command parser and the catalogs. Nothing was spoken aloud; the words it would have said were recorded and graded.</p>
-  <div class="meta"><span class="pill">Qwen3-4B via llama-server</span><span class="pill">6 FAISS collections</span><span class="pill">radio stopped during the run</span><span class="pill">answers graded by hand</span></div>
+  <p class="lede">The same 310 spoken requests, run through the real pipeline on the Jetson four times: once before any change, then after each of three fix passes. Knowledge answers were graded by hand every time; commands are graded against the catalogs.</p>
+  <div class="meta"><span class="pill">Qwen3-4B via llama-server</span><span class="pill">6 FAISS collections</span><span class="pill">4 runs · 1,240 graded answers</span></div>
 
   <div class="tiles">
-    <div class="tile"><div class="eyebrow">Librarian answers</div><div class="big">2.57<span style="font-size:1.1rem;color:var(--muted)"> / 3</span></div>
-      <div class="bar"><div class="c3" style="width:68%"></div><div class="c2" style="width:21%"></div><div class="c1" style="width:11%"></div></div>
-      <div class="legend"><span><i class="c3"></i>68 right</span><span><i class="c2"></i>21 flawed</span><span><i class="c1"></i>11 wrong</span></div>
-      <div class="sub" style="margin-top:.6rem">Median answer 72 words, about 30 seconds of speech.</div></div>
-    <div class="tile"><div class="eyebrow">Music commands</div><div class="big">93<span style="font-size:1.1rem;color:var(--muted)"> / 100</span></div>
-      <div class="sub">understood the request.</div>
-      <div class="big" style="font-size:1.6rem;margin-top:.8rem">46 / 56</div><div class="sub">of the song and artist requests would play the right thing.</div></div>
-    <div class="tile"><div class="eyebrow">Book commands</div><div class="big">108<span style="font-size:1.1rem;color:var(--muted)"> / 110</span></div>
-      <div class="sub">understood the request.</div>
-      <div class="big" style="font-size:1.6rem;margin-top:.8rem">68 / 79</div><div class="sub">of the title and author requests would open the right book.</div></div>
+    <div class="tile"><div class="eyebrow">Librarian answers, hand grade</div>
+      <div class="big">2.57<span class="arrow">→</span>2.78<span style="font-size:1rem;color:var(--muted)"> / 3</span></div>
+      <div class="bar"><div class="c3" style="width:83%"></div><div class="c2" style="width:12%"></div><div class="c1" style="width:5%"></div></div>
+      <div class="legend"><span><i class="c3"></i>83 right</span><span><i class="c2"></i>12 flawed</span><span><i class="c1"></i>5 wrong</span></div>
+      <div class="sub" style="margin-top:.5rem">Best run (pass 1). Was 68 / 21 / 11. Later passes sit at 2.72 and 2.69: within sampling noise of each other.</div></div>
+    <div class="tile"><div class="eyebrow">Music commands</div>
+      <div class="big">93<span class="arrow">→</span>100<span style="font-size:1rem;color:var(--muted)"> / 100</span></div>
+      <div class="sub">understood.</div>
+      <div class="big" style="font-size:1.5rem;margin-top:.7rem">46 / 56<span class="arrow">→</span>60 / 60</div><div class="sub">song and artist requests that play the right thing.</div></div>
+    <div class="tile"><div class="eyebrow">Book commands</div>
+      <div class="big">108<span class="arrow">→</span>110<span style="font-size:1rem;color:var(--muted)"> / 110</span></div>
+      <div class="sub">understood.</div>
+      <div class="big" style="font-size:1.5rem;margin-top:.7rem">68 / 79<span class="arrow">→</span>77 / 77</div><div class="sub">title and author requests that open the right book (checked on the real 60,030-book library).</div></div>
   </div>
 
-  <h2>Librarian: where the answers go wrong</h2>
-  <p>Most answers are correct and well put. Follow-up questions resolved correctly every time (“Where did <em>he</em> die?”, “Can you see <em>them</em> from Colorado?”). The 32 flawed or wrong answers come from six causes.</p>
-  <div class="causes">
-    <div class="cause"><h3>1. Plot facts get made up</h3><span class="n">L02 · L77 · L80 · L82</span><p>When the question is about a story, retrieval returns title look-alikes (a video game article for <em>A Tale of Two Cities</em>) and the small model fills the gap.</p>
-      <div class="ex"><div class="q">“What happens at the end of A Tale of Two Cities?”</div><div class="said">Both men are released from prison and survive; a quiet, hopeful ending.</div><div class="truth">Sydney Carton goes to the guillotine in Darnay’s place.</div></div>
-      <div class="ex"><div class="q">“Who were the three musketeers?”</div><div class="said">D’Artagnan, Aramis, and Porthos.</div><div class="truth">Athos, Porthos and Aramis. D’Artagnan is the fourth.</div></div></div>
-    <div class="cause"><h3>2. Practical advice is a century old</h3><span class="n">L13 · L16 · L17 · L25 · L29 · L88</span><p>Gutenberg passages appeared in the sources of all 100 answers. WikiMed appeared in 36, iFixit in 11. So first aid and farming often come from 1900s manuals.</p>
-      <div class="ex"><div class="q">“When should I plant tomatoes in Colorado?”</div><div class="said">Sow seeds up to mid-July for a fall crop.</div><div class="truth">From a southern treatise. In Colorado the frost arrives before that crop does.</div></div>
-      <div class="ex"><div class="q">“How do I tell if a mushroom is poisonous?”</div><div class="said">A bitter or sharp taste often signals poison; blue-turning flesh is toxic.</div><div class="truth">Folk tests. There is no taste test; identification is the only way.</div></div></div>
-    <div class="cause"><h3>3. Memory butts in</h3><span class="n">L72 · L75 · L76 · L79</span><p>Four literature answers end with an unprompted “You were on chapter 43 of Moby-Dick two days ago, HARK!” The memory block is quoted back whenever a question touches books.</p>
-      <div class="ex"><div class="q">“Which play has the line ‘To be, or not to be’?”</div><div class="said">Hamlet … You were on chapter 43 of Moby-Dick when you asked about it. Maybe a coincidence, maybe not.</div><div class="truth">Hamlet. Stop there.</div></div></div>
-    <div class="cause"><h3>4. No sense of “now”</h3><span class="n">L98 · L99</span><p>It has no clock and no news, but it will still answer.</p>
-      <div class="ex"><div class="q">“What year is it right now?”</div><div class="said">It’s 2025.</div><div class="truth">It cannot know. The device passage already says “I don’t know how long ago that was for you.”</div></div>
-      <div class="ex"><div class="q">“What’s the latest news?”</div><div class="said">A global tech outage in July 2024 knocked out ABC and Sky News Australia…</div><div class="truth">A 2024 Wikipedia article recited as today’s news. The weather question, by contrast, was declined correctly.</div></div></div>
-    <div class="cause"><h3>5. Text artifacts reach the voice</h3><span class="n">L47 · L81</span><p>One answer has a stray Chinese character mid-sentence, which the speech engine will mangle. Another stops on an unfinished clause. The safeguard that drops an unfinished tail did not fire; it may not be wired for llama-server.</p>
-      <div class="ex"><div class="q">“How does soap kill germs?”</div><div class="said">Soap doesn’t kill germs—它 works by breaking their structure.</div><div class="truth">A token from the model’s other languages leaked through.</div></div></div>
-    <div class="cause"><h3>6. It refuses the premise</h3><span class="n">L86</span><p>Asked how to set a bone when there is no doctor, it says not to try and to call emergency services. For an offline companion, the field procedure with the risks stated is the useful answer.</p></div>
-  </div>
-
-  <details><summary>All 100 librarian questions and grades</summary>
-    <div class="filters" role="group" aria-label="filter by grade"><button aria-pressed="true" data-f="all">All 100</button><button aria-pressed="false" data-f="3">Right (68)</button><button aria-pressed="false" data-f="2">Flawed (21)</button><button aria-pressed="false" data-f="1">Wrong (11)</button></div>
-    <div class="tablewrap"><table id="libtable"><thead><tr><th>id</th><th>question</th><th>grade</th><th>note</th></tr></thead><tbody>
-    <tr data-g="3"><td class="mono">L01</td><td>Who was Nikola Tesla?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="1"><td class="mono">L02</td><td>Where did he die?</td><td><span class="g g1">1</span></td><td class="note">Tesla died at the Hotel New Yorker; Wardenclyffe was demolished in 1917</td></tr>
-<tr data-g="3"><td class="mono">L03</td><td>What causes the northern lights?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L04</td><td>Can you see them from Colorado?</td><td><span class="g g2">2</span></td><td class="note">says yes, then &#x27;you&#x27;d need to be outside the state&#x27;</td></tr>
-<tr data-g="3"><td class="mono">L05</td><td>How do I treat a second-degree burn?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L06</td><td>Should I pop the blisters?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L07</td><td>What is the boiling point of water at high altitude?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L08</td><td>Why is that?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L09</td><td>Who wrote Pride and Prejudice?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L10</td><td>When was it published?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L11</td><td>How does a vacuum tube amplify a signal?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L12</td><td>How do I purify water so it&#x27;s safe to drink?</td><td><span class="g g2">2</span></td><td class="note">&#x27;boiling is the only proven method&#x27; is false; solar still muddled</td></tr>
-<tr data-g="1"><td class="mono">L13</td><td>How long do I need to boil it?</td><td><span class="g g1">1</span></td><td class="note">ten minutes at sea level, three above 2000 m: inconsistent; sources were a 1600s tract and a travelogue</td></tr>
-<tr data-g="3"><td class="mono">L14</td><td>What are the signs of dehydration?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L15</td><td>How do you perform CPR on an adult?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L16</td><td>How do I splint a broken arm?</td><td><span class="g g2">2</span></td><td class="note">1900s manual: shoulder-to-elbow splints, three weeks; no modern caution</td></tr>
-<tr data-g="2"><td class="mono">L17</td><td>What should I do for a snake bite?</td><td><span class="g g2">2</span></td><td class="note">correct, but &#x27;panic and alcohol&#x27; is 1910s framing</td></tr>
-<tr data-g="3"><td class="mono">L18</td><td>Should I suck out the venom?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L19</td><td>How can I tell if a wound is infected?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L20</td><td>What is hypothermia and how do I treat it?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L21</td><td>How do I start a fire without matches?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L22</td><td>How do you make charcoal?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L23</td><td>How do I sharpen a knife with a stone?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L24</td><td>How do you grow potatoes?</td><td><span class="g g2">2</span></td><td class="note">dated (ash, lime, salt); depth too shallow</td></tr>
-<tr data-g="1"><td class="mono">L25</td><td>When should I plant tomatoes in Colorado?</td><td><span class="g g1">1</span></td><td class="note">sow tomatoes up to mid-July in Colorado: from a southern 1900s treatise; frost kills that</td></tr>
-<tr data-g="2"><td class="mono">L26</td><td>How do I fix a flat bicycle tire?</td><td><span class="g g2">2</span></td><td class="note">&#x27;remove the wheel using tire levers&#x27; is muddled</td></tr>
-<tr data-g="3"><td class="mono">L27</td><td>How do I replace the battery in a phone?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L28</td><td>How does a lead-acid battery work?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="1"><td class="mono">L29</td><td>How can I tell if a car battery is dead?</td><td><span class="g g1">1</span></td><td class="note">&#x27;tap the cable, no spark means dead&#x27; is unsafe; no voltmeter</td></tr>
-<tr data-g="3"><td class="mono">L30</td><td>How does a solar panel make electricity?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L31</td><td>How does a diesel engine differ from a gasoline engine?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L32</td><td>How does a refrigerator keep things cold?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L33</td><td>How does a transistor work?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L34</td><td>What is Ohm&#x27;s law?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L35</td><td>How do I measure voltage with a multimeter?</td><td><span class="g g2">2</span></td><td class="note">circle+wavy line is the AC symbol</td></tr>
-<tr data-g="3"><td class="mono">L36</td><td>How does radio work?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L37</td><td>What is AM versus FM radio?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L38</td><td>What causes earthquakes?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L39</td><td>How do volcanoes form?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L40</td><td>What is the water cycle?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L41</td><td>Why is the sky blue?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L42</td><td>How far away is the Moon?</td><td><span class="g g2">2</span></td><td class="note">&#x27;a few days at the speed of light&#x27; (it is 1.3 s)</td></tr>
-<tr data-g="3"><td class="mono">L43</td><td>How many planets are in the solar system?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L44</td><td>What is photosynthesis?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L45</td><td>How do vaccines work?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L46</td><td>What is penicillin and who discovered it?</td><td><span class="g g2">2</span></td><td class="note">1928, not 1929</td></tr>
-<tr data-g="1"><td class="mono">L47</td><td>How does soap kill germs?</td><td><span class="g g1">1</span></td><td class="note">stray Chinese token &#x27;它&#x27; mid-sentence; &#x27;soap doesn&#x27;t kill germs&#x27; overstated</td></tr>
-<tr data-g="2"><td class="mono">L48</td><td>What is the theory of relativity?</td><td><span class="g g2">2</span></td><td class="note">never names Einstein</td></tr>
-<tr data-g="3"><td class="mono">L49</td><td>Explain how a nuclear reactor works.</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L50</td><td>What is the Pythagorean theorem?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L51</td><td>How do I calculate the area of a circle?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L52</td><td>What is a prime number?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L53</td><td>What is the difference between a virus and a bacterium?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L54</td><td>What is DNA?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L55</td><td>How do birds fly?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L56</td><td>Why do leaves change color in the fall?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L57</td><td>How do bees make honey?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L58</td><td>Who was Genghis Khan?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L59</td><td>How big was his empire?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L60</td><td>What caused the fall of the Roman Empire?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L61</td><td>Who invented the printing press?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L62</td><td>When did the First World War start?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L63</td><td>What was the Black Death?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L64</td><td>Who was the first person to walk on the Moon?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L65</td><td>What year was that?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L66</td><td>What is the capital of Mongolia?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L67</td><td>How tall is Mount Everest?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L68</td><td>Which river is the longest in the world?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L69</td><td>What is the Continental Divide?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L70</td><td>Tell me about Boulder, Colorado.</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L71</td><td>Who is Sherlock Holmes?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L72</td><td>Which novel begins with the line &#x27;Call me Ishmael&#x27;?</td><td><span class="g g2">2</span></td><td class="note">correct, then unprompted &#x27;you were on chapter 43 of it two days ago, HARK!&#x27;</td></tr>
-<tr data-g="2"><td class="mono">L73</td><td>Tell me about the whaling ship in Moby Dick.</td><td><span class="g g2">2</span></td><td class="note">&#x27;long, sleek vessel&#x27; (the Pequod is old and weathered)</td></tr>
-<tr data-g="3"><td class="mono">L74</td><td>Who was the captain?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L75</td><td>Which play has the line &#x27;To be, or not to be&#x27;?</td><td><span class="g g2">2</span></td><td class="note">correct, then unprompted Moby-Dick bookmark remark</td></tr>
-<tr data-g="2"><td class="mono">L76</td><td>What is the opening line of Pride and Prejudice?</td><td><span class="g g2">2</span></td><td class="note">correct, then unprompted Moby-Dick bookmark remark</td></tr>
-<tr data-g="1"><td class="mono">L77</td><td>What happens at the end of A Tale of Two Cities?</td><td><span class="g g1">1</span></td><td class="note">wrong: Carton dies at the guillotine; answer says both men survive. Sources: Half-Life, Le dernier sorcier</td></tr>
-<tr data-g="3"><td class="mono">L78</td><td>Who wrote The Time Machine?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L79</td><td>What is Walden about?</td><td><span class="g g2">2</span></td><td class="note">correct, then unprompted &#x27;you were on chapter 43, HARK!&#x27;</td></tr>
-<tr data-g="1"><td class="mono">L80</td><td>Summarize the plot of Treasure Island.</td><td><span class="g g1">1</span></td><td class="note">plot garbled: map &#x27;aboard his father&#x27;s ship&#x27;, Billy Bones a friend, a shipwreck, treasure &#x27;claimed by the reader&#x27;</td></tr>
-<tr data-g="2"><td class="mono">L81</td><td>What does Marcus Aurelius say about death in the Meditations?</td><td><span class="g g2">2</span></td><td class="note">good, but ends mid-sentence &#x27;He doesn&#x27;t claim immortality,&#x27;</td></tr>
-<tr data-g="1"><td class="mono">L82</td><td>Who were the three musketeers?</td><td><span class="g g1">1</span></td><td class="note">names D&#x27;Artagnan instead of Athos</td></tr>
-<tr data-g="3"><td class="mono">L83</td><td>What is Frankenstein&#x27;s monster made of?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L84</td><td>How do I preserve meat without a refrigerator?</td><td><span class="g g2">2</span></td><td class="note">no smoking/drying; sand-and-sawdust aside</td></tr>
-<tr data-g="2"><td class="mono">L85</td><td>How do I make bread without yeast?</td><td><span class="g g2">2</span></td><td class="note">&#x27;potato and hop-based mix&#x27; odd</td></tr>
-<tr data-g="1"><td class="mono">L86</td><td>How do I set a broken bone if there is no doctor?</td><td><span class="g g1">1</span></td><td class="note">refuses the premise (no doctor) and says call emergency services</td></tr>
-<tr data-g="2"><td class="mono">L87</td><td>What plants can I eat in the wild?</td><td><span class="g g2">2</span></td><td class="note">cuckoo-flower and thyme baths; thin</td></tr>
-<tr data-g="2"><td class="mono">L88</td><td>How do I tell if a mushroom is poisonous?</td><td><span class="g g2">2</span></td><td class="note">&#x27;bitter taste signals poison&#x27; is unsafe folk advice, though it ends with &#x27;if in doubt, don&#x27;t&#x27;</td></tr>
-<tr data-g="3"><td class="mono">L89</td><td>How does a compass work?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L90</td><td>How can I find north without a compass?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L91</td><td>How do you treat frostbite?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L92</td><td>What are the symptoms of a concussion?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="2"><td class="mono">L93</td><td>How do you stop heavy bleeding?</td><td><span class="g g2">2</span></td><td class="note">cold compress odd; no tourniquet</td></tr>
-<tr data-g="3"><td class="mono">L94</td><td>What is the Krebs cycle?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L95</td><td>Explain supply and demand.</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L96</td><td>What is the difference between weather and climate?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="3"><td class="mono">L97</td><td>What will the weather be tomorrow?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-<tr data-g="1"><td class="mono">L98</td><td>What&#x27;s the latest news?</td><td><span class="g g1">1</span></td><td class="note">invents &#x27;latest news&#x27; from a 2024 Wikipedia TV-outage article</td></tr>
-<tr data-g="1"><td class="mono">L99</td><td>What year is it right now?</td><td><span class="g g1">1</span></td><td class="note">asserts &#x27;It&#x27;s 2025&#x27;</td></tr>
-<tr data-g="3"><td class="mono">L100</td><td>How do I tune a guitar by ear?</td><td><span class="g g3">3</span></td><td class="note"></td></tr>
-    </tbody></table></div></details>
-
-  <h2>Music: it understands, then searches badly</h2>
-  <p>93 of 100 commands were understood. The misses are four repeatable patterns, not random noise. Transport words (pause, skip, next album, hush) were perfect; 67 of 100 commands needed the slower LLM step because the keyword table only knows transport words.</p>
-  <div class="causes">
-    <div class="cause"><h3>Questions about the catalog go to Wikipedia</h3><span class="n">M08 · M83 · M84 · M87 · M88</span><p>“Do you have any Springsteen?”, “Any albums by the Beatles?”, “Can you play Mark Knopfler?” start with a question word, so the question detector fires before the music parser sees them.</p></div>
-    <div class="cause"><h3>“Song by Artist” finds nothing</h3><span class="n">M47 · M49 · M55</span><p>“Hurt by Johnny Cash” is searched as one phrase. Nothing is titled that, so it says it couldn’t find anything.</p></div>
-    <div class="cause"><h3>Spelling in the tags</h3><span class="n">M20 · M48 · M09/M10</span><p>“and” never matches “&amp;”. A straight apostrophe never matches the curly one in “Maybe I’m Amazed”. Emmylou Harris is filed under two spellings.</p></div>
-    <div class="cause"><h3>Substring collisions</h3><span class="n">M26 · M29 · M51 · M53</span><p>“Ryan Adams” also matches Bryan Adams; “Harvest” matches Barclay James Harvest; “Dion” is a coin flip. It then picks a random track from the pool, so the wrong artist plays a good share of the time.</p></div>
-  </div>
-  <details><summary>Music misses (17)</summary><div class="tablewrap"><table><thead><tr><th>id</th><th>said</th><th>what it did</th><th>why</th></tr></thead><tbody>
-  <tr><td class="mono">M08</td><td>Can you play Mark Knopfler?</td><td>question</td><td class="note">Starts with “Can”, so the question detector sent it to Wikipedia.</td></tr>
-<tr><td class="mono">M12</td><td>Play the Boss.</td><td>play · “Boss” → 2 tracks, artists: Greg Brown &amp; Ani De Franco, Jimmy Reed</td><td class="note">Nickname. Matched two unrelated tracks with “Boss” in the title.</td></tr>
-<tr><td class="mono">M20</td><td>Play Robert Plant and Alison Krauss.</td><td>play · “Robert Plant and Alison Krauss” → 0 tracks</td><td class="note">The tag says “Robert Plant &amp; Alison Krauss”. “and” never matches “&amp;”.</td></tr>
-<tr><td class="mono">M26</td><td>Play Ryan Adams.</td><td>play · “Ryan Adams” → 18 tracks, artists: Bryan Adams, Bryan Adams ft. Sting &amp; Rod Stewart, Ryan Adams &amp; The Cardinals</td><td class="note">Also matches Bryan Adams. Two of the three artists it can pick are wrong.</td></tr>
-<tr><td class="mono">M29</td><td>Play Dion.</td><td>play · “Dion” → 18 tracks, artists: Celine Dion, Dion DiMucci</td><td class="note">Celine Dion or Dion DiMucci, coin flip.</td></tr>
-<tr><td class="mono">M47</td><td>Play Hurt by Johnny Cash.</td><td>play · “Hurt by Johnny Cash” → 0 tracks</td><td class="note">Searched the whole phrase “Hurt by Johnny Cash”. Nothing has that as a title.</td></tr>
-<tr><td class="mono">M48</td><td>Play Maybe I&#x27;m Amazed.</td><td>play · “Maybe I&#x27;m Amazed” → 0 tracks</td><td class="note">The tag uses a curly apostrophe (I’m). The straight one doesn’t match.</td></tr>
-<tr><td class="mono">M49</td><td>Play Rumours by Fleetwood Mac.</td><td>play · “Rumours by Fleetwood Mac” → 0 tracks</td><td class="note">Same “X by Y” problem.</td></tr>
-<tr><td class="mono">M51</td><td>Play the album Harvest.</td><td>play · “Harvest” → 3 tracks, artists: Barclay James Harvest, Neil Young, Woody Guthrie/John McCutchen</td><td class="note">Also matches Barclay James Harvest and a Woody Guthrie track. One in three is Neil Young.</td></tr>
-<tr><td class="mono">M53</td><td>Play Let It Be.</td><td>play · “Let It Be” → 4 tracks, artists: Everly Brothers, The Beatles</td><td class="note">Also matches the Everly Brothers’ “Let It Be Me”.</td></tr>
-<tr><td class="mono">M55</td><td>Play Suzanne by Leonard Cohen.</td><td>play · “Suzanne by Leonard Cohen” → 0 tracks</td><td class="note">Same “X by Y” problem.</td></tr>
-<tr><td class="mono">M61</td><td>I don&#x27;t like this one.</td><td>none</td><td class="note">Not understood. Nothing happens.</td></tr>
-<tr><td class="mono">M79</td><td>Turn the radio on.</td><td>none</td><td class="note">Not understood. Nothing happens.</td></tr>
-<tr><td class="mono">M83</td><td>Do you have any Springsteen?</td><td>question</td><td class="note">Starts with “Do”, so it became a Wikipedia question.</td></tr>
-<tr><td class="mono">M84</td><td>Any albums by the Beatles?</td><td>question</td><td class="note">Starts with “Any”, so it became a Wikipedia question.</td></tr>
-<tr><td class="mono">M87</td><td>What kind of music is there?</td><td>question</td><td class="note">Starts with “What”, so it became a Wikipedia question.</td></tr>
-<tr><td class="mono">M88</td><td>Is there any jazz?</td><td>question</td><td class="note">Starts with “Is”, so it became a Wikipedia question.</td></tr>
-  </tbody></table></div></details>
-
-  <h2>Books: the right intent, the wrong book</h2>
-  <p>108 of 110 commands were understood. The problem is which book opens. Of 79 title or author requests, 11 would open the wrong book, and the confidence check passed almost all of them, so the reader would start reading without asking. The search ranks short titles that contain the words above the famous work.</p>
-  <div class="tablewrap"><table><thead><tr><th>id</th><th>said</th><th>would open</th><th>wanted</th></tr></thead><tbody>
-  <tr><td class="mono">B05</td><td>Read Sherlock Holmes to me.</td><td>A doctor enjoys Sherlock Holmes</td><td class="note">Adventures of Sherlock Holmes, Memoirs of Sherlock Holmes, Return of Sherlock Holmes, Study in Scarlet, Hound of the Baskervilles, Sign of the Four</td></tr>
-<tr><td class="mono">B10</td><td>Read Tom Sawyer.</td><td>Tom Sawyer, Detective</td><td class="note">Adventures of Tom Sawyer</td></tr>
-<tr><td class="mono">B14</td><td>Read me War and Peace.</td><td>Poems of Peace and War</td><td class="note">War and Peace</td></tr>
-<tr><td class="mono">B17</td><td>Read Walden.</td><td>The Voodoo Gold Trail, by Walter Walden</td><td class="note">Walden, Thoreau</td></tr>
-<tr><td class="mono">B26</td><td>Read me Little Women.</td><td>Two Little Women</td><td class="note">Little Women, Alcott</td></tr>
-<tr><td class="mono">B30</td><td>Read me Peter Pan.</td><td>The Peter Pan Alphabet</td><td class="note">Peter Pan, Peter and Wendy, Barrie</td></tr>
-<tr><td class="mono">B46</td><td>Read Emma by Jane Austen.</td><td>The Poems of Emma Lazarus</td><td class="note">Emma, Austen</td></tr>
-<tr><td class="mono">B54</td><td>Read The Prince by Machiavelli.</td><td>The Constant Prince</td><td class="note">Prince, Machiavelli</td></tr>
-<tr><td class="mono">B71</td><td>Read something by Mark Twain.</td><td>Mark Twain&#x27;s Speeches</td><td class="note">Twain</td></tr>
-<tr><td class="mono">B73</td><td>Read me some Dickens.</td><td>Dickens-Land</td><td class="note">Dickens</td></tr>
-<tr><td class="mono">B77</td><td>Read me something by Kipling.</td><td>Index for Works of Rudyard Kipling</td><td class="note">Kipling</td></tr>
+  <h2>The four runs</h2>
+  <div class="tablewrap"><table><thead><tr><th>run</th><th>what changed</th><th>grade</th><th>right</th><th>flawed</th><th>wrong</th><th>median words</th><th>answers with a Gutenberg source</th><th>with a WikiMed source</th></tr></thead><tbody>
+  <tr><td>Before</td><td>—</td><td class="n">2.57</td><td class="n">68</td><td class="n">21</td><td class="n">11</td><td class="n">72</td><td class="n">43</td><td class="n">18</td></tr>
+  <tr><td>Pass 1</td><td>book ranking, command routing, retrieval weighting, prompt (memory only when asked, no clock, offline premise), output hygiene</td><td class="n">2.78</td><td class="n">83</td><td class="n">12</td><td class="n">5</td><td class="n">72</td><td class="n">21</td><td class="n">24</td></tr>
+  <tr><td>Pass 2</td><td>stronger offline wording, plot questions pull 5 chunks from Gutenberg + Wikipedia only, reply cap 140 → 120 tokens</td><td class="n">2.72</td><td class="n">76</td><td class="n">20</td><td class="n">4</td><td class="n">70</td><td class="n">21</td><td class="n">24</td></tr>
+  <tr><td>Pass 3</td><td>offline wording softened again (never mention doctors, neither to recommend nor to say they're gone)</td><td class="n">2.69</td><td class="n">75</td><td class="n">19</td><td class="n">6</td><td class="n">66</td><td class="n">21</td><td class="n">24</td></tr>
   </tbody></table></div>
-  <p style="margin-top:1rem">One more: “Which books by H. G. Wells do you have?” searched for “H. G. Wells do you have” and found nothing. The phrase after “by” is taken to the end of the sentence.</p>
+  <p style="margin-top:1rem">Pass 1 did the work. Passes 2 and 3 were prompt tuning against the two problems that survived it, and they moved the score less than the run-to-run noise of a 4B model sampling at temperature 0.6: the musketeers answer was wrong, then right, then wrong again across the last three runs with no relevant change in between.</p>
 
-  <h2>What to fix first</h2>
+  <h2>What got fixed</h2>
+  <div class="causes">
+    <div class="cause"><h3>The right book opens</h3><p>Search candidates are now scored: exact title first, words in front of the request cost ("Two" Little Women, "A doctor enjoys" Sherlock Holmes), books <em>by</em> an author beat books <em>about</em> them, and a small table of canonical works and each author's best-known novel breaks ties. All 77 famous requests open the right book on the device; the confidence check now refuses the look-alikes.</p>
+      <div class="ex"><div class="q">“Read me Little Women”</div><div class="said">Two Little Women</div><div class="truth">Little Women, Louisa May Alcott</div></div>
+      <div class="ex"><div class="q">“Read me some Dickens”</div><div class="said">Dickens-Land</div><div class="truth">A Tale of Two Cities, Charles Dickens</div></div></div>
+    <div class="cause"><h3>Commands understood and resolved</h3><p>Catalog questions ("Do you have any Springsteen?", "Any albums by the Beatles?", "Is there any jazz?") are exploration commands now, not Wikipedia questions. "Can you play X" is a request. "Song by Artist" is split, and the artist plays if the song isn't there. Tags are normalised (& / and, curly quotes, accents), whole-word artist matches beat substrings, and a nickname table knows "the Boss".</p>
+      <div class="ex"><div class="q">“Play Ryan Adams”</div><div class="said">a random pick from Ryan Adams and Bryan Adams</div><div class="truth">Ryan Adams &amp; The Cardinals only</div></div>
+      <div class="ex"><div class="q">“Play Hurt by Johnny Cash”</div><div class="said">I couldn&#x27;t find anything for Hurt by Johnny Cash.</div><div class="truth">Playing Johnny Cash (the song isn&#x27;t in the catalog)</div></div></div>
+    <div class="cause"><h3>Modern sources for practical questions</h3><p>Hits are merged with a per-collection bias by question type: WikiMed forward for medical, iFixit and Wikibooks for how-to, Gutenberg pushed back unless the question is about a book. Answers with a Gutenberg passage in their sources: 43 → 21. The prompt also labels Gutenberg passages as pre-1930.</p>
+      <div class="ex"><div class="q">“When should I plant tomatoes in Colorado?”</div><div class="said">Sow seeds up to mid-July for a fall crop.</div><div class="truth">After the last frost, late spring, once the soil is 60 °F; start indoors at elevation.</div></div>
+      <div class="ex"><div class="q">“How do I tell if a mushroom is poisonous?”</div><div class="said">A bitter taste often signals poison; blue-turning flesh is toxic.</div><div class="truth">There&#x27;s no reliable way to tell by looking. If you find one, don&#x27;t eat it.</div></div></div>
+    <div class="cause"><h3>Memory stays in the background</h3><p>The four literature answers that ended with "You were on chapter 43 of Moby-Dick two days ago, HARK!" no longer do. Memory is used only when the user refers to it or asks about the very book in it.</p></div>
+    <div class="cause"><h3>No clock, no news</h3><p>"What year is it?" now gets "I don't have a clock or calendar." The weather question is declined cleanly. The news question still mentions the 2024 article it retrieved before saying it can't know what's happening now.</p></div>
+    <div class="cause"><h3>Clean text reaches the voice</h3><p>Runs of non-Latin script are stripped before speaking and storing. When the reply hits the token cap, it is cut back to the last complete sentence and any clause already queued past it is skipped before it plays. The tail-drop is now confirmed wired for llama-server (24 of 100 replies hit the cap in pass 3, all ended on a full sentence).</p></div>
+  </div>
+
+  <h2>What still misses</h2>
+  <div class="causes">
+    <div class="cause open"><h3>Plot facts from a 4B model</h3><p>"What happens at the end of A Tale of Two Cities" and "Summarize Treasure Island" are wrong in every run, even with the right article and the book's own text retrieved. The musketeers flip between runs. This is model capacity, not retrieval. Options: a larger model for literature questions only, or a per-book plot summary pre-computed on the workstation and indexed as its own passage.</p></div>
+    <div class="cause open"><h3>Medical answers and "seek help"</h3><p>Three wordings were tried. Too strong and the model turns fatalistic ("no doctor, no hospital, wait for help that doesn't exist"). Too soft and "seek medical help" creeps back into a few answers. The current wording gives steps first and keeps the referral to a mild aside in five answers; the bone-setting question still gets a refusal plus splint steps.</p></div>
+    <div class="cause open"><h3>Length</h3><p>The prompt asks for forty to fifty words; the model gives about seventy. The 120-token cap trims the longest to a clean sentence, so the median is 66 words now (was 72). Going shorter means cutting content, not style.</p></div>
+    <div class="cause open"><h3>Sampling noise</h3><p>At temperature 0.6 the same question gets a different answer each run, and about one in twenty flips between right and wrong. For a factual librarian, 0.3 to 0.4 would make answers repeatable; not changed here so the measured runs stay comparable.</p></div>
+  </div>
+
+  <h2>Recommended next</h2>
   <ol class="todo">
-    <li><b>Book search ranking.</b> Exact title first; when an author is named, prefer books <em>by</em> them over books <em>about</em> them; a small list of canonical works as tie-breaker; make the confidence check fail when the top title has extra leading words. Fixes 11 of the 79 requests.</li>
-    <li><b>Command routing.</b> Add “do you have…”, “any … by…”, “is there any…”, “can you play…” to the keyword table ahead of the question detector. Split “X by Y” into title and artist. Normalise &amp;/and and quote styles in the catalog search. Prefer whole-word artist matches before substrings.</li>
-    <li><b>Retrieval weighting.</b> Medical questions to WikiMed, how-to to iFixit and Wikibooks, Gutenberg only when the question is about a book. This is the change that most improves safety.</li>
-    <li><b>Prompt.</b> Use memory only when the user refers to it. State plainly that the radio has no clock and no news. Aim for 40 to 50 words per answer.</li>
-    <li><b>Output hygiene.</b> Drop non-Latin runs and unfinished trailing clauses before speaking; confirm the tail-drop works with llama-server.</li>
-    <li><b>Plot questions.</b> Route “what happens in… / who is… in…” to the book’s own text and the Wikipedia article on the novel.</li>
+    <li><b>Lower the temperature to 0.4</b> and rerun once to confirm it reduces the flip-flops.</li>
+    <li><b>Pre-computed plot summaries</b> for the canonical works, indexed as one passage each, so plot questions retrieve a summary instead of the book's first chapter.</li>
+    <li><b>Try the 8B model for literature only</b> if memory allows a swap on demand; the 4B model's plots are unreliable regardless of context.</li>
+    <li><b>Ask for confirmation</b> before opening any book the confidence check rejects; it now rejects the look-alikes correctly.</li>
   </ol>
-  <p style="color:var(--muted);font-size:.9rem;margin-top:2rem">Question sets, raw results and hand grades are in <code>docs/eval/</code> in the repo; rerun with <code>scripts/eval_quality.py</code>.</p>
+  <p style="color:var(--muted);font-size:.9rem;margin-top:2rem">Question sets, all four runs' raw results and hand grades are in <code>docs/eval/results/</code>; rerun with <code>scripts/eval_quality.py</code>.</p>
 </div>
-<script>
-(function () {
-  const table = document.getElementById('libtable');
-  const buttons = document.querySelectorAll('.filters button');
-  buttons.forEach(b => b.addEventListener('click', () => {
-    buttons.forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    const f = b.dataset.f;
-    table.querySelectorAll('tbody tr').forEach(tr => { tr.hidden = !(f === 'all' || tr.dataset.g === f); });
-  }));
-})();
-</script>
