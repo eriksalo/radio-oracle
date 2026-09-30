@@ -159,6 +159,14 @@ def _resample_to_playback(audio: np.ndarray, src_sr: int) -> tuple[np.ndarray, i
 # second of buffer ride those out, and no Python runs on the audio thread.
 _PLAYBACK_LATENCY_S = 0.25
 _PLAYBACK_CHUNK_S = 0.05
+_PLAYBACK_TAIL_MARGIN_S = 0.1
+
+
+def _stream_latency(stream) -> float:
+    try:
+        return float(stream.latency)
+    except (TypeError, ValueError, AttributeError):
+        return _PLAYBACK_LATENCY_S
 
 
 def _stream_play(
@@ -213,7 +221,21 @@ def _stream_play(
             if stream.write(audio[cursor:end]):
                 underflows += 1
             cursor = end
-        stream.stop()  # drains what is buffered
+        # stop() does NOT drain on this path (PortAudio ALSA → pulse): what
+        # is still in the ring buffer is dropped. Measured on the sink
+        # monitor, every clip lost its last ~270 ms, heard as the end of
+        # each sentence being clipped (2026-09-30). Push a buffer's worth
+        # of silence behind the audio so only silence is discarded.
+        tail = np.zeros((chunk, channels), dtype=np.float32)
+        pad = int(sample_rate * (_stream_latency(stream) + _PLAYBACK_TAIL_MARGIN_S))
+        while pad > 0:
+            if should_abort and should_abort():
+                stream.abort()
+                return
+            n = min(pad, chunk)
+            stream.write(tail[:n])
+            pad -= n
+        stream.stop()
     finally:
         stream.close()
     if underflows:

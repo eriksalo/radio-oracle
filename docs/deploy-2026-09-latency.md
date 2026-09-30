@@ -491,3 +491,17 @@ summarize failed … unexpected keyword argument 'activity'").
 |---|---|---|
 | TTS sidecar | 1.3–2.0 GB, then mute | ~0.9–1.0 GB, stable |
 | available memory (`free -m`) | 360–500 MB | ~1.0 GB |
+
+
+## 2026-09-30 — "it truncates the very end of each sentence"
+
+Since the blocking-write playback went in (no more underflows), Erik
+heard the last syllable of every sentence clipped. Measured on the
+speaker sink's monitor (`scripts/probe_tail.py`, no mic in the loop): a
+clip ending in a 300 ms marker tone reached the DAC with **0 ms** of the
+marker; with 150 ms of trailing silence, 180 ms; with 300 ms, all of it.
+`stream.stop()` on the PortAudio-ALSA-pulse path does not drain — it
+drops the ~250 ms ring buffer. `_stream_play` now writes the stream's
+actual latency + 100 ms of silence behind every clip before stopping:
+300 of 300 ms in every valid trial. Each speech unit is its own clip, so
+this was every unit, i.e. roughly every sentence.

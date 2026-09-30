@@ -74,7 +74,8 @@ def test_stream_play_prefills_then_writes_chunks_in_blocking_mode(monkeypatch):
     assert st.writes[0] == 12000, "first write fills the ring buffer"
     assert st.order[:2] == ["start", "write"], "PortAudio rejects writes before start()"
     assert st.started and st.stopped and st.closed and not st.aborted
-    assert sum(st.writes) == sr
+    tail = int(sr * (audio._PLAYBACK_LATENCY_S + audio._PLAYBACK_TAIL_MARGIN_S))
+    assert sum(st.writes) == sr + tail, "clip plus a buffer's worth of trailing silence"
     assert all(w <= int(sr * audio._PLAYBACK_CHUNK_S) for w in st.writes[1:])
     assert any("1 underflows in a 1.0s clip" in w for w in warnings)
 
@@ -122,3 +123,16 @@ def test_knob_tracker_lands_exactly_on_the_ends():
     for _ in range(12):
         t.update(1.0)
     assert t.applied_pct == 100
+
+
+def test_stream_play_pads_by_the_streams_real_latency(monkeypatch):
+    """stop() drops what is still buffered on the pulse path — every clip
+    lost its last ~270 ms (the end of each sentence). The silence tail
+    must cover the latency PortAudio actually granted, not the request."""
+    _install_fake_sounddevice(monkeypatch)
+    monkeypatch.setattr(_FakeStream, "latency", 0.4, raising=False)
+    sr = 24000
+    audio._stream_play(np.ones(sr // 2, dtype=np.float32), sr, None)
+    (st,) = _FakeStream.instances
+    assert sum(st.writes) == sr // 2 + int(sr * (0.4 + audio._PLAYBACK_TAIL_MARGIN_S))
+    assert st.stopped and not st.aborted
