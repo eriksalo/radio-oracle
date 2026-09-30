@@ -1,0 +1,326 @@
+# 2026-09-30T13:00:00-06:00 stopping radio-oracle
+Mem:           7.4Gi       4.8Gi       1.5Gi        15Mi       1.2Gi       2.4Gi
+
+## music: 100 items
+M01   ok   2.1s play         Pink Floyd               Play Pink Floyd.
+M02   ok   0.8s play         Beatles                  Play the Beatles.
+M03   ok   0.7s play         Bob Dylan                Put on some Bob Dylan.
+M04   ok   0.8s play         Leonard Cohen            I want to hear Leonard Cohen.
+M05   ok   0.8s play         Johnny Cash              Let's listen to Johnny Cash.
+M06   ok   0.0s play         Greg Brown               Play music by Greg Brown.
+M07   ok   0.8s play         Neil Young               Play something by Neil Young.
+M08   MISS  0.0s question     None                     Can you play Mark Knopfler?
+M09   ok   0.9s play         Emmylou Harris           Play Emmylou Harris.
+M10   ok   0.9s play         Emmy Lou Harris          Play Emmy Lou Harris.
+M11   ok   0.8s play         Bruce Springsteen        Play Bruce Springsteen.
+M12   MISS  0.7s play         Boss                     Play the Boss.
+M13   ok   0.9s play         Stevie Ray Vaughan       Play Stevie Ray Vaughan.
+M14   ok   0.9s play         Fleetwood Mac            Play Fleetwood Mac.
+M15   ok   0.8s play         Aerosmith                Play some Aerosmith.
+M16   ok   0.9s play         Richard Shindell         Put on Richard Shindell.
+M17   ok   0.8s play         Chris Smither            Play Chris Smither.
+M18   ok   0.9s play         Eliza Gilkyson           Play Eliza Gilkyson.
+M19   ok   0.8s play         Steve Earle              Play Steve Earle.
+M20   MISS  1.0s play         Robert Plant and Alison  Play Robert Plant and Alison Krauss.
+M21   ok   0.7s play         Robert Plant             Play Robert Plant.
+M22   ok   0.8s play         Isobel Campbell          Play Isobel Campbell.
+M23   ok   0.7s play         Neil Diamond             Play Neil Diamond.
+M24   ok   0.7s play         Richard Thompson         Play Richard Thompson.
+M25   ok   0.8s play         Teddy Thompson           Play Teddy Thompson.
+M26   ok   0.7s play         Ryan Adams               Play Ryan Adams.
+M27   ok   0.8s play         Pieta Brown              Play Pieta Brown.
+M28   ok   0.9s play         Ray Nargis               Play Ray Nargis.
+M29   ok   0.7s play         Dion                     Play Dion.
+M30   ok   0.7s play         John Williams            Play John Williams.
+M31   ok   0.7s play         Paul McCartney           Play Paul McCartney.
+M32   ok   0.8s play         Bruce Cockburn           Play Bruce Cockburn.
+M33   ok   0.9s play         Peerless Quartet         Play the Peerless Quartet.
+M34   ok   0.7s play         Ada Jones                Play Ada Jones.
+M35   ok   0.9s play         Kasey Chambers           Play Kasey Chambers.
+M36   ok   0.7s play         blues                    Play some blues.
+M37   ok   0.7s play         folk                     Play folk music.
+M38   ok   0.7s play         rock                     Play some rock.
+M39   ok   0.7s play         country                  Play country music.
+M40   ok   0.8s play         progressive rock         Play some progressive rock.
+M41   ok   0.7s play         jazz                     Play some jazz.
+M42   ok   0.8s play         relaxing                 Play something relaxing.
+M43   ok   0.9s play         Dark Side of the Moon    Play Dark Side of the Moon.
+M44   ok   0.9s play         Wish You Were Here       Play Wish You Were Here.
+M45   ok   0.8s play         Abbey Road               Play Abbey Road.
+M46   ok   0.9s play         Hallelujah               Play Hallelujah.
+M47   MISS  0.9s play         Hurt by Johnny Cash      Play Hurt by Johnny Cash.
+M48   MISS  0.9s play         Maybe I'm Amazed         Play Maybe I'm Amazed.
+M49   MISS  1.1s play         Rumours by Fleetwood Mac Play Rumours by Fleetwood Mac.
+M50   ok   1.1s play         Blowin' in the Wind      Play Blowin' in the Wind.
+M51   ok   0.8s play         Harvest                  Play the album Harvest.
+M52   ok   0.9s play         Comfortably Numb         Play Comfortably Numb.
+M53   ok   0.8s play         Let It Be                Play Let It Be.
+M54   ok   0.8s play         Ring of Fire             Play Ring of Fire.
+M55   MISS  1.0s play         Suzanne by Leonard Cohen Play Suzanne by Leonard Cohen.
+M56   ok   0.0s next         None                     Next song.
+M57   ok   0.0s next         None                     Skip this.
+M58   ok   0.0s next         None                     Skip.
+M59   ok   0.0s next         None                     Next track please.
+M60   ok   0.0s next         None                     Next slide.
+M61   MISS  0.7s none         None                     I don't like this one.
+M62   ok   0.0s next_album   None                     Another album.
+M63   ok   0.8s next_album   None                     Change the album.
+M64   ok   0.8s next_album   None                     Play a different album.
+M65   ok   0.0s pause        None                     Pause.
+M66   ok   0.0s pause        None                     Pause the music.
+M67   ok   0.0s pause        None                     Hush.
+M68   ok   0.0s pause        None                     Quiet.
+M69   ok   0.7s pause        None                     Be quiet for a while.
+M70   ok   0.0s pause        None                     Stop the music.
+M71   ok   0.7s stop         None                     Turn it off.
+M72   ok   0.0s resume       None                     Resume.
+M73   ok   0.0s resume       None                     Resume the music.
+M74   ok   0.0s resume       None                     Continue.
+M75   ok   0.7s music_on     None                     Keep playing.
+M76   ok   0.0s music_on     None                     Play music.
+M77   ok   0.8s music_on     None                     Put the music back on.
+M78   ok   0.0s music_on     None                     Back to the music.
+M79   MISS  0.7s none         None                     Turn the radio on.
+M80   ok   0.0s music_on     None                     Play some music.
+M81   ok   0.0s list_music   None                     What music do we have?
+M82   ok   0.0s list_music   None                     What songs are there by Greg Brown?
+M83   MISS  0.0s question     None                     Do you have any Springsteen?
+M84   MISS  0.0s question     None                     Any albums by the Beatles?
+M85   ok   0.0s list_music   None                     What albums are there by Pink Floyd?
+M86   ok   0.0s list_music   None                     Explore the music.
+M87   MISS  0.0s question     None                     What kind of music is there?
+M88   MISS  0.0s question     None                     Is there any jazz?
+M89   ok   0.0s list_music   None                     What artists do you have?
+M90   ok   0.0s question     None                     Who is this?
+M91   ok   0.0s question     None                     What song is this?
+M92   ok   0.0s question     None                     Who wrote Blowin' in the Wind?
+M93   ok   0.0s question     None                     When did the Beatles break up?
+M94   ok   0.0s question     None                     Tell me about Pink Floyd.
+M95   ok   0.7s none         None                     Turn it up.
+M96   ok   0.7s none         None                     Louder.
+M97   ok   0.7s none         None                     Umm, never mind.
+M98   ok   0.7s none         None                     Thanks.
+M99   ok   0.7s music_on     None                     Play.
+M100  ok   0.7s play         Dylan                    Play Dylan.
+# music: {"n": 100, "action_pass": 93, "resolve_pass": 50, "resolve_n": 56, "llm_intent": 67, "wall_s": 56.1}
+
+## books: 110 items
+B01   ok   0.9s read_book    Moby Dick                Moby-Dick; or, The Whale, by Herman Melville
+B02   ok   0.8s read_book    Dracula                  Dracula, by Bram Stoker
+B03   ok   0.8s read_book    Frankenstein             Frankenstein; Or, The Modern Prometheus
+B04   ok   0.9s read_book    Treasure Island          Treasure Island
+B05   MISS  0.9s read_book    Sherlock Holmes          A doctor enjoys Sherlock Holmes
+B06   ok   1.2s read_book    The Hound of the Baskerv The Hound of the Baskervilles, by A. Conan Doyle
+B07   ok   1.1s read_book    Pride and Prejudice      Pride and Prejudice
+B08   ok   0.9s read_book    Alice in Wonderland      Alice in Wonderland
+B09   ok   0.9s read_book    Huckleberry Finn         Adventures of Huckleberry Finn, by Mark Twain
+B10   MISS  0.8s read_book    Tom Sawyer               Tom Sawyer, Detective, by Mark Twain
+B11   ok   0.9s read_book    Great Expectations       Great Expectations, by Charles Dickens
+B12   ok   1.0s read_book    A Tale of Two Cities     A Tale of Two Cities, by Charles Dickens
+B13   ok   0.9s read_book    Jane Eyre                Jane Eyre: An Autobiography, by Charlotte Brontë
+B14   MISS  0.9s read_book    War and Peace            Poems of Peace and War
+B15   ok   0.8s read_book    The Odyssey              The Odyssey, by Homer
+B16   ok   0.9s read_book    Iliad                    The Iliad
+B17   MISS  0.9s read_book    Walden                   The Voodoo Gold Trail, by Walter Walden
+B18   ok   0.9s read_book    Don Quixote              Don Quixote, by Miguel de Cervantes
+B19   ok   0.9s read_book    Les Miserables           Les Misérables, by Victor Hugo
+B20   ok   1.1s read_book    The Count of Monte Crist The Count of Monte Cristo, by Alexandre Dumas
+B21   ok   1.0s read_book    The Three Musketeers     The three musketeers, by Alexandre Dumas, Père
+B22   ok   0.9s read_book    The Time Machine         The Time Machine, by H. G. Wells
+B23   ok   1.0s read_book    The War of the Worlds    The War of the Worlds, by H. G. Wells
+B24   ok   1.1s read_book    Twenty Thousand Leagues  Twenty Thousand Leagues under the Sea, by Jules Ve
+B25   ok   1.1s read_book    Around the World in Eigh Around the World in Eighty Days, by Jules Verne
+B26   ok   0.8s read_book    Little Women             Two Little Women
+B27   ok   1.0s read_book    Anne of Green Gables     Anne of Green Gables, by Lucy Maud Montgomery
+B28   ok   0.9s read_book    The Secret Garden        The Secret Garden, by Frances Hodgson Burnett
+B29   ok   1.1s read_book    The Wind in the Willows  The Wind in the Willows
+B30   ok   0.8s read_book    Peter Pan                The Peter Pan Alphabet
+B31   ok   0.9s read_book    The Jungle Book          The Jungle Book
+B32   ok   1.0s read_book    The Call of the Wild     The call of the wild, by Jack London
+B33   ok   0.8s read_book    White Fang               White Fang, by Jack London
+B34   ok   0.9s read_book    Heart of Darkness        Heart of Darkness, by Joseph Conrad
+B35   ok   0.9s read_book    Crime and Punishment     Crime and Punishment, by Fyodor Dostoevsky
+B36   ok   1.1s read_book    The Brothers Karamazov   The Brothers Karamazov, by Constance Garnett
+B37   ok   0.9s read_book    Anna Karenina            Anna Karenina, by Leo Tolstoy
+B38   ok   0.9s read_book    Paradise Lost            Paradise Lost, by John Milton
+B39   ok   0.9s read_book    Beowulf                  Beowulf, by Gummere
+B40   ok   1.1s read_book    Grimm's fairy tales      Grimm's Fairy Tales
+B41   ok   1.1s read_book    Aesop's fables           Three hundred Aesop’s fables
+B42   ok   0.9s read_book    Robinson Crusoe          Robinson Crusoe, by Daniel Defoe
+B43   ok   1.1s read_book    Gulliver's Travels       Gulliver's Travels, by Jonathan Swift
+B44   ok   0.9s read_book    The Scarlet Letter       The Scarlet Letter, by Nathaniel Hawthorne
+B45   ok   0.9s read_book    Walt Whitman             Poems by Walt Whitman, by Walt Whitman
+B46   ok   0.8s read_book    Emma                     The Poems of Emma Lazarus, Volume 2, by Emma Lazar
+B47   ok   0.9s read_book    Persuasion               Persuasion, by Jane Austen
+B48   ok   1.1s read_book    The Picture of Dorian Gr The Picture of Dorian Gray, by Oscar Wilde
+B49   ok   1.2s read_book    Dr. Jekyll and Mr. Hyde  The Strange Case of Dr. Jekyll and Mr. Hyde, by Ro
+B50   ok   0.9s read_book    Kidnapped                Kidnapped (Illustrated)
+B51   ok   0.9s read_book    Oliver Twist             Oliver Twist, by Charles Dickens
+B52   ok   0.9s read_book    David Copperfield        David Copperfield, by Charles Dickens
+B53   ok   1.1s read_book    The Scarlet Pimpernel    The Scarlet Pimpernel, by Baroness Orczy
+B54   ok   0.8s read_book    The Prince               The Constant Prince
+B55   ok   0.9s read_book    Federalist Papers        The Federalist Papers, by Alexander Hamilton
+B56   ok   0.8s read_book    Common Sense             Common Sense
+B57   ok   0.9s read_book    Benjamin Franklin        Benjamin Franklin
+B58   ok   1.0s read_book    Frederick Douglass       Collected Articles of Frederick Douglass, by Frede
+B59   ok   1.0s read_book    The Wonderful Wizard of  The Wonderful Wizard of Oz
+B60   ok   0.8s read_book    Black Beauty             Black Beauty, by Anna Sewell
+B61   ok   0.9s read_book    A Princess of Mars       A Princess of Mars, by Edgar Rice Burroughs
+B62   ok   1.0s read_book    The Thirty-Nine Steps    The Thirty-Nine Steps, by John Buchan
+B63   ok   1.0s read_book    The Phantom of the Opera The Phantom of the Opera, by Gaston Leroux
+B64   ok   0.9s read_book    Ethan Frome              Ethan Frome, by Edith Wharton
+B65   ok   0.9s read_book    The Great Gatsby         The Great Gatsby, by F. Scott Fitzgerald
+B66   ok   0.9s read_book    Siddhartha               Siddhartha, by Herman Hesse
+B67   ok   1.0s read_book    Winnie the Pooh          Winnie-the-Pooh, by A. A. Milne
+B68   ok   0.8s read_book    Hamlet                   Hamlet
+B69   ok   0.8s read_book    Macbeth                  Macbeth
+B70   ok   1.1s read_book    Meditations of Marcus Au The Meditations of the Emperor Marcus Aurelius Ant
+B71   ok   0.9s read_book    Mark Twain               Mark Twain's Speeches, by Mark Twain
+B72   ok   0.9s read_book    Jane Austen              Emma, by Jane Austen
+B73   MISS  0.8s read_book    Dickens                  Dickens-Land
+B74   ok   0.8s read_book    Jack London              Brown Wolf and Other Jack London Stories, by Jack 
+B75   ok   1.0s read_book    H. G. Wells              The Star, by H. G. Wells
+B76   ok   0.9s read_book    Jules Verne              Topsy-Turvy, by Jules Verne
+B77   ok   0.9s read_book    Kipling                  Index for Works of Rudyard Kipling, by Rudyard Kip
+B78   ok   0.0s mode_reader  None                     
+B79   ok   0.0s mode_reader  None                     
+B80   ok   0.0s mode_reader  None                     
+B81   ok   0.7s read_book    None                     Which book?
+B82   ok   0.8s read_book    mystery                  An Historical Mystery (The Gondreville Mystery), b
+B83   ok   0.0s question     None                     
+B84   ok   0.0s next_chapter None                     
+B85   ok   0.0s next_chapter None                     
+B86   ok   0.0s prev_chapter None                     
+B87   ok   0.0s prev_chapter None                     
+B88   ok   0.0s goto_chapter None                     
+B89   ok   0.0s goto_chapter None                     
+B90   ok   0.0s goto_chapter None                     
+B91   ok   0.0s goto_chapter None                     
+B92   ok   0.0s goto_chapter None                     
+B93   MISS  0.0s prev_chapter None                     
+B94   ok   0.0s restart_book None                     
+B95   ok   0.0s restart_book None                     
+B96   ok   0.0s book_status  None                     
+B97   ok   0.0s book_status  None                     
+B98   ok   0.0s book_status  None                     
+B99   ok   0.0s pause        None                     
+B100  ok   0.0s pause        None                     
+B101  ok   0.0s list_books   None                     The library holds 60030 books. Authors include Sir
+B102  ok   0.0s list_books   None                     I have Brown Wolf and Other Jack London Stories by
+B103  MISS  0.0s question     None                     
+B104  ok   0.0s list_books   None                     No books match H. G. Wells do you have. Try an aut
+B105  ok   0.0s list_books   None                     The library holds 60030 books. Authors include The
+B106  ok   0.0s question     None                     
+B107  ok   0.0s question     None                     
+B108  ok   0.0s question     None                     
+B109  ok   0.0s question     None                     
+B110  ok   0.8s read_book    a poem                   Kathrina—A Poem
+# books: {"n": 110, "action_pass": 108, "resolve_pass": 79, "resolve_n": 84, "confident": 78, "llm_intent": 80, "wall_s": 74.3}
+
+## librarian: 100 items
+[0;93m2026-09-30 13:02:14.812009987 [W:onnxruntime:Default, device_discovery.cc:283 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card0": device_discovery.cc:93 ReadFileContents Failed to open file: "/sys/class/drm/card0/device/vendor"[m
+# retriever warm-up 6.8s
+L01   ok   10.7s  82w rag= 2295 Who was Nikola Tesla?
+L02   ok    6.8s  42w rag= 2295 Where did he die?
+L03   ok    7.9s  76w rag= 2284 What causes the northern lights?
+L04   ok    9.9s  85w rag= 2294 Can you see them from Colorado?
+L05   ok    8.1s  69w rag= 2292 How do I treat a second-degree burn?
+L06   ok    6.4s  52w rag= 2399 Should I pop the blisters?
+L07   ok   10.2s  68w rag= 2323 What is the boiling point of water at high altit
+L08   ok    8.3s  57w rag= 2618 Why is that?
+L09   ok    2.8s   6w rag= 2318 Who wrote Pride and Prejudice?
+L10   ok    4.3s   8w rag= 2326 When was it published?
+L11   ok    9.6s  99w rag= 2383 How does a vacuum tube amplify a signal?
+L12   ok   11.0s 100w rag= 2309 How do I purify water so it's safe to drink?
+L13   ok    8.1s  44w rag= 2337 How long do I need to boil it?
+L14   ok    7.6s  62w rag= 2271 What are the signs of dehydration?
+L15   ok   10.3s  87w rag= 2295 How do you perform CPR on an adult?
+L16   ok    9.7s  93w rag= 2317 How do I splint a broken arm?
+L17   ok    8.1s  78w rag= 2323 What should I do for a snake bite?
+L18   ok    6.3s  53w rag= 2257 Should I suck out the venom?
+L19   ok    7.9s  67w rag= 2255 How can I tell if a wound is infected?
+L20   ok   10.6s  92w rag= 2323 What is hypothermia and how do I treat it?
+L21   ok    9.4s  91w rag= 2363 How do I start a fire without matches?
+L22   ok    8.1s  71w rag= 2376 How do you make charcoal?
+L23   ok    8.2s  71w rag= 2429 How do I sharpen a knife with a stone?
+L24   ok    8.9s  67w rag= 2368 How do you grow potatoes?
+L25   ok    7.1s  61w rag= 2300 When should I plant tomatoes in Colorado?
+L26   ok    8.4s  73w rag= 2347 How do I fix a flat bicycle tire?
+L27   ok    8.5s  83w rag= 2264 How do I replace the battery in a phone?
+L28   ok    9.8s  85w rag= 2339 How does a lead-acid battery work?
+L29   ok    9.6s  88w rag= 2348 How can I tell if a car battery is dead?
+L30   ok    6.6s  53w rag= 2359 How does a solar panel make electricity?
+L31   ok    6.4s  58w rag= 2304 How does a diesel engine differ from a gasoline 
+L32   ok    6.7s  62w rag= 2307 How does a refrigerator keep things cold?
+L33   ok    8.7s  82w rag= 2381 How does a transistor work?
+L34   ok    6.5s  55w rag= 2289 What is Ohm's law?
+L35   ok    7.7s  72w rag= 2328 How do I measure voltage with a multimeter?
+L36   ok    8.8s  94w rag= 2364 How does radio work?
+L37   ok    7.5s  68w rag= 2302 What is AM versus FM radio?
+L38   ok    7.2s  70w rag= 2303 What causes earthquakes?
+L39   ok   10.9s 104w rag= 2408 How do volcanoes form?
+L40   ok    9.1s  80w rag= 2382 What is the water cycle?
+L41   ok    8.2s  84w rag= 2347 Why is the sky blue?
+L42   ok    7.2s  47w rag= 2330 How far away is the Moon?
+L43   ok    5.0s  28w rag= 2419 How many planets are in the solar system?
+L44   ok    7.0s  62w rag= 2343 What is photosynthesis?
+L45   ok    7.2s  67w rag= 2251 How do vaccines work?
+L46   ok    7.4s  56w rag= 2284 What is penicillin and who discovered it?
+L47   ok    8.6s  76w rag= 2261 How does soap kill germs?
+L48   MISS  10.5s  98w rag= 2318 What is the theory of relativity?
+L49   MISS   8.7s  87w rag= 2287 Explain how a nuclear reactor works.
+L50   ok    7.6s  61w rag= 2337 What is the Pythagorean theorem?
+L51   ok    6.4s  46w rag= 2305 How do I calculate the area of a circle?
+L52   ok    8.2s  74w rag= 2359 What is a prime number?
+L53   ok    8.9s  76w rag= 2328 What is the difference between a virus and a bac
+L54   ok    9.0s  86w rag= 2341 What is DNA?
+L55   ok   10.7s 104w rag= 2355 How do birds fly?
+L56   ok    7.4s  63w rag= 2282 Why do leaves change color in the fall?
+L57   ok    7.8s  70w rag= 2527 How do bees make honey?
+L58   ok    8.4s  74w rag= 2266 Who was Genghis Khan?
+L59   ok    8.1s  56w rag= 2291 How big was his empire?
+L60   ok    9.6s  86w rag= 2369 What caused the fall of the Roman Empire?
+L61   ok    6.6s  51w rag= 2293 Who invented the printing press?
+L62   ok    7.0s  47w rag= 2363 When did the First World War start?
+L63   MISS   8.7s  71w rag= 2276 What was the Black Death?
+L64   ok    5.3s  33w rag= 2281 Who was the first person to walk on the Moon?
+L65   ok    6.2s  26w rag= 2281 What year was that?
+L66   ok    3.8s  20w rag= 2271 What is the capital of Mongolia?
+L67   ok    5.8s  33w rag= 2331 How tall is Mount Everest?
+L68   ok    8.1s  68w rag= 2285 Which river is the longest in the world?
+L69   ok    7.4s  77w rag= 2315 What is the Continental Divide?
+L70   ok   11.2s  81w rag= 2294 Tell me about Boulder, Colorado.
+L71   ok    9.0s  89w rag= 2297 Who is Sherlock Holmes?
+L72   ok    9.1s  71w rag= 2287 Which novel begins with the line 'Call me Ishmae
+L73   ok   11.4s  87w rag= 2313 Tell me about the whaling ship in Moby Dick.
+L74   ok   12.7s  92w rag= 2304 Who was the captain?
+L75   ok    6.4s  40w rag= 2340 Which play has the line 'To be, or not to be'?
+L76   ok    9.9s  79w rag= 2325 What is the opening line of Pride and Prejudice?
+L77   ok    8.9s  77w rag= 2301 What happens at the end of A Tale of Two Cities?
+L78   ok    5.2s  37w rag= 2298 Who wrote The Time Machine?
+L79   ok    9.2s  78w rag= 2340 What is Walden about?
+L80   ok   11.3s 111w rag= 2346 Summarize the plot of Treasure Island.
+L81   ok   11.4s  96w rag= 2347 What does Marcus Aurelius say about death in the
+L82   ok   11.4s  85w rag= 2321 Who were the three musketeers?
+L83   ok    8.9s  81w rag= 2298 What is Frankenstein's monster made of?
+L84   ok   10.2s  95w rag= 2364 How do I preserve meat without a refrigerator?
+L85   ok    9.0s  78w rag= 2361 How do I make bread without yeast?
+L86   ok   10.9s  97w rag= 2311 How do I set a broken bone if there is no doctor
+L87   ok    9.3s  73w rag= 2385 What plants can I eat in the wild?
+L88   MISS   8.8s  73w rag= 2338 How do I tell if a mushroom is poisonous?
+L89   ok    8.0s  73w rag= 2268 How does a compass work?
+L90   ok    7.3s  66w rag= 2304 How can I find north without a compass?
+L91   ok    8.2s  73w rag= 2406 How do you treat frostbite?
+L92   ok    6.7s  55w rag= 2303 What are the symptoms of a concussion?
+L93   ok   11.2s 103w rag= 2310 How do you stop heavy bleeding?
+L94   ok   10.7s  90w rag= 2331 What is the Krebs cycle?
+L95   ok    6.5s  58w rag= 2317 Explain supply and demand.
+L96   ok    7.4s  66w rag= 2369 What is the difference between weather and clima
+L97   ok    6.6s  59w rag= 2383 What will the weather be tomorrow?
+L98   ok    7.9s  65w rag= 2337 What's the latest news?
+L99   MISS   4.8s  19w rag= 2258 What year is it right now?
+L100  ok    9.2s  81w rag= 2299 How do I tune a guitar by ear?
+# librarian: {"n": 100, "keyword_pass": 95, "errors": 0, "no_rag": 0, "wall_s": 858.2}
+# harness exit=0
+Mem:           7.4Gi       4.6Gi       769Mi        18Mi       2.0Gi       2.5Gi
+# radio-oracle restarted: active
