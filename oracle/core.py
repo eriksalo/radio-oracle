@@ -213,6 +213,14 @@ def _try_rag_query(user_input: str) -> str:
         # wider candidate pool + cross-encoder rerank. Plot questions get
         # the words a plot summary would use appended (router.augment_query).
         results = retriever.query(augment_query(user_input), mode=detect_mode(user_input))
+        # A checked plot summary for a canonical work goes first: the model
+        # invents endings from chunk one of a novel (rag/plots.py).
+        from oracle.rag.plots import as_result
+        from oracle.rag.plots import match as plot_match
+
+        plot = plot_match(user_input) if settings.rag_plot_summaries else None
+        if plot is not None:
+            results = [as_result(plot)] + results[: max(0, len(results) - 1)]
         if results:
             from oracle.activity import emit
 

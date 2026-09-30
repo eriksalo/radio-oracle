@@ -18,6 +18,7 @@ from oracle.rag.router import route as router_route
 # How a source is named inside the prompt: the model reads these, so they
 # carry what it needs to weigh the passage ("old book").
 _SOURCE_LABELS = {
+    "summary": "plot summary (checked; trust it over the other passages for plot and characters)",
     "gutenberg": "gutenberg (a book from before 1930 — historical, check its advice)",
     "wikimed": "wikimed (medical reference)",
     "wikipedia": "wikipedia",

@@ -76,6 +76,7 @@ include = ["oracle*", "config*"]
 
 [tool.setuptools.package-data]
 "oracle.diag" = ["static/*"]
+"oracle.rag" = ["plot_summaries.json"]
 
 [build-system]
 requires = ["setuptools>=68"]

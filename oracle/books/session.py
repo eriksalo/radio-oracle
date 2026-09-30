@@ -51,6 +51,22 @@ class ReaderSession:
         hits = self._library.search(query)
         return hits[0] if hits else None
 
+    def find_books(self, query: str, n: int = 3) -> list[Book]:
+        """The *n* best candidates, distinct by title (editions collapse)."""
+        from oracle.books.ranking import main_title
+
+        out: list[Book] = []
+        seen: set[str] = set()
+        for b in self._library.search(query):
+            key = main_title(b.title) or b.title.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(b)
+            if len(out) >= n:
+                break
+        return out
+
     @staticmethod
     def is_confident_match(query: str, book: Book) -> bool:
         """Every meaningful word of the request appears in the title or
@@ -155,3 +171,35 @@ class ReaderSession:
 
     def close(self) -> None:
         self._reader.close()
+
+
+_YES_RE = re.compile(
+    r"^\W*(?:yes|yeah|yep|yup|sure|correct|right|please|that'?s (?:it|the one|right)|"
+    r"ok(?:ay)?|exactly|go ahead|read it)\b",
+    re.IGNORECASE,
+)
+_NO_RE = re.compile(
+    r"^\W*(?:no|nope|nah|not (?:that|this)(?: one)?|wrong(?: one)?)\b[\s,.!]*", re.IGNORECASE
+)
+_FILLER_RE = re.compile(
+    r"^(?:i\s+(?:meant|mean|want(?:ed)?)|the\s+one|it'?s|i\s+said)\s+", re.IGNORECASE
+)
+
+
+def parse_confirmation(answer: str) -> tuple[str, str]:
+    """ "Did you mean X?" → ("yes", ""), ("no", ""), ("correction", "by Thoreau")
+    or ("unclear", text). A correction is what follows a no ("no, the one
+    by Thoreau") or a bare new request ("the one by Thoreau")."""
+    a = answer.strip()
+    if not a:
+        return ("unclear", "")
+    if _YES_RE.match(a):
+        return ("yes", "")
+    m = _NO_RE.match(a)
+    if m:
+        rest = _FILLER_RE.sub("", a[m.end() :].strip(" ,.!?")).strip()
+        return ("correction", rest) if rest else ("no", "")
+    rest = _FILLER_RE.sub("", a.strip(" ,.!?"))
+    if rest != a.strip(" ,.!?"):
+        return ("correction", rest)
+    return ("unclear", a)

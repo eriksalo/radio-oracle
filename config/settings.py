@@ -27,7 +27,9 @@ class OracleSettings(BaseSettings):
     # pushed the box into swap once STT/TTS/retriever were resident.
     ollama_num_ctx: int = 4096
     # Factuality-leaning sampling for a RAG-grounded archive persona.
-    ollama_temperature: float = 0.6
+    # 0.6 → 0.4 (2026-09-30): at 0.6 about one factual answer in twenty flipped
+    # between right and wrong from run to run of the same question.
+    ollama_temperature: float = 0.4
     ollama_top_p: float = 0.9
     # Hard cap on streamed (spoken) replies. Baseline 2026-09-27: replies
     # ran 136-178 tokens ≈ 40 s of speech despite the persona's "two to
@@ -206,6 +208,8 @@ class OracleSettings(BaseSettings):
     rag_collection_bias: bool = True
     # Plot/character questions pull more chunks from Gutenberg + Wikipedia.
     rag_literature_top_k: int = 5
+    # Inject oracle/rag/plot_summaries.json when a question names a canonical work.
+    rag_plot_summaries: bool = True
     # Kill-switch for cross-encoder reranking (deep mode) if it proves too
     # slow on the Jetson CPU.
     rag_rerank_enabled: bool = True

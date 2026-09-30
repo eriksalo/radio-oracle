@@ -28,7 +28,6 @@ Transitions:
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 from queue import Empty
 from typing import Literal
@@ -398,8 +397,7 @@ class OracleApp:
                         )
                     elif not session.is_confident_match(query, book):
                         # A loose FTS hit must not start reading unasked.
-                        if not await self._confirm_book(voice_ctx, book):
-                            book = None
+                        book = await self._confirm_book(voice_ctx, session, query)
                 if book is None and not query:
                     book = session.current_book()
                     if book is not None:
@@ -568,34 +566,54 @@ class OracleApp:
                 "books, mostly from Project Gutenberg.",
             )
             return None
-        if not session.is_confident_match(text, book) and not await self._confirm_book(
-            voice_ctx, book
-        ):
-            return None
+        if not session.is_confident_match(text, book):
+            return await self._confirm_book(voice_ctx, session, text)
         return book
 
-    async def _confirm_book(self, voice_ctx, book) -> bool:
-        """ "Did you mean X, by Y?" — yes/no by voice; anything else is no."""
+    async def _confirm_book(self, voice_ctx, session, query: str, max_asks: int = 3):
+        """Offer the best candidates one at a time — "Did you mean X, by Y?"
+        — and return the book the user accepts, or None.
+
+        "No" moves to the next candidate; "no, the one by Thoreau" searches
+        again with the correction added and offers that first; silence or
+        anything unclear gives up. Before 2026-09-30 one "no" ended the
+        request even when the right book was second in the list.
+        """
+        from oracle.books.session import parse_confirmation
         from oracle.core import speak_text
         from oracle.stt import listen
 
-        by = f", by {book.author}" if book.author else ""
-        await speak_text(voice_ctx, f"Did you mean {book.title}{by}?")
-        try:
-            _audio, text = listen(
-                voice_ctx.stt, onset_timeout=6.0, should_abort=lambda: not self.power.is_on
-            )
-        except (ValueError, OSError) as e:
-            logger.warning(f"Mic unavailable for confirmation: {e}")
-            return False
-        finally:
-            voice_ctx.stt.unload()
-        answer = text.strip().lower()
-        logger.info(f"Book confirmation: {answer!r}")
-        if re.match(r"^\W*(yes|yeah|yep|sure|correct|right|please|that'?s it|ok(?:ay)?)\b", answer):
-            return True
-        await speak_text(voice_ctx, "Okay, not that one.")
-        return False
+        candidates = session.find_books(query, n=max_asks)
+        asked = 0
+        while candidates and asked < max_asks:
+            book = candidates.pop(0)
+            asked += 1
+            by = f", by {book.author}" if book.author else ""
+            await speak_text(voice_ctx, f"Did you mean {book.title}{by}?")
+            try:
+                _audio, text = listen(
+                    voice_ctx.stt, onset_timeout=6.0, should_abort=lambda: not self.power.is_on
+                )
+            except (ValueError, OSError) as e:
+                logger.warning(f"Mic unavailable for confirmation: {e}")
+                return None
+            finally:
+                voice_ctx.stt.unload()
+            verdict, rest = parse_confirmation(text)
+            logger.info(f"Book confirmation: {text!r} -> {verdict} {rest!r}")
+            if verdict == "yes":
+                return book
+            if verdict == "correction":
+                query = f"{query} {rest}"
+                fresh = session.find_books(query, n=max_asks)
+                if fresh and session.is_confident_match(query, fresh[0]):
+                    return fresh[0]
+                candidates = [c for c in fresh if c.id != book.id]
+                continue
+            if verdict == "unclear":
+                break
+        await speak_text(voice_ctx, "Okay. Say read me, and the title, when you know which one.")
+        return None
 
     @staticmethod
     def _book_announcement(session, book, chapter_spec: str | None) -> str:
