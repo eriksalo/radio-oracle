@@ -207,3 +207,65 @@ def test_smart_turn_runs_on_reference_signal():
     ref = np.load(DATA / "smart_turn_ref.npz")
     p = st.probability(ref["signal"])
     assert 0.0 <= p <= 1.0
+
+
+# ------------------------------------------- adaptive floor (2026-09-30)
+
+
+def _noisy_blocks(pattern: str, noise: float = 0.009, speech: float = 0.1, n: int = 1600):
+    rng = np.random.default_rng(0)
+    out = []
+    for ch in pattern:
+        level = speech if ch == "S" else noise
+        out.append((rng.standard_normal(n) * level).astype(np.float32))
+    return out
+
+
+def test_energy_endpointer_follows_the_noise_floor():
+    ep = EnergyEndpointer(threshold=0.004, max_silence=0.9, ratio=3.0)
+    ep.start()
+    noise = _noisy_blocks("." * 12)
+    assert ep.is_speech(noise[0])  # no history yet: fixed threshold, noise counts
+    for b in noise[1:]:
+        ep.is_speech(b)
+    assert ep.effective_threshold > 0.02
+    assert not ep.is_speech(_noisy_blocks(".")[0])
+    assert ep.is_speech(_noisy_blocks("S")[0])
+
+
+def test_record_ends_in_a_noisy_room(monkeypatch):
+    from oracle import audio
+
+    monkeypatch.setattr(settings, "vad_backend", "energy")
+    monkeypatch.setattr(settings, "audio_capture_sample_rate", 16000)
+    monkeypatch.setattr(settings, "audio_sample_rate", 16000)
+    monkeypatch.setattr(audio, "_get_input_device", lambda: None)
+    # Room noise above the fixed threshold the whole time, then speech, then noise.
+    _install_fake_sd(monkeypatch, _noisy_blocks("......SSSSSS" + "." * 40))
+    out = audio.record_until_silence(silence_duration=0.5)
+    assert 0 < len(out) <= 20 * 1600, "must end soon after the speech, not run on the noise"
+
+
+def test_record_caps_a_runaway_utterance(monkeypatch):
+    from oracle import audio
+
+    monkeypatch.setattr(settings, "vad_backend", "energy")
+    monkeypatch.setattr(settings, "vad_noise_ratio", 0.0)
+    monkeypatch.setattr(settings, "vad_max_utterance_s", 1.0)
+    monkeypatch.setattr(settings, "audio_capture_sample_rate", 16000)
+    monkeypatch.setattr(settings, "audio_sample_rate", 16000)
+    monkeypatch.setattr(audio, "_get_input_device", lambda: None)
+    _install_fake_sd(monkeypatch, _blocks("S" * 60))
+    assert len(audio.record_until_silence(silence_duration=0.5)) == 10 * 1600
+
+
+def test_single_block_blip_does_not_start_a_recording(monkeypatch):
+    from oracle import audio
+
+    monkeypatch.setattr(settings, "vad_backend", "energy")
+    monkeypatch.setattr(settings, "audio_capture_sample_rate", 16000)
+    monkeypatch.setattr(settings, "audio_sample_rate", 16000)
+    monkeypatch.setattr(audio, "_get_input_device", lambda: None)
+    _install_fake_sd(monkeypatch, _blocks("S.......SSS....."))
+    out = audio.record_until_silence(silence_duration=0.3)
+    assert len(out) == 6 * 1600  # the blip is ignored; 3 speech + 3 silence

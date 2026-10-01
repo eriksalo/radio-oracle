@@ -205,14 +205,49 @@ class Endpointer:
 
 
 class EnergyEndpointer(Endpointer):
-    """The legacy behaviour: RMS threshold, fixed trailing-silence window."""
+    """RMS threshold with a noise floor that follows the room, and a fixed
+    trailing-silence window.
 
-    def __init__(self, threshold: float, max_silence: float):
+    A block is speech when its RMS beats both the configured threshold and
+    ``ratio`` times the quietest block of the last ``floor_window`` blocks
+    (applied once ``min_history`` blocks have been seen).
+    With a fixed 0.004 threshold the radio's own room sat at 0.009 median
+    RMS, every block counted as speech, and a question took 63 s to end
+    (2026-09-30).
+    """
+
+    def __init__(
+        self,
+        threshold: float,
+        max_silence: float,
+        ratio: float | None = None,
+        floor_window: int = 30,
+        min_history: int = 10,
+    ):
+        from collections import deque
+
         self._threshold = threshold
         self._max_silence = max_silence
+        self._ratio = settings.vad_noise_ratio if ratio is None else ratio
+        self._recent: deque[float] = deque(maxlen=floor_window)
+        self._min_history = min_history
+
+    def start(self) -> None:
+        self._recent.clear()
+
+    @property
+    def effective_threshold(self) -> float:
+        # The fixed threshold until a second of history exists: the quietest
+        # of two speech blocks is still speech, not the room.
+        if len(self._recent) < self._min_history or self._ratio <= 0:
+            return self._threshold
+        return max(self._threshold, min(self._recent) * self._ratio)
 
     def is_speech(self, block: np.ndarray) -> bool:
-        return float(np.sqrt(np.mean(block**2))) > self._threshold
+        rms = float(np.sqrt(np.mean(block**2)))
+        speech = rms > self.effective_threshold
+        self._recent.append(rms)
+        return speech
 
     def turn_complete(self, audio: np.ndarray, silence_s: float) -> bool:
         return silence_s >= self._max_silence

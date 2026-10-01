@@ -53,6 +53,11 @@ def record_until_silence(
     onset_blocks_left = int(onset_timeout / block_duration) if onset_timeout else None
     started = False
     frames: list[np.ndarray] = []
+    pending: list[np.ndarray] = []  # speech blocks not yet enough to call it onset
+    min_onset = max(1, settings.vad_min_onset_blocks)
+    max_blocks = (
+        int(settings.vad_max_utterance_s / block_duration) if settings.vad_max_utterance_s else 0
+    )
     # The VAD endpointers classify 16 kHz mono; capture is 16 kHz today
     # (audio_capture_sample_rate) so blocks pass straight through.
     endpointer = build_endpointer(threshold, max_silence)
@@ -85,12 +90,25 @@ def record_until_silence(
             # energy endpointer's threshold is tuned to the raw level.
             vad_view = mono if vad_gain == 1.0 else np.clip(mono * vad_gain, -1.0, 1.0)
 
+            if max_blocks and len(frames) >= max_blocks:
+                logger.info(f"Recording hit the {settings.vad_max_utterance_s:.0f}s cap")
+                break
             if endpointer.is_speech(vad_view):
-                started = True
+                if not started:
+                    pending.append(data.copy())
+                    if len(pending) < min_onset:
+                        continue
+                    started = True
+                    for blk in pending:
+                        frames.append(blk)
+                        if on_block is not None:
+                            on_block(blk[:, 0] if blk.ndim > 1 else blk)
+                    pending = []
+                else:
+                    frames.append(data.copy())
+                    if on_block is not None:
+                        on_block(mono)
                 silence_s = 0.0
-                frames.append(data.copy())
-                if on_block is not None:
-                    on_block(mono)
             elif started:
                 silence_s += block_duration
                 frames.append(data.copy())
@@ -104,11 +122,13 @@ def record_until_silence(
                         logger.debug(f"Endpoint: {endpointer.last_decision} after {silence_s:.2f}s")
                     break
             elif onset_blocks_left is not None:
+                pending = []
                 onset_blocks_left -= 1
                 if onset_blocks_left <= 0:
                     logger.debug("No speech within onset timeout")
                     return np.array([], dtype=np.float32)
-            # If not started and below threshold, keep waiting
+            else:
+                pending = []  # an isolated blip, not the start of speech
 
     if not frames:
         return np.array([], dtype=np.float32)

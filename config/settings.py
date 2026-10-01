@@ -127,6 +127,14 @@ class OracleSettings(BaseSettings):
     # natural pause ("Why… is the weather…" recorded 2.2s → "Why?").
     # Radio turns now handle questions too, so match the librarian window.
     vad_silence_duration_radio: float = 0.9
+    # Energy endpointer follows the room: speech must beat this many times
+    # the quietest recent 100 ms block (0 = fixed threshold only).
+    vad_noise_ratio: float = 3.0
+    # Speech must last this many 100 ms blocks before a recording starts
+    # (a click or the tail of the radio's own voice is one block).
+    vad_min_onset_blocks: int = 2
+    # Hard cap on one utterance: a noisy room must never hold the mic open.
+    vad_max_utterance_s: float = 15.0
     # End-of-utterance detection (oracle/endpoint.py). "energy" is the
     # legacy RMS threshold + fixed trailing silence (vad_silence_duration*).
     # "silero" ends the turn vad_silence_min after Silero VAD last heard

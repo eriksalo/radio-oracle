@@ -633,6 +633,11 @@ async def dispatch_radio_command(
         # and a longer follow-up window for open-ended conversation.
         _speak(vc, "What would you like to know?", should_abort)
         opening = await _listen_once(vc, onset_timeout=max(settings.followup_window_s * 2, 8.0))
+        if not opening and not (should_abort and should_abort()):
+            # Heard nothing usable: say so and give one more chance, rather
+            # than dropping back to the music in silence (2026-09-30).
+            _speak(vc, "Sorry, I didn't catch that. Go ahead.", should_abort)
+            opening = await _listen_once(vc, onset_timeout=max(settings.followup_window_s * 2, 8.0))
         if opening:
             switched = await _question_turns(
                 vc,
