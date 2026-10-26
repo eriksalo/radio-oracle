@@ -107,6 +107,17 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 # Set power mode to maximum performance
 sudo nvpmodel -m 0
 sudo jetson_clocks
+
+# Keep logs across reboots (JetPack's journal is volatile by default) and
+# stop the RTL8822CE Wi-Fi card from power-saving itself off the network.
+# Both files are in systemd/ with their install notes; in short:
+sudo mkdir -p /etc/systemd/journald.conf.d /var/log/journal
+sudo cp systemd/journald-radio-oracle.conf /etc/systemd/journald.conf.d/radio-oracle.conf
+sudo systemd-tmpfiles --create --prefix /var/log/journal
+sudo systemctl restart systemd-journald
+sudo cp systemd/wifi-powersave-off.conf /etc/NetworkManager/conf.d/zz-wifi-powersave-off.conf
+sudo nmcli con modify "<your SSID>" 802-11-wireless.powersave 2
+sudo iw dev wlP1p1s0 set power_save off
 ```
 
 ### 1.5 Audio Hardware Setup
