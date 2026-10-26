@@ -505,3 +505,62 @@ drops the ~250 ms ring buffer. `_stream_play` now writes the stream's
 actual latency + 100 ms of silence behind every clip before stopping:
 300 of 300 ms in every valid trial. Each speech unit is its own clip, so
 this was every unit, i.e. roughly every sentence.
+
+
+## 2026-10-26 — Qwen3.5-4B replaces Qwen3-4B-Instruct-2507
+
+Why: Artificial Analysis retired the 2507 model and scores Qwen3.5-4B
+(non-reasoning) 16 vs 7 on its index; the Feb 2026 model is a dense
+hybrid (Gated DeltaNet + full attention every 4th layer, 32 layers,
+262k context) under Apache-2.0. GGUF: `unsloth/Qwen3.5-4B-GGUF`
+Q4_K_M, 2.74 GB (sha256 `00fe7986…`), text-only — the vision mmproj is
+not loaded. llama.cpp rebuilt natively at `caa8191` (2026-10-26,
+`scripts/build_llama_cpp.sh`, ~35 min at `-j4`); the previous binaries
+are kept in `/opt/llama.cpp/{bin,lib}.old`.
+
+What had to change:
+
+- **One system message.** Qwen3.5's chat template raises
+  `System message must be at the beginning` for any system message past
+  index 0; the builder used to send five (persona, profile, activity,
+  summary, RAG). `ContextBuilder.build` now joins persona + memory +
+  activity + summary into one system message and puts the RAG block
+  inside the final user message (`<RAG>\n\nQuestion: <text>`). Same text,
+  same order, so the stable prefix is unchanged.
+- **Thinking off** with `--reasoning off` (the `enable_thinking`
+  template kwarg is deprecated in this build). The rendered prompt ends
+  in an empty `<think>\n\n</think>` block; `reasoning_content` is empty.
+- **Prefix cache through context checkpoints.** Recurrent layers cannot
+  roll back, so llama-server snapshots the state (~50 MB) at the start of
+  the last user message and restores it on the next turn. The slot state
+  it parks in the RAM prompt cache around the rewrite call is ~300 MB; at
+  `--cache-ram 256` every save was skipped ("prompt state size 291 MiB
+  exceeds cache size limit") and every follow-up prefilled cold. Now
+  `--cache-ram 768 --ctx-checkpoints 4`, no `--cache-reuse` (needs KV
+  shifting). Sampler defaults per Qwen: `--top-k 20 --min-p 0
+  --presence-penalty 1.5`; the app still sends temperature 0.4 / top-p 0.9.
+
+Harness (`scripts/sim_turn.sh`, RAG + GPU Kokoro active, same ten
+golden questions). The prompt is ~2,500 tokens now (the Sept-30 quality
+passes grew the persona; Sept 27 measured 1,807), so the fair comparison
+is prefill per new token, not the Sept ttfa.
+
+| question | ttfa | retrieve | prefill | first_token | tok/s | prompt tok |
+|---|---|---|---|---|---|---|
+| Who was Nikola Tesla? (cold) | 7.94 | 0.77 | 4.49 | 4.52 | 11.2 | 2115 |
+| + Where did he die? | 5.56 | 2.01 | 1.63 | 1.81 | 13.5 | 2246 |
+| Vacuum tube | 4.22 | 0.85 | 1.56 | 1.59 | 10.6 | 2258 |
+| Boiling point | 4.45 | 0.85 | 1.63 | 1.65 | 10.9 | 2389 |
+| + Why is that? | 6.86 | 3.28 | 1.60 | 1.76 | 10.9 | 2448 |
+| Moby Dick (4.2k-char RAG) | 6.39 | 1.15 | 3.17 | 3.21 | 11.4 | 3026 |
+| Burn | 4.82 | 0.84 | 2.20 | 2.46 | 11.0 | 2541 |
+| Northern lights | 4.68 | 0.70 | 2.36 | 2.39 | 10.8 | 2590 |
+| + Colorado? | 7.11 | 2.42 | 2.31 | 2.48 | 10.5 | 2603 |
+| Pride and Prejudice (4.0k-char RAG) | 5.75 | 0.71 | 3.43 | 3.46 | 10.7 | 3115 |
+| **median** | **5.66** | 0.85 | 2.26 | 2.42 | 10.9 | 2494 |
+
+Before the cache fix (`--cache-ram 256`) the same run gave median ttfa
+8.70 s / prefill 5.34 s. Decode is 13.8 tok/s alone (Qwen3-4B: 16.3),
+~11 with Kokoro overlapping. Cold prefill ~470 tok/s. Memory: llama-server
+cgroup 4.4 GB (2.7 GB of it the mmapped GGUF page cache), ~0.8 GB free
+with the app and the TTS sidecar up, swap untouched.

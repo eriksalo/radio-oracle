@@ -13,11 +13,28 @@ SupplementaryGroups=video render
 Restart=on-failure
 RestartSec=5
 Environment=LD_LIBRARY_PATH=/opt/llama.cpp/lib:/usr/local/cuda/lib64
+# Qwen3.5-4B (2026-10-26): hybrid Gated-DeltaNet model, thinking disabled with
+# --reasoning off (the chat-template enable_thinking kwarg is deprecated). Its
+# recurrent layers cannot roll back, so the prefix cache works through context
+# checkpoints (~50 MB each, capped at 4): the server takes one at the start of
+# the last user message (the RAG block + question, see oracle/memory/context.py)
+# and the next turn restores it instead of re-reading the whole prompt. The
+# slot state it parks in the RAM prompt cache between the rewrite call and the
+# main turn is ~300 MB (recurrent state + checkpoints + KV), so --cache-ram
+# must be well above that: at 256 every save was skipped and every follow-up
+# turn prefilled cold (measured 2026-10-26: 4.7 s vs 1.6 s). --cache-reuse
+# needs KV shifting, which recurrent memory does not support. Sampler
+# defaults follow Qwen's non-thinking recommendation (top-k 20, min-p 0,
+# presence 1.5); the app sends temperature/top-p per request. Rollback: the
+# previous model, qwen3-4b-instruct-2507-q4_K_M.gguf, with --alias qwen3-4b
+# and without --reasoning off.
 ExecStart=/opt/llama.cpp/bin/llama-server \
-    -m /opt/radio-oracle/models/qwen3-4b-instruct-2507-q4_K_M.gguf \
-    --alias qwen3-4b --host 127.0.0.1 --port 8080 \
+    -m /opt/radio-oracle/models/qwen3.5-4b-q4_K_M.gguf \
+    --alias qwen3.5-4b --host 127.0.0.1 --port 8080 \
     -ngl 99 -c 3584 -np 1 -fa on -ctk q8_0 -ctv q8_0 \
-    --cache-ram 256 --cache-reuse 256 --jinja -t 4
+    --cache-ram 768 --ctx-checkpoints 4 --jinja \
+    --reasoning off \
+    --top-k 20 --min-p 0 --presence-penalty 1.5 -t 4
 
 [Install]
 WantedBy=multi-user.target

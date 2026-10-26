@@ -125,13 +125,12 @@ async def test_context_builder_puts_rag_last_and_question_once():
         messages = await ctx.build("PERSONA", "=== Retrieved ===", user_text="Where did he die?")
 
         roles = [m["role"] for m in messages]
-        assert messages[0] == {"role": "system", "content": "PERSONA"}
-        assert "vintage radio" in messages[1]["content"]
-        assert roles[2:] == ["user", "assistant", "system", "user"]
-        assert messages[-2]["content"] == "=== Retrieved ==="
-        assert messages[-1]["content"] == "Where did he die?"
-        assert sum(m["content"] == "Where did he die?" for m in messages) == 1
-        # The persona message never carries the retrieved text.
+        assert roles == ["system", "user", "assistant", "user"]
+        assert messages[0]["content"].startswith("PERSONA")
+        assert "vintage radio" in messages[0]["content"]
+        assert messages[-1]["content"] == "=== Retrieved ===\n\nQuestion: Where did he die?"
+        assert sum("Where did he die?" in m["content"] for m in messages) == 1
+        # The system message never carries the retrieved text.
         assert "Retrieved" not in messages[0]["content"]
         store.close()
 
@@ -144,7 +143,7 @@ async def test_context_builder_legacy_call_without_user_text():
         s = store.new_session()
         store.add_message(s, "user", "hi")
         messages = await ContextBuilder(store, s).build("P", "RAG")
-        assert [m["role"] for m in messages] == ["system", "user", "system"]
+        assert [m["role"] for m in messages] == ["system", "user", "user"]
         assert messages[-1]["content"] == "RAG"
         store.close()
 

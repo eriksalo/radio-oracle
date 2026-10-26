@@ -14,7 +14,8 @@ from oracle.memory.summarizer import fold_into_profile, summarize_conversation
 
 
 class ContextBuilder:
-    """Builds the messages array: [system, long-term memory, summary, recent, rag, user].
+    """Builds the messages array: one system message (persona + memory +
+    activity + summary), the history, then one user message (RAG + question).
 
     Order matters for latency: Ollama/llama.cpp reuse the KV cache for the
     longest byte-identical prefix of the previous prompt. Persona, memory
@@ -98,34 +99,37 @@ class ContextBuilder:
 
         Args:
             system_prompt: The system prompt (persona + instructions)
-            rag_context: Formatted RAG retrieval context (goes last)
+            rag_context: Formatted RAG retrieval context (goes into the
+                final user message, ahead of the question)
             user_text: The current question. Callers store it before
                 building, so it is dropped from the history tail and
-                appended once after the RAG block. None = legacy callers
+                appended once, after the RAG block. None = legacy callers
                 that append the user message themselves.
 
         Returns:
             List of message dicts ready for Ollama
         """
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        # One system message. Qwen3.5's chat template (and most others)
+        # accepts a system message only at index 0, so persona, memory,
+        # the activity block and the session summary are joined into it —
+        # same text, same order, so the prefix cache still sees one stable
+        # prefix.
+        blocks = [system_prompt]
 
         # Cross-session memory (profile + last conversation)
         if self._long_term:
-            messages.append({"role": "system", "content": self._long_term})
+            blocks.append(self._long_term)
 
         # Recent books / music / questions — from the journal, not the LLM.
-        recent = self._recent_activity()
-        if recent:
-            messages.append({"role": "system", "content": recent})
+        recent_activity = self._recent_activity()
+        if recent_activity:
+            blocks.append(recent_activity)
 
         # Session summary (if we've summarized older turns)
         if self._summary:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": f"Previous conversation summary: {self._summary}",
-                }
-            )
+            blocks.append(f"Previous conversation summary: {self._summary}")
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": "\n\n".join(blocks)}]
 
         # Recent conversation turns — minus the current question, which
         # was already persisted and is re-added at the very end.
@@ -139,10 +143,16 @@ class ContextBuilder:
             recent = recent[:-1]
         messages.extend(recent)
 
-        if rag_context:
-            messages.append({"role": "system", "content": rag_context})
+        # The RAG block rides inside the final user message, ahead of the
+        # question: it changes every turn, and llama-server takes a context
+        # checkpoint at the start of the last user message, which is what
+        # lets a hybrid/recurrent model (Qwen3.5) reuse everything before it.
         if user_text is not None:
-            messages.append({"role": "user", "content": user_text})
+            content = f"{rag_context}\n\nQuestion: {user_text}" if rag_context else user_text
+            messages.append({"role": "user", "content": content})
+        elif rag_context:
+            # Legacy callers append the question themselves.
+            messages.append({"role": "user", "content": rag_context})
 
         return messages
 

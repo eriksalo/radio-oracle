@@ -12,7 +12,7 @@ class OracleSettings(BaseSettings):
     # the same GGUF Ollama pulled; see docs/deploy-2026-09-latency.md §4.
     llm_backend: Literal["ollama", "llama-server"] = "ollama"
     llama_server_url: str = "http://127.0.0.1:8080"
-    llama_server_model: str = "qwen3-4b"  # --alias in the unit; informational
+    llama_server_model: str = "qwen3.5-4b"  # --alias in the unit; informational
     # Ollama
     ollama_host: str = "http://localhost:11434"
     # Qwen3-4B-Instruct-2507 (Q4_K_M, ~2.5GB): best-in-class instruction

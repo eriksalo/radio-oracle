@@ -141,10 +141,13 @@ async def test_context_builder_inserts_recent_block_after_profile(tmp_path):
     )
     ctx = ContextBuilder(store, s)
     msgs = await ctx.build("PERSONA", "", user_text="hi")
-    assert [m["role"] for m in msgs] == ["system", "system", "system", "user"]
-    assert "Pink Floyd" in msgs[1]["content"]
-    assert msgs[2]["content"].startswith("What you remember doing with Erik")
-    assert "Current book: Moby-Dick, chapter 2 of 135" in msgs[2]["content"]
+    assert [m["role"] for m in msgs] == ["system", "user"]
+    system = msgs[0]["content"]
+    assert system.startswith("PERSONA")
+    assert "Pink Floyd" in system
+    assert "What you remember doing with Erik" in system
+    assert system.index("Pink Floyd") < system.index("What you remember doing with Erik")
+    assert "Current book: Moby-Dick, chapter 2 of 135" in system
     assert j.session_id == s and j.user == settings.default_user
     store.close()
 

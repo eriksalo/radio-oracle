@@ -35,7 +35,7 @@ make test       # pytest
 
 ## Key Design Decisions
 
-- LLM: Qwen3-4B-Instruct-2507 Q4_K_M via Ollama (default) or llama.cpp's `llama-server` in NVIDIA's JP6 container (`ORACLE_LLM_BACKEND=llama-server`, `systemd/llama-server.service`, same GGUF blob); llama3.2:3b is the rollback model
+- LLM: Qwen3.5-4B Q4_K_M (unsloth GGUF, text-only — the vision mmproj is not loaded) via the native llama.cpp `llama-server` build (`ORACLE_LLM_BACKEND=llama-server`, `systemd/llama-server-native.service` installed as `llama-server.service`, `scripts/build_llama_cpp.sh`). Thinking is disabled server-side with `--reasoning off`; the model is a hybrid Gated-DeltaNet, so the prefix cache relies on context checkpoints (see the unit's comments) and `--cache-reuse` is off. Rollback: `models/qwen3-4b-instruct-2507-q4_K_M.gguf` with `--alias qwen3-4b` (Ollama is disabled on the Jetson; the Ollama client path in `oracle/llm.py` still works for development)
 - STT and LLM are sequential (never concurrent) to fit in 8GB unified memory
 - LLM calls always set num_ctx (8192) — Ollama's 2048 default silently truncates
 - Memory: sessions are summarized at close (or caught up at next boot) and folded
