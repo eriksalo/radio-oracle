@@ -1,0 +1,12 @@
+{
+  "started": "2026-10-26T13:50:18",
+  "domains": {
+    "librarian": {
+      "n": 100,
+      "keyword_pass": 95,
+      "errors": 0,
+      "no_rag": 0,
+      "wall_s": 998.4
+    }
+  }
+}

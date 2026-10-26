@@ -564,3 +564,24 @@ Before the cache fix (`--cache-ram 256`) the same run gave median ttfa
 ~11 with Kokoro overlapping. Cold prefill ~470 tok/s. Memory: llama-server
 cgroup 4.4 GB (2.7 GB of it the mmapped GGUF page cache), ~0.8 GB free
 with the app and the TTS sidecar up, swap untouched.
+
+### Quality (same 310 requests as `docs/eval/`, hand-graded)
+
+| run | model / prompt | librarian | right / flawed / wrong | median words |
+|---|---|---|---|---|
+| v5 (Sept 30, pass 4) | Qwen3-4B-2507, RAG as a system message | 2.71 | 75 / 21 / 4 | 67 |
+| v6 | Qwen3.5-4B, RAG inside the user turn | 2.67 | 70 / 27 / 3 | 51 |
+| v7 | v6 + block header "library notes you looked up…", sourcing rule | **2.74** | 76 / 22 / 2 | 51 |
+
+Music 100/100 understood, 60/60 resolved; books 110/110, 86/87 — identical
+in all three runs. Fixed for good: WWI start (28 July 1914), Tesla's death
+place, the invented serial publication of *Pride and Prejudice*, the
+bone-setting refusal, and the no-clock answers ("I have no way to know what
+year it is"). v6 narrated the reference block in 10 answers ("the retrieved
+text confirms…", "the plot summary source provided") because the block now
+sits in the user turn; the v7 wording brought that to 1 ("The Wikipedia
+entry on … describes", which the persona allows). Still wrong in v7: meat
+preservation without a fridge (L84) and wild edible plants (L87) refuse
+instead of answering; the usual 4B slips elsewhere (Pequod's name, the
+musketeers' allegiance, the noon-shadow direction). Grades and raw answers:
+`docs/eval/results/v6/`, `v7/`.

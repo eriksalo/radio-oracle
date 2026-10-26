@@ -1,0 +1,405 @@
+{
+"_scale": "3 correct and useful; 2 right in substance with a flaw; 1 materially wrong, misleading or unhelpful; 0 no answer",
+"_run": "v7 = v6 model/settings + RAG block reworded as 'library notes you looked up' and persona sourcing rule tightened (2026-10-26)",
+"_summary": "avg 2.74; 3:76 2:22 1:2 0:0",
+"L01": [
+3,
+""
+],
+"L02": [
+3,
+""
+],
+"L03": [
+3,
+""
+],
+"L04": [
+2,
+"irrelevant 'University of Northern Colorado region 300 days of sunshine' aside"
+],
+"L05": [
+3,
+""
+],
+"L06": [
+3,
+""
+],
+"L07": [
+3,
+""
+],
+"L08": [
+3,
+""
+],
+"L09": [
+3,
+""
+],
+"L10": [
+3,
+""
+],
+"L11": [
+3,
+""
+],
+"L12": [
+2,
+"humidifier/vinegar aside leaked from the iFixit source"
+],
+"L13": [
+3,
+""
+],
+"L14": [
+2,
+"misses the severe signs; 'fever alongside' odd"
+],
+"L15": [
+3,
+""
+],
+"L16": [
+3,
+""
+],
+"L17": [
+2,
+"'call emergency services', 'tell the dispatcher' (offline premise); do-nots right"
+],
+"L18": [
+2,
+"'ingest toxic saliva' odd; 'seeking professional medical help'"
+],
+"L19": [
+3,
+""
+],
+"L20": [
+2,
+"'rub their limbs to restart circulation' (discouraged); rest fine"
+],
+"L21": [
+3,
+""
+],
+"L22": [
+3,
+""
+],
+"L23": [
+3,
+""
+],
+"L24": [
+2,
+"1900s Gutenberg advice (cottonseed, May 1st); no depth/spacing"
+],
+"L25": [
+3,
+""
+],
+"L26": [
+3,
+""
+],
+"L27": [
+2,
+"Sony Ericsson z300 still named; otherwise generic but sane"
+],
+"L28": [
+2,
+"generic"
+],
+"L29": [
+3,
+""
+],
+"L30": [
+3,
+""
+],
+"L31": [
+2,
+"'higher-octane fuel to prevent knocking under boost' wrong for diesel"
+],
+"L32": [
+3,
+""
+],
+"L33": [
+2,
+"vague"
+],
+"L34": [
+3,
+""
+],
+"L35": [
+2,
+"no 'set the dial to volts'; range explanation muddled"
+],
+"L36": [
+3,
+""
+],
+"L37": [
+3,
+""
+],
+"L38": [
+2,
+"terse; no plates/faults"
+],
+"L39": [
+3,
+""
+],
+"L40": [
+3,
+""
+],
+"L41": [
+3,
+""
+],
+"L42": [
+3,
+""
+],
+"L43": [
+3,
+""
+],
+"L44": [
+3,
+""
+],
+"L45": [
+3,
+""
+],
+"L46": [
+2,
+"'stopping them from dividing' (cell wall); 'no one else had ever done before' fluff"
+],
+"L47": [
+3,
+""
+],
+"L48": [
+3,
+""
+],
+"L49": [
+3,
+""
+],
+"L50": [
+3,
+""
+],
+"L51": [
+3,
+""
+],
+"L52": [
+3,
+""
+],
+"L53": [
+3,
+""
+],
+"L54": [
+3,
+""
+],
+"L55": [
+3,
+""
+],
+"L56": [
+3,
+""
+],
+"L57": [
+3,
+""
+],
+"L58": [
+3,
+""
+],
+"L59": [
+3,
+""
+],
+"L60": [
+2,
+"'The Wikipedia entry on … describes' (allowed citation style, but the answer stays vague on causes)"
+],
+"L61": [
+3,
+""
+],
+"L62": [
+3,
+""
+],
+"L63": [
+3,
+""
+],
+"L64": [
+3,
+""
+],
+"L65": [
+3,
+""
+],
+"L66": [
+2,
+"'southern part of the country' wrong (north-central)"
+],
+"L67": [
+3,
+""
+],
+"L68": [
+3,
+""
+],
+"L69": [
+3,
+""
+],
+"L70": [
+3,
+""
+],
+"L71": [
+3,
+""
+],
+"L72": [
+2,
+"'after escaping a fire' invented"
+],
+"L73": [
+2,
+"Pequod name origin invented (it is the Pequot tribe)"
+],
+"L74": [
+3,
+""
+],
+"L75": [
+3,
+""
+],
+"L76": [
+3,
+""
+],
+"L77": [
+3,
+""
+],
+"L78": [
+3,
+""
+],
+"L79": [
+3,
+""
+],
+"L80": [
+3,
+""
+],
+"L81": [
+3,
+""
+],
+"L82": [
+2,
+"'served under Cardinal Richelieu' wrong (they served the King against him)"
+],
+"L83": [
+3,
+""
+],
+"L84": [
+1,
+"'can't really preserve fresh meat without cold storage' — no salting/drying/smoking"
+],
+"L85": [
+3,
+""
+],
+"L86": [
+2,
+"opens with 'cannot set' but gives splinting and warning signs"
+],
+"L87": [
+1,
+"refuses: 'stick to cooking food you know at home'"
+],
+"L88": [
+3,
+""
+],
+"L89": [
+3,
+""
+],
+"L90": [
+2,
+"dawn method right; 'at noon your shadow points south' wrong for the northern hemisphere"
+],
+"L91": [
+3,
+""
+],
+"L92": [
+3,
+""
+],
+"L93": [
+3,
+""
+],
+"L94": [
+3,
+""
+],
+"L95": [
+3,
+""
+],
+"L96": [
+3,
+""
+],
+"L97": [
+3,
+""
+],
+"L98": [
+3,
+""
+],
+"L99": [
+3,
+""
+],
+"L100": [
+2,
+"fork 'against your chest'; 5th-fret method only hinted; 'known intervals' vague"
+]
+}

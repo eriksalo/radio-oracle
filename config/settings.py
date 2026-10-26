@@ -209,7 +209,7 @@ class OracleSettings(BaseSettings):
     rag_query_rewrite: bool = True
     # Collections never used for knowledge answers (the music catalog is
     # searched via Catalog, not RAG — its rows polluted answers as
-    # "Retrieved Knowledge").
+    # "Library notes").
     rag_exclude_collections: str = "music"
     # Weight collections by question type when merging hits (oracle/rag/router.py).
     # Off = pure distance merge, which let 10 M Gutenberg chunks dominate.
