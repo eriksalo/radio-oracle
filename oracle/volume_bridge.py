@@ -15,8 +15,10 @@ import threading
 
 from loguru import logger
 
-# Target Pulse's *default* sink rather than a hardcoded name — the USB
-# DAC's profile suffix flips between .stereo-fallback and .analog-stereo
+from config.settings import settings
+
+# Target Pulse's *default* sink rather than a hardcoded name — a USB
+# card's profile suffix flips between .stereo-fallback and .analog-stereo
 # depending on capture state, and @DEFAULT_SINK@ follows it.
 _SPEAKER_SINK = "@DEFAULT_SINK@"
 _POLL_S = 0.1  # well below human perception of knob lag
@@ -34,9 +36,16 @@ _thread: threading.Thread | None = None
 _stop = threading.Event()
 
 
+def sink_percent(gain: float) -> int:
+    """Knob position (0.0–1.0) → sink volume percent, under the ceiling."""
+    ceiling = max(0, min(100, settings.speaker_max_volume_pct))
+    return int(round(max(0.0, min(1.0, gain)) * ceiling))
+
+
 def set_sink_volume(gain: float) -> None:
-    """Set the speaker sink volume in Pulse. gain is 0.0–1.0."""
-    pct = max(0, min(100, int(round(gain * 100))))
+    """Set the speaker sink volume in Pulse. gain is the knob, 0.0–1.0;
+    full knob lands on settings.speaker_max_volume_pct."""
+    pct = sink_percent(gain)
     proc = subprocess.run(
         ["pactl", "set-sink-volume", _SPEAKER_SINK, f"{pct}%"],
         check=False,

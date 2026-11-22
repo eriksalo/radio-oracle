@@ -108,9 +108,10 @@ def test_set_sink_volume_clamps(monkeypatch):
     monkeypatch.setattr(
         volume_bridge.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or _Proc()
     )
+    monkeypatch.setattr(volume_bridge.settings, "speaker_max_volume_pct", 80)
     volume_bridge.set_sink_volume(1.5)
     volume_bridge.set_sink_volume(-0.2)
-    assert calls[0][-1] == "100%"
+    assert calls[0][-1] == "80%"  # full knob stops at the speaker ceiling
     assert calls[1][-1] == "0%"
 
 

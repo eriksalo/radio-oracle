@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 
 SR = 24000
-MON = "alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00.analog-stereo.monitor"
+MON = "alsa_output.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo.monitor"
 
 
 def _band_ms(x: np.ndarray, f0: float, thr: float) -> int:

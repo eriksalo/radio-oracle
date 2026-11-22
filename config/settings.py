@@ -161,10 +161,19 @@ class OracleSettings(BaseSettings):
     # PortAudio can't address ALSA `plughw`/`asym` PCMs, so we pin both
     # devices by name and open them at their native rates. Capture is
     # resampled to `audio_sample_rate` for Whisper.
+    # Since 2026-11-22 the speaker is driven by the ReSpeaker Lite's own
+    # amplifier, so both directions are the same USB device. Its playback
+    # endpoint is 16 kHz; speech is resampled once, here, to that rate.
     audio_input_device: str = "ReSpeaker"
-    audio_output_device: str = "UACDemoV1.0"
+    audio_output_device: str = "ReSpeaker"
     audio_capture_sample_rate: int = 16000
-    audio_playback_sample_rate: int = 48000
+    audio_playback_sample_rate: int = 16000
+    # Sink volume (percent) at full knob. The speaker is 4 ohm on the
+    # ReSpeaker Lite's 5 V USB-powered amplifier: full scale into 4 ohm
+    # pulls roughly twice the current of an 8 ohm load, and a sagging 5 V
+    # rail resets the XU316 (mic and speaker both vanish). The knob's
+    # whole travel maps onto 0..this.
+    speaker_max_volume_pct: int = 80
 
     # RAG
     chroma_path: Path = Path("data/chroma")

@@ -10,15 +10,19 @@
 # via ExecStartPre).
 #
 # Usage: ensure_aec.sh [direct|aec]
-#   direct — music/TTS to the raw USB sink (pre-2026-07 behavior)
-#   aec    — music/TTS through aec_sink so the canceller has a
-#            reference signal ("mono gambit"). MEASURED 2026-07-20: only
-#            ~3-7dB of cancellation — the mic and speaker are separate
-#            USB devices with independent clocks, which pulse's webrtc
-#            AEC cannot track even with drift_compensation. Kept for
-#            re-testing if the hardware ever changes (e.g. speaker moved
-#            to the ReSpeaker Lite's own amp → on-chip XU316 AEC).
+#   direct — music/TTS straight to the speaker sink. Since 2026-11-22
+#            the speaker hangs off the ReSpeaker Lite's own amplifier, so
+#            the speaker sink is the Lite's USB playback endpoint (16 kHz)
+#            and the XU316 sees what it plays: its on-chip AEC has a
+#            reference on the same clock as the mics.
+#   aec    — music/TTS through aec_sink so pulse's webrtc canceller has
+#            a reference too ("mono gambit"). MEASURED 2026-07-20 with the
+#            old separate USB DAC: only ~3-7dB (two independent clocks).
+#            Not re-measured on the single-device setup.
 #            Default: $ORACLE_AUDIO_TOPOLOGY or direct.
+#
+# ORACLE_SPEAKER_SINK_BASE overrides the speaker sink name prefix (e.g.
+# to go back to a separate USB DAC).
 #
 # Even in direct mode this script matters: aec_source (mic + webrtc
 # noise suppression) becomes the default STT source — previously the
@@ -29,7 +33,7 @@ set -u
 
 MODE="${1:-${ORACLE_AUDIO_TOPOLOGY:-direct}}"
 MIC_SRC="alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
-SPK_SINK_BASE="alsa_output.usb-Jieli_Technology_UACDemoV1.0_415035313136340C-00"
+SPK_SINK_BASE="${ORACLE_SPEAKER_SINK_BASE:-alsa_output.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00}"
 
 log() { echo "ensure_aec: $*"; }
 

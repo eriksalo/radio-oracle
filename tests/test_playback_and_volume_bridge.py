@@ -136,3 +136,15 @@ def test_stream_play_pads_by_the_streams_real_latency(monkeypatch):
     (st,) = _FakeStream.instances
     assert sum(st.writes) == sr // 2 + int(sr * (0.4 + audio._PLAYBACK_TAIL_MARGIN_S))
     assert st.stopped and not st.aborted
+
+
+def test_full_knob_stops_at_the_speaker_ceiling(monkeypatch):
+    """The 4 ohm speaker runs off the ReSpeaker Lite's USB-powered amp;
+    the knob's travel maps onto 0..speaker_max_volume_pct."""
+    monkeypatch.setattr(volume_bridge.settings, "speaker_max_volume_pct", 80)
+    assert volume_bridge.sink_percent(0.0) == 0
+    assert volume_bridge.sink_percent(0.5) == 40
+    assert volume_bridge.sink_percent(1.0) == 80
+    assert volume_bridge.sink_percent(1.7) == 80
+    monkeypatch.setattr(volume_bridge.settings, "speaker_max_volume_pct", 100)
+    assert volume_bridge.sink_percent(1.0) == 100
