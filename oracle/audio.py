@@ -16,6 +16,18 @@ from config.settings import settings
 AbortCheck = Callable[[], bool] | None
 
 
+# Soft pre-roll: the always-on wake detector's mic buffer (registered by the
+# app). Opening a recording stream takes a few hundred ms; someone who
+# answers a prompt at once ("keep going", "yes") lost their first word in
+# that gap — "keep going" arrived as "going." twice running (2026-11-23).
+_preroll_source: Callable[[float], np.ndarray] | None = None
+
+
+def set_preroll_source(fn: Callable[[float], np.ndarray] | None) -> None:
+    global _preroll_source
+    _preroll_source = fn
+
+
 def record_until_silence(
     sample_rate: int | None = None,
     channels: int | None = None,
@@ -41,10 +53,14 @@ def record_until_silence(
     *on_block* receives each raw mono block (capture rate) from speech
     onset on — the streaming STT decodes as the user talks.
     """
+    import time
+
     import sounddevice as sd
     from scipy.signal import resample_poly
 
     from oracle.endpoint import VadEndpointer, build_endpointer
+
+    t_call = time.monotonic()
 
     out_sr = sample_rate or settings.audio_sample_rate
     capture_sr = settings.audio_capture_sample_rate
@@ -86,20 +102,40 @@ def record_until_silence(
         latency="high",
     )
     with sd.InputStream(**stream_opts) as stream:
-        pre = preroll_fn() if preroll_fn is not None and capture_sr == 16000 else None
+        # Explicit pre-roll (after a wake word) always starts the recording.
+        # Otherwise the detector's buffer since this call is used only if
+        # the person is already speaking at the end of it.
+        soft = preroll_fn is None
+        pre = None
+        if capture_sr == 16000:
+            if preroll_fn is not None:
+                pre = preroll_fn()
+            elif _preroll_source is not None and settings.wake_preroll:
+                pre = _preroll_source(t_call)
         if pre is not None and len(pre) >= block_size:
             pre = np.asarray(pre, dtype=np.float32)
-            for i in range(0, len(pre) - block_size + 1, block_size):
-                mono = pre[i : i + block_size]
-                # Keep the endpointer's model state in step with the audio.
-                endpointer.is_speech(
-                    mono if vad_gain == 1.0 else np.clip(mono * vad_gain, -1.0, 1.0)
-                )
-                frames.append(np.repeat(mono.reshape(-1, 1), ch, axis=1))
-                if on_block is not None:
-                    on_block(mono)
-            started = True
-            logger.debug(f"Recording starts with {len(pre) / 16000:.2f}s of pre-roll")
+            blocks = [pre[i : i + block_size] for i in range(0, len(pre) - block_size + 1, block_size)]
+            # Keep the endpointer's model state in step with the audio.
+            flags = [
+                endpointer.is_speech(b if vad_gain == 1.0 else np.clip(b * vad_gain, -1.0, 1.0))
+                for b in blocks
+            ]
+            first = 0
+            if soft:
+                first = len(blocks)
+                if flags[-1]:  # speaking right now: back up to where it began
+                    first = len(blocks) - 1
+                    while first > 0 and flags[first - 1]:
+                        first -= 1
+                    first = max(0, first - 1)  # one block of lead-in
+            if first < len(blocks):
+                for mono in blocks[first:]:
+                    frames.append(np.repeat(mono.reshape(-1, 1), ch, axis=1))
+                    if on_block is not None:
+                        on_block(mono)
+                started = True
+                kept = (len(blocks) - first) * block_duration
+                logger.info(f"Recording starts with {kept:.1f}s said before the mic opened")
         while True:
             if should_abort and should_abort():
                 logger.debug("Recording aborted")

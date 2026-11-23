@@ -162,9 +162,11 @@ class WakeWordDetector:
         logger.debug("Wake word listener stopped")
 
     def _remember(self, chunk) -> None:
+        import time
+
         with self._ring_lock:
             self._seq += 1
-            self._ring.append((self._seq, chunk.copy()))
+            self._ring.append((self._seq, time.monotonic(), chunk.copy()))
 
     def audio_since_wake(self):
         """Mic audio captured after the most recent wake-word detection, as
@@ -174,7 +176,18 @@ class WakeWordDetector:
 
         with self._ring_lock:
             mark = self._wake_seq
-            chunks = [c for s, c in self._ring if mark is not None and s > mark]
+            chunks = [c for s, _t, c in self._ring if mark is not None and s > mark]
+        if not chunks:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(chunks).astype(np.float32) / 32768.0
+
+    def audio_since_time(self, t: float):
+        """Mic audio that arrived after monotonic time *t* (float32 mono,
+        16 kHz) — what was said while a recording stream was still opening."""
+        import numpy as np
+
+        with self._ring_lock:
+            chunks = [c for _s, ts, c in self._ring if ts > t]
         if not chunks:
             return np.zeros(0, dtype=np.float32)
         return np.concatenate(chunks).astype(np.float32) / 32768.0

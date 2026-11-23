@@ -543,6 +543,14 @@ async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
 _WAKE_TAIL_RE = re.compile(r"^\s*(?:the\s+)?(?:li)?b?rarians?\b[\s,.!?:;-]*", re.IGNORECASE)
 
 
+# Includes the bare "going" that a clipped "keep going" becomes.
+_CONTINUE_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:(?:keep\s+)?going|go\s+on|continue|carry\s+on|go\s+ahead|keep\s+talking)"
+    r"(?:\s+please)?[\s.!]*$",
+    re.IGNORECASE,
+)
+
+
 async def dispatch_radio_command(
     player: Player | None,
     catalog: Catalog | None,
@@ -638,8 +646,14 @@ async def dispatch_radio_command(
         if audio_in is not None:
             await observe(vc, audio_in, reader=reader)
 
-        # 3. Classify.
-        action, query = await classify(vc, text)
+        # 3. Classify. "Keep going" after an interruption is a request to
+        # carry on with the answer, which the conversation history holds.
+        if _CONTINUE_RE.match(text):
+            logger.info(f"{text!r} — continuing the previous answer")
+            text = "Please continue what you were just telling me."
+            action, query = "question", None
+        else:
+            action, query = await classify(vc, text)
         if action != "none":
             break
         if attempt == 0:

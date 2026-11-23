@@ -133,6 +133,9 @@ class OracleApp:
 
         self._wakeword = WakeWordDetector(on_wake=on_wake)
         self._wakeword.start()
+        from oracle import audio
+
+        audio.set_preroll_source(self._wakeword.audio_since_time)
 
     def _begin_turn(self) -> None:
         """Enter a voice turn. With voice barge-in the detector keeps
@@ -201,6 +204,9 @@ class OracleApp:
 
     def _stop_wakeword(self) -> None:
         if self._wakeword is not None:
+            from oracle import audio
+
+            audio.set_preroll_source(None)
             self._wakeword.stop()
             self._wakeword = None
 
