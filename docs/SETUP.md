@@ -179,8 +179,14 @@ removed). What that changes relative to the description above:
   to it; speech is resampled once in-app (`audio_playback_sample_rate`,
   now 16000). Music loses everything above 8 kHz.
 - Mic and speaker share one device and one clock, so the XU316 now has a
-  playback reference for its on-chip AEC. Wake-word-during-music has not
-  been re-measured on this setup.
+  playback reference for its on-chip AEC. Measured 2026-11-23 that AEC
+  does not remove the speaker usefully: the radio's own speech is 15–21 dB
+  above room noise on the mic and clips it at 60 % sink volume. Pulse's
+  canceller (`ORACLE_AUDIO_TOPOLOGY=aec`) adds only 4–7 dB. Moving the
+  mic board away from the speaker cone is the lever, not software.
+- Saying the wake word while the radio is answering stops it and opens
+  the mic again (`ORACLE_VOICE_BARGE_IN`, default on). The button does the
+  same and is the reliable one while the speaker is loud.
 - The amplifier is powered from USB 5 V and a 4 Ω load draws about twice
   the current of 8 Ω at the same level. `ORACLE_SPEAKER_MAX_VOLUME_PCT`
   (default 80) is the sink volume at full knob. If the board drops off

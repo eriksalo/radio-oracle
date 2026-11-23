@@ -145,7 +145,7 @@ def test_say_pipelines_units_in_order(monkeypatch):
     monkeypatch.setattr(settings, "reading_unit_max_words", 6)
     played: list[int] = []
     monkeypatch.setattr(
-        audio, "play_audio", lambda a, sr=None, should_abort=None: played.append(int(a[0]))
+        audio, "play_audio", lambda a, sr=None, should_abort=None, text="": played.append(int(a[0]))
     )
 
     class T:
@@ -169,7 +169,7 @@ def test_say_aborts_between_units(monkeypatch):
     played: list[str] = []
     flags = iter([False, True, True, True, True])
     monkeypatch.setattr(
-        audio, "play_audio", lambda a, sr=None, should_abort=None: played.append("x")
+        audio, "play_audio", lambda a, sr=None, should_abort=None, text="": played.append("x")
     )
 
     class T:

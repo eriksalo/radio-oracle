@@ -45,11 +45,11 @@ On-chip DSP runs before audio reaches the host:
 - **AGC** — automatic gain control (whisper-to-shout normalization)
 - **VNR** — voice-to-noise-ratio estimation
 
-**On-chip AEC is also a feature of this firmware but doesn't apply in our
-architecture** — the XU316 has no reference signal for our separate USB
-speaker (UACDemoV1.0), so it can't cancel that echo. Software AEC via
-PulseAudio (`module-echo-cancel`) handles echo cancellation instead. See
-`docs/SETUP.md` §1.6.
+**On-chip AEC:** since 2026-11-22 the speaker is driven by this board's
+own amplifier, so the chip has a playback reference. Measured 2026-11-23
+it still leaves the radio's own voice 15–21 dB above room noise on the
+mic (clipping at higher volume), so nothing in the app relies on it. See
+`docs/SETUP.md` §1.6 and `CLAUDE.md`.
 
 ## Upstream
 

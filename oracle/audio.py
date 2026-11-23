@@ -314,16 +314,58 @@ def _get_output_device() -> int | None:
 _speaker_lock = threading.Lock()
 
 
+# What the speaker is saying right now, for voice barge-in (oracle/app.py):
+# the wake word only interrupts while a clip is playing, and never while
+# the radio itself is saying the wake word — the mic hears the speaker
+# 15-20 dB above the room and the ReSpeaker Lite's on-chip AEC does not
+# remove it (measured 2026-11-23: the radio's own "Librarian." scored up
+# to 0.96 on the mic).
+_SELF_ECHO_HOLD_S = 1.5
+_playing = threading.Event()
+_playing_text = ""
+_last_text = ""
+_last_text_end = 0.0
+
+
+def speech_playing() -> bool:
+    """True while a clip is going out of the speaker."""
+    return _playing.is_set()
+
+
+def speaker_said(word: str) -> bool:
+    """True if the clip playing now, or one that ended within the last
+    1.5 s, contains *word* (the detector fires a beat after the word)."""
+    import time
+
+    w = word.lower()
+    if _playing.is_set() and w in _playing_text:
+        return True
+    return w in _last_text and time.monotonic() - _last_text_end < _SELF_ECHO_HOLD_S
+
+
 def play_audio(
     audio: np.ndarray,
     sample_rate: int | None = None,
     should_abort: AbortCheck = None,
+    text: str = "",
 ) -> None:
-    """Play audio through configured output device (one clip at a time)."""
+    """Play audio through configured output device (one clip at a time).
+
+    *text* is what the clip says, when the caller knows it."""
+    import time
+
+    global _playing_text, _last_text, _last_text_end
     src_sr = sample_rate or settings.audio_sample_rate
     out, dst_sr = _resample_to_playback(audio, src_sr)
     with _speaker_lock:
-        _stream_play(out, dst_sr, should_abort)
+        _playing_text = text.lower()
+        _playing.set()
+        try:
+            _stream_play(out, dst_sr, should_abort)
+        finally:
+            _playing.clear()
+            _last_text, _last_text_end = _playing_text, time.monotonic()
+            _playing_text = ""
 
 
 def play_wav_bytes(wav_bytes: bytes, should_abort: AbortCheck = None) -> None:

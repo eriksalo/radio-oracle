@@ -167,7 +167,7 @@ def silent_speak(monkeypatch):
     """Replace play_audio so _speak() doesn't hit real audio devices."""
     spoken: list[str] = []
 
-    def fake_play(audio, sample_rate=None, should_abort=None):
+    def fake_play(audio, sample_rate=None, should_abort=None, **_kw):
         spoken.append("<played>")
 
     from oracle import audio

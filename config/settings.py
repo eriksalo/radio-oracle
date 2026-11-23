@@ -359,6 +359,11 @@ class OracleSettings(BaseSettings):
     # topology where music plays through aec_sink), or "default".
     wakeword_source: Literal["raw", "aec", "default"] = "raw"
     wakeword_threshold: float = 0.7  # detection confidence threshold (0–1)
+    # Voice barge-in: the wake word stays live while the radio is speaking
+    # during a voice turn; hearing it stops the answer and opens the mic
+    # for a new utterance (same as pressing the button, plus a re-listen).
+    # Off = the detector is muted for the whole turn (pre-2026-11-23).
+    voice_barge_in: bool = True
     long_press_threshold: float = 1.0  # seconds — long press triggers Librarian-mode toggle
     pot_i2c_bus: int = 7  # /dev/i2c-N for the ADS1115 (header pins 3/5)
     pot_ads1115_addr: int = 0x48  # default ADDR-floating address

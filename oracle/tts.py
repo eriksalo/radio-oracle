@@ -162,7 +162,7 @@ def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = Non
                 if aborted():
                     return
                 try:
-                    q.put(tts.synthesize(u))
+                    q.put((u, tts.synthesize(u)))
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"TTS failed on a unit: {e}")
         finally:
@@ -173,18 +173,19 @@ def say(tts: KokoroTTS, text: str, should_abort=None, prefetch: int | None = Non
     try:
         for i in range(len(units) + 1):
             t0 = time.monotonic()
-            audio = q.get()
+            item = q.get()
             waited = time.monotonic() - t0
             if i and waited > 0.5:
                 # The speaker sat silent waiting for synthesis: the sidecar
                 # is slow (memory pressure, arena rebuild) or the box is
                 # thrashing. Audible as a gap mid-sentence.
                 logger.warning(f"TTS pipeline stall: waited {waited:.1f}s for unit {i + 1}")
-            if audio is done:
+            if item is done:
                 break
             if aborted():
                 break
-            play_audio(audio, tts.sample_rate, should_abort=should_abort)
+            unit, audio = item
+            play_audio(audio, tts.sample_rate, should_abort=should_abort, text=unit)
     finally:
         stop.set()
         try:

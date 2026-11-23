@@ -691,7 +691,9 @@ async def _voice_turn(
             if aborted() or unit in skip:
                 continue
             timer.mark_once("first_audio")
-            await asyncio.to_thread(play_audio, audio_out, vc.tts.sample_rate, should_abort)
+            await asyncio.to_thread(
+                play_audio, audio_out, vc.tts.sample_rate, should_abort, unit
+            )
 
     synth = asyncio.create_task(_synth_worker())
     play = asyncio.create_task(_play_worker())

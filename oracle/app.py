@@ -21,6 +21,7 @@ Transitions:
   long-press button      : RADIO <-> READER (channel toggle)
   short-press button     : RADIO -> next track; READER -> pause/resume;
                            during any voice turn -> barge-in (stop talking)
+  wake word over speech  : during a voice turn -> stop talking, chime, listen again
   double-press button    : RADIO -> next album (AM intro); READER -> next chapter
   wake word              : chime, then one utterance — command, switch, or question
 """
@@ -28,6 +29,7 @@ Transitions:
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from queue import Empty
 from typing import Literal
@@ -57,6 +59,11 @@ class OracleApp:
         self._player = None  # lazy init
         self._wakeword = None  # lazy init
         self._wake_event: asyncio.Event | None = None
+        # Voice barge-in (see _begin_turn): set by the detector thread when
+        # the wake word is heard over the radio's own speech in a turn.
+        self._in_turn = False
+        self._barge_armed = False
+        self._barge = threading.Event()
         self._reader_session = None  # lazy init
         self._voice_ctx = None  # set in run() after voice_init
         # Book title/author requested via "read me <title>"; consumed by
@@ -96,6 +103,21 @@ class OracleApp:
         self._wake_event = asyncio.Event()
 
         def on_wake() -> None:
+            if self._in_turn:
+                # Inside a voice turn the wake word means "stop talking and
+                # listen" — but only while the radio is actually speaking
+                # (never while it records), and never when the speaker
+                # itself just said the word.
+                from oracle import audio
+
+                if (
+                    self._barge_armed
+                    and audio.speech_playing()
+                    and not audio.speaker_said(settings.wake_word)
+                ):
+                    logger.info("Wake word over speech — barge-in")
+                    self._barge.set()
+                return
             # Flip LED from the detector thread for zero perceived delay.
             # StatusLEDs.set_mode is lock-guarded; GPIO writes are sub-ms.
             # Doing this in the asyncio path queues behind the chime + pause.
@@ -110,6 +132,27 @@ class OracleApp:
 
         self._wakeword = WakeWordDetector(on_wake=on_wake)
         self._wakeword.start()
+
+    def _begin_turn(self) -> None:
+        """Enter a voice turn. With voice barge-in the detector keeps
+        running (its feature buffers stay warm) and on_wake decides what a
+        detection means; otherwise it is muted for the whole turn."""
+        self._barge.clear()
+        self._barge_armed = False
+        self._in_turn = True
+        if self._wakeword and not settings.voice_barge_in:
+            self._wakeword.mute()
+
+    def _end_turn(self) -> None:
+        self._in_turn = False
+        self._barge_armed = False
+        self._barge.clear()
+        if self._wakeword and not settings.voice_barge_in:
+            self._wakeword.unmute()
+
+    def _barged_in(self) -> bool:
+        """The turn that just returned was cut off by the wake word."""
+        return self._barge.is_set() and self.power.is_on
 
     def _stop_wakeword(self) -> None:
         if self._wakeword is not None:
@@ -281,41 +324,42 @@ class OracleApp:
 
                 # LED was already flipped to blue in the on_wake callback.
 
-                # Mute wake detector during our own voice interaction
-                if self._wakeword:
-                    self._wakeword.mute()
-
+                self._begin_turn()
                 self._pause_music()
-                # "Ready to listen" chirp — synthesized in memory and
-                # played synchronously, so it neither pays the ~3.4s
-                # subprocess cost of the old MP3 chime nor leaks its
-                # tail into the recording (both killed the previous
-                # attempt; see oracle/chime.py).
-                if settings.wake_chime:
-                    from oracle.chime import play_wake_chime
-
-                    play_wake_chime()
-
                 player = self._get_player()
                 catalog = player._catalog if player is not None else None
                 # If dispatch raises (mic, STT, LLM, TTS), we still must
-                # unmute the wake detector — otherwise the next wake never
-                # fires. Catch locally so a transient failure doesn't tear
-                # the whole event loop down.
+                # end the turn — otherwise the next wake never fires. Catch
+                # locally so a transient failure doesn't tear the whole
+                # event loop down.
                 try:
-                    result = await dispatch_radio_command(
-                        player=player,
-                        catalog=catalog,
-                        vc=voice_ctx,
-                        leds=self.leds,
-                        should_abort=self._make_turn_abort(),
-                    )
+                    while True:
+                        # "Ready to listen" chirp — synthesized in memory
+                        # and played synchronously, so it neither pays the
+                        # ~3.4s subprocess cost of the old MP3 chime nor
+                        # leaks its tail into the recording (see
+                        # oracle/chime.py).
+                        if settings.wake_chime:
+                            from oracle.chime import play_wake_chime
+
+                            await asyncio.to_thread(play_wake_chime)
+                        self._barge.clear()
+                        result = await dispatch_radio_command(
+                            player=player,
+                            catalog=catalog,
+                            vc=voice_ctx,
+                            leds=self.leds,
+                            should_abort=self._make_turn_abort(),
+                        )
+                        # "Librarian" over the answer: chime and listen again.
+                        if not self._barged_in():
+                            break
+                        self.leds.set_mode("q_listen")
                 except Exception:  # noqa: BLE001
                     logger.exception("dispatch_radio_command failed; recovering to radio")
                     result = DispatchResult(next_mode="radio")
                 finally:
-                    if self._wakeword:
-                        self._wakeword.unmute()
+                    self._end_turn()
 
                 if result.next_mode == "radio":
                     if result.starts_music:
@@ -491,30 +535,33 @@ class OracleApp:
         from oracle.commands import DispatchResult, dispatch_radio_command
 
         logger.info("Wake word triggered — book command turn")
-        if self._wakeword:
-            self._wakeword.mute()
+        self._begin_turn()
         session.pause()  # aborts narration mid-sentence; bookmark saved
-        if settings.wake_chime:
-            from oracle.chime import play_wake_chime
-
-            play_wake_chime()
         player = self._get_player()
         try:
-            result = await dispatch_radio_command(
-                player=player,
-                catalog=player._catalog if player is not None else None,
-                vc=voice_ctx,
-                leds=self.leds,
-                should_abort=self._make_turn_abort(),
-                context="book",
-                reader=session,
-            )
+            while True:
+                if settings.wake_chime:
+                    from oracle.chime import play_wake_chime
+
+                    await asyncio.to_thread(play_wake_chime)
+                self._barge.clear()
+                result = await dispatch_radio_command(
+                    player=player,
+                    catalog=player._catalog if player is not None else None,
+                    vc=voice_ctx,
+                    leds=self.leds,
+                    should_abort=self._make_turn_abort(),
+                    context="book",
+                    reader=session,
+                )
+                if not self._barged_in():
+                    break
+                self.leds.set_mode("book_listen")
         except Exception:  # noqa: BLE001
             logger.exception("book dispatch failed; resuming reading")
             result = DispatchResult("reader")
         finally:
-            if self._wakeword:
-                self._wakeword.unmute()
+            self._end_turn()
 
         if result.next_mode == "reader" and not result.reader_query:
             if result.resume_channel:
@@ -785,11 +832,16 @@ class OracleApp:
         (recording, LLM stream, TTS queue) aborted once tripped. Called
         from worker threads — Queue.get_nowait is thread-safe."""
         latch = {"hit": False}
+        # From here on the radio may speak: the wake word can cut it off.
+        self._barge_armed = self._in_turn
 
         def check() -> bool:
             if not self.power.is_on:
                 return True
             if latch["hit"]:
+                return True
+            if self._barge.is_set():
+                latch["hit"] = True
                 return True
             try:
                 evt = self.button.events.get_nowait()
