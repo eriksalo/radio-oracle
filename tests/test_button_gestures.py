@@ -293,3 +293,18 @@ def test_player_replay_plays_the_same_track_again(monkeypatch):
     monkeypatch.setattr("oracle.music.player.time.sleep", lambda s: None)
     player._play_thread(first_track=None, play_intro=False)
     assert order == ["t1", "t1", "t2"]
+
+
+# ------------------------------------------------- barge-in keeps the result
+
+
+def test_silent_relisten_keeps_what_the_turn_already_did():
+    from oracle.commands import DispatchResult
+
+    played = DispatchResult("radio", starts_music=True)
+    assert OracleApp._keep_earlier(played, DispatchResult("radio"), "radio") is played
+    assert OracleApp._keep_earlier(None, DispatchResult("radio"), "radio") == DispatchResult(
+        "radio"
+    )
+    book = DispatchResult("reader", resume_channel=False, reader_query="moby dick")
+    assert OracleApp._keep_earlier(played, book, "radio") is book  # a real new request wins

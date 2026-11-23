@@ -692,7 +692,13 @@ def hw_inputs() -> dict:
             out["pot"] = {"available": False, "detail": "no pot telemetry"}
         out["switch"] = {"channel": "-", "on": bool(hw.get("power_on"))}
         lb = snap.get("last_button") or {}
-        out["button"] = {"channel": "-", "pressed": False, "last": lb.get("kind")}
+        btn = hw.get("button") or {}
+        out["button"] = {
+            "channel": "-",
+            "pressed": bool(btn.get("pressed")),
+            "voltage": btn.get("voltage"),
+            "last": lb.get("kind"),
+        }
         age = time.time() - snap.get("updated_at", 0)
         if age > 3:
             out["stale_s"] = round(age, 1)

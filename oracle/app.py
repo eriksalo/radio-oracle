@@ -222,6 +222,19 @@ class OracleApp:
         except Exception as e:  # noqa: BLE001
             logger.debug(f"Could not speak the apology: {e}")
 
+    @staticmethod
+    def _keep_earlier(earlier, result, here: str):
+        """A barge-in re-listen that heard nothing must not undo what the
+        turn already did. 2026-11-23: "Playing Vaya Con Dios" set off the
+        wake word, the re-listen got silence, and its empty result replaced
+        the one that said music had started — the radio sat in "waiting"
+        with a song playing, so the button meant "open the mic"."""
+        from oracle.commands import DispatchResult
+
+        if earlier is not None and result == DispatchResult(here):
+            return earlier
+        return result
+
     def _barged_in(self) -> bool:
         """The turn that just returned was cut off by the wake word."""
         return self._barge.is_set() and self.power.is_on
@@ -441,6 +454,7 @@ class OracleApp:
                 # end the turn — otherwise the next wake never fires. Catch
                 # locally so a transient failure doesn't tear the whole
                 # event loop down.
+                result = None
                 try:
                     while True:
                         # "Ready to listen" chirp — synthesized in memory
@@ -454,6 +468,7 @@ class OracleApp:
                             await asyncio.to_thread(play_wake_chime)
                         self._barge.clear()
                         abort = self._make_turn_abort()
+                        earlier = result
                         result = await dispatch_radio_command(
                             player=player,
                             catalog=catalog,
@@ -464,6 +479,7 @@ class OracleApp:
                             # The long press asks the question for you.
                             **({"pre_text": _ABOUT_REQUEST} if about else {}),
                         )
+                        result = self._keep_earlier(earlier, result, "radio")
                         if about:
                             # The passage ends "I'm listening" — so listen,
                             # unless it was stopped with the button.
@@ -658,6 +674,7 @@ class OracleApp:
         self._begin_turn()
         session.pause()  # aborts narration mid-sentence; bookmark saved
         player = self._get_player()
+        result = None
         try:
             while True:
                 if settings.wake_chime:
@@ -665,6 +682,7 @@ class OracleApp:
 
                     await asyncio.to_thread(play_wake_chime)
                 self._barge.clear()
+                earlier = result
                 result = await dispatch_radio_command(
                     player=player,
                     catalog=player._catalog if player is not None else None,
@@ -674,6 +692,7 @@ class OracleApp:
                     context="book",
                     reader=session,
                 )
+                result = self._keep_earlier(earlier, result, "reader")
                 if not self._barged_in():
                     break
                 self.leds.set_mode("book_listen")
@@ -945,7 +964,7 @@ class OracleApp:
             logger.debug(f"hw telemetry unavailable: {e}")
             return
         while not self._hw_stop.is_set():
-            hw: dict = {"power_on": self.power.is_on}
+            hw: dict = {"power_on": self.power.is_on, "button": self.button.level()}
             r = ctl.reading()
             if r is not None:
                 hw["pot"] = {

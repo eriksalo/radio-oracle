@@ -85,6 +85,13 @@ class ActionButton:
             self._thread.join(timeout=1.0)
         self._thread = None
 
+    def level(self) -> dict:
+        """What the button line reads right now (for the dashboard)."""
+        r = self._switch.read() if self._switch.available else None
+        if r is None:
+            return {"pressed": False, "voltage": None}
+        return {"pressed": r.closed, "voltage": round(r.voltage, 2)}
+
     def classify(self, duration: float) -> PressKind:
         return "long" if duration >= self._long_threshold else "short"
 
@@ -118,7 +125,7 @@ class ActionButton:
                     logger.debug(f"Ignoring {duration * 1000:.0f} ms blip on the button channel")
                 elif duration >= _DEBOUNCE_S:
                     kind = self.classify(duration)
-                    logger.debug(f"Button {kind} press ({duration:.2f}s)")
+                    logger.info(f"Button {kind} press ({duration:.2f}s)")
                     self.events.put(ButtonEvent(kind=kind, duration=duration))
             prev = level
             self._stop.wait(_POLL_S)
