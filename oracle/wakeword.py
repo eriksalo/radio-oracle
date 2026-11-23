@@ -10,6 +10,7 @@ Supports both pretrained models (by name) and custom-trained models
 
 from __future__ import annotations
 
+import collections
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +22,7 @@ from config.settings import settings
 # openWakeWord expects 16 kHz mono int16 or float32, in 1280-sample chunks (80ms)
 _CHUNK_SAMPLES = 1280
 _SAMPLE_RATE = 16000
+_RING_CHUNKS = 100  # 8 s
 
 
 class WakeWordDetector:
@@ -45,6 +47,13 @@ class WakeWordDetector:
         self._thread: threading.Thread | None = None
         self._muted = threading.Event()
         self._muted.set()  # not muted by default (set = listening)
+        # The last few seconds of mic audio, so what is said straight after
+        # the wake word is not lost while the app reacts (see
+        # audio_since_wake). (sequence number, int16 chunk).
+        self._ring: collections.deque = collections.deque(maxlen=_RING_CHUNKS)
+        self._ring_lock = threading.Lock()
+        self._seq = 0
+        self._wake_seq: int | None = None
 
     def _load_model(self) -> None:
         from openwakeword.model import Model
@@ -152,6 +161,24 @@ class WakeWordDetector:
                 self._stop.wait(3.0)
         logger.debug("Wake word listener stopped")
 
+    def _remember(self, chunk) -> None:
+        with self._ring_lock:
+            self._seq += 1
+            self._ring.append((self._seq, chunk.copy()))
+
+    def audio_since_wake(self):
+        """Mic audio captured after the most recent wake-word detection, as
+        float32 mono at 16 kHz (empty if there was none or it has aged out
+        of the 8 s buffer)."""
+        import numpy as np
+
+        with self._ring_lock:
+            mark = self._wake_seq
+            chunks = [c for s, c in self._ring if mark is not None and s > mark]
+        if not chunks:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(chunks).astype(np.float32) / 32768.0
+
     def _listen(self, sd, wanted_src: str | None, prev_src: str | None) -> None:
         """Open the mic and run detection until stopped or the stream fails."""
         import os
@@ -181,12 +208,14 @@ class WakeWordDetector:
             while not self._stop.is_set():
                 # If muted, drain audio but don't process
                 if not self._muted.is_set():
-                    stream.read(_CHUNK_SAMPLES)
+                    data, _ = stream.read(_CHUNK_SAMPLES)
+                    self._remember(data.flatten())
                     self._stop.wait(0.01)
                     continue
 
                 data, _ = stream.read(_CHUNK_SAMPLES)
                 chunk = data.flatten()
+                self._remember(chunk)
 
                 predictions = self._model.predict(chunk)
                 score = predictions.get(self._model_key, 0.0)
@@ -194,5 +223,6 @@ class WakeWordDetector:
                 if score >= self._threshold:
                     logger.info(f"Wake word detected: {self._model_key} (score={score:.3f})")
                     self._model.reset()
+                    self._wake_seq = self._seq
                     if self.on_wake is not None:
                         self.on_wake()

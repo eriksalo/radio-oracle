@@ -64,6 +64,7 @@ class OracleApp:
         self._in_turn = False
         self._barge_armed = False
         self._barge = threading.Event()
+        self._preroll_vad = None  # lazy Silero instance for _user_kept_talking
         self._reader_session = None  # lazy init
         self._voice_ctx = None  # set in run() after voice_init
         # Book title/author requested via "read me <title>"; consumed by
@@ -149,6 +150,37 @@ class OracleApp:
         self._barge.clear()
         if self._wakeword and not settings.voice_barge_in:
             self._wakeword.unmute()
+
+    def _user_kept_talking(self) -> bool:
+        """Half a second after the wake word: is the person still speaking?
+        Blocking (run in a thread). False whenever it cannot tell."""
+        if (
+            not settings.wake_preroll
+            or self._wakeword is None
+            or settings.vad_backend == "energy"
+        ):
+            return False
+        import numpy as np
+
+        try:
+            time.sleep(settings.wake_preroll_decide_s)
+            audio = self._wakeword.audio_since_wake()
+            if len(audio) < 0.3 * 16000:
+                return False
+            if self._preroll_vad is None:
+                from oracle.endpoint import SileroVad
+
+                self._preroll_vad = SileroVad()
+            vad = self._preroll_vad
+            vad.reset()
+            gained = np.clip(audio * settings.vad_input_gain, -1.0, 1.0)
+            speech = False
+            for i in range(0, len(gained) - 511, 512):
+                speech = vad.is_speech(gained[i : i + 512])
+            return bool(speech)  # speaking at the end of the window
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Pre-roll check failed: {e}")
+            return False
 
     async def _apologise(self, voice_ctx) -> None:
         """A turn blew up (LLM, TTS, mic): say so instead of dropping back
@@ -345,6 +377,15 @@ class OracleApp:
                 # LED was already flipped to blue in the on_wake callback.
 
                 self._begin_turn()
+                # Did the request follow the wake word in one breath? Then
+                # no chime: the detector's buffer is the start of the
+                # recording. Only from quiet — over music the mic hears
+                # the speaker.
+                music_on = bool(self._player and self._player.is_playing)
+                preroll_fn = None
+                if not music_on and await asyncio.to_thread(self._user_kept_talking):
+                    logger.info("Request follows the wake word — no chime, using pre-roll")
+                    preroll_fn = self._wakeword.audio_since_wake
                 self._pause_music()
                 player = self._get_player()
                 catalog = player._catalog if player is not None else None
@@ -359,7 +400,7 @@ class OracleApp:
                         # ~3.4s subprocess cost of the old MP3 chime nor
                         # leaks its tail into the recording (see
                         # oracle/chime.py).
-                        if settings.wake_chime:
+                        if settings.wake_chime and preroll_fn is None:
                             from oracle.chime import play_wake_chime
 
                             await asyncio.to_thread(play_wake_chime)
@@ -370,7 +411,9 @@ class OracleApp:
                             vc=voice_ctx,
                             leds=self.leds,
                             should_abort=self._make_turn_abort(),
+                            preroll_fn=preroll_fn,
                         )
+                        preroll_fn = None  # a barge-in re-listen chimes
                         # "Librarian" over the answer: chime and listen again.
                         if not self._barged_in():
                             break

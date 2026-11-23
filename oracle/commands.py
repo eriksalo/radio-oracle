@@ -538,6 +538,11 @@ async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
     return action, query
 
 
+# The pre-roll starts where the wake word was detected; its last syllables
+# sometimes land in the transcript.
+_WAKE_TAIL_RE = re.compile(r"^\s*(?:the\s+)?(?:li)?b?rarians?\b[\s,.!?:;-]*", re.IGNORECASE)
+
+
 async def dispatch_radio_command(
     player: Player | None,
     catalog: Catalog | None,
@@ -548,6 +553,7 @@ async def dispatch_radio_command(
     reader=None,
     pre_text: str | None = None,
     pre_audio=None,
+    preroll_fn=None,
 ) -> DispatchResult:
     """One wake-word voice turn — the single dispatcher for both channels.
 
@@ -602,7 +608,11 @@ async def dispatch_radio_command(
                     silence_duration=settings.vad_silence_duration_radio,
                     onset_timeout=settings.wake_onset_timeout_s or None,
                     should_abort=should_abort,
+                    # The request began before the mic opened (no chime).
+                    **({"preroll_fn": preroll_fn} if preroll_fn and attempt == 0 else {}),
                 )
+                if preroll_fn and attempt == 0:
+                    text = _WAKE_TAIL_RE.sub("", text, count=1)
             except (ValueError, OSError) as e:
                 logger.warning(f"Mic unavailable: {e}")
                 return DispatchResult(here)

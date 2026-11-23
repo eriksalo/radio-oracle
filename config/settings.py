@@ -165,6 +165,20 @@ class OracleSettings(BaseSettings):
     # Soft tones when the mic reopens for a follow-up and when a turn
     # closes without anything said (the LED was the only cue before).
     listen_cues: bool = True
+    # "Librarian, play the Beatles" in one breath: the wake detector keeps
+    # the mic audio that follows the wake word, and when the speaker is
+    # still talking half a second later the chime is skipped and that audio
+    # becomes the start of the recording. Before 2026-11-23 the mic opened
+    # only after the chime and the first words were lost. Needs a Silero
+    # vad_backend; with music or narration playing the old flow is used
+    # (the mic hears the speaker).
+    wake_preroll: bool = True
+    wake_preroll_decide_s: float = 0.5
+    # A recording shorter than vad_blip_max_s whose peak is below
+    # vad_blip_peak is room noise, not a request (a 0.9 s, 0.057-peak blip
+    # was transcribed as "Brand" and answered with the 37 s device tour).
+    vad_blip_peak: float = 0.08
+    vad_blip_max_s: float = 1.5
     # PortAudio can't address ALSA `plughw`/`asym` PCMs, so we pin both
     # devices by name and open them at their native rates. Capture is
     # resampled to `audio_sample_rate` for Whisper.

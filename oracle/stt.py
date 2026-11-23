@@ -46,6 +46,7 @@ def listen(
     silence_duration: float | None = None,
     onset_timeout: float | None = None,
     should_abort=None,
+    preroll_fn=None,
 ) -> tuple[np.ndarray, str]:
     """Record one utterance and transcribe it: ``(audio, text)``.
 
@@ -64,6 +65,7 @@ def listen(
         onset_timeout=onset_timeout,
         should_abort=should_abort,
         on_block=session.feed if session is not None else None,
+        **({"preroll_fn": preroll_fn} if preroll_fn is not None else {}),
     )
     timing.mark("record")
     if len(audio) == 0 or (should_abort is not None and should_abort()):

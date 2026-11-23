@@ -24,8 +24,14 @@ def record_until_silence(
     should_abort: AbortCheck = None,
     onset_timeout: float | None = None,
     on_block: Callable[[np.ndarray], None] | None = None,
+    preroll_fn: Callable[[], np.ndarray] | None = None,
 ) -> np.ndarray:
     """Record audio from default mic until silence is detected.
+
+    *preroll_fn*, called once the mic stream is open, returns 16 kHz mono
+    audio captured just before it (what was said straight after the wake
+    word); it becomes the start of the recording and speech counts as
+    already begun.
 
     Returns float32 numpy array of audio samples.  If *should_abort*
     returns True mid-recording, returns whatever has been captured so far
@@ -80,6 +86,20 @@ def record_until_silence(
         latency="high",
     )
     with sd.InputStream(**stream_opts) as stream:
+        pre = preroll_fn() if preroll_fn is not None and capture_sr == 16000 else None
+        if pre is not None and len(pre) >= block_size:
+            pre = np.asarray(pre, dtype=np.float32)
+            for i in range(0, len(pre) - block_size + 1, block_size):
+                mono = pre[i : i + block_size]
+                # Keep the endpointer's model state in step with the audio.
+                endpointer.is_speech(
+                    mono if vad_gain == 1.0 else np.clip(mono * vad_gain, -1.0, 1.0)
+                )
+                frames.append(np.repeat(mono.reshape(-1, 1), ch, axis=1))
+                if on_block is not None:
+                    on_block(mono)
+            started = True
+            logger.debug(f"Recording starts with {len(pre) / 16000:.2f}s of pre-roll")
         while True:
             if should_abort and should_abort():
                 logger.debug("Recording aborted")
@@ -144,6 +164,9 @@ def record_until_silence(
     # Boost gain so quiet USB mics still produce signal Whisper can transcribe.
     # Target peak ~0.5; cap gain at 50x to avoid blowing up pure noise.
     peak = float(np.max(np.abs(audio)))
+    if peak < settings.vad_blip_peak and duration < settings.vad_blip_max_s:
+        logger.info(f"Ignored a {duration:.1f}s blip (peak {peak:.3f}) — room noise, not speech")
+        return np.array([], dtype=np.float32)
     if peak > 1e-5:
         gain = min(0.5 / peak, 50.0)
         if gain > 1.0:
