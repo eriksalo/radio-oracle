@@ -1,7 +1,8 @@
 """Momentary action button with short/long-press detection.
 
-Press < long_press_threshold = "short" (next track / action)
-Press >= long_press_threshold = "long"  (toggle Radio ↔ Librarian mode)
+Press < long_press_threshold = "short", press >= long_press_threshold =
+"long". What each means depends on what the radio is doing — see the
+gesture table at the top of oracle/app.py.
 
 Events are pushed to a thread-safe queue. Falls back to keyboard input
 when the ADC is unavailable so the state machine still exercises in dev.
@@ -54,6 +55,9 @@ class ActionButton:
         )
         self._switch = make_action_button_switch()
         self.events: Queue[ButtonEvent] = Queue()
+        # Held down right now (events only arrive on release). The app uses
+        # it to wait out the second press of a double press.
+        self.pressed = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         if self._switch.available:
@@ -100,12 +104,14 @@ class ActionButton:
             if not prev and level:
                 # released → pressed
                 press_start = time.monotonic()
+                self.pressed = True
                 self._stop.wait(_DEBOUNCE_S)
             elif prev and not level and press_start is not None:
                 # pressed → released
                 duration = time.monotonic() - press_start
                 began = press_start
                 press_start = None
+                self.pressed = False
                 if began - started < _SETTLE_S:
                     logger.debug(f"Ignoring button press during startup settle ({duration:.2f}s)")
                 elif duration < _MIN_PRESS_S:

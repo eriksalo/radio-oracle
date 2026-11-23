@@ -61,6 +61,9 @@ class Player:
         # Suppress intro: set by next() so a track skip at an album
         # boundary doesn't replay the AM tuning sound.
         self._suppress_intro = False
+        # Replay: set by replay() so the track that was just cut off starts
+        # over instead of the album moving on.
+        self._replay = threading.Event()
 
     @property
     def now_playing(self) -> Track | None:
@@ -137,6 +140,13 @@ class Player:
         self._suppress_intro = True
         self._kill_proc()
 
+    def replay(self) -> None:
+        """Start the current track again from the top."""
+        if self._current is None:
+            return
+        self._replay.set()
+        self._kill_proc()
+
     def next_album(self) -> None:
         """Skip to a new random album (plays AM intro)."""
         self._suppress_intro = False
@@ -195,13 +205,16 @@ class Player:
                 self._skip_album.clear()
 
                 # --- play tracks in album ---
-                for track in tracks:
+                i = 0
+                while i < len(tracks):
+                    track = tracks[i]
                     if self._stop_event.is_set():
                         return
                     if self._skip_album.is_set():
                         self._skip_album.clear()
                         break
                     self._current = track
+                    self._replay.clear()
                     logger.info(f"Playing: {track.artist} — {track.title}")
                     from oracle.activity import emit
 
@@ -212,6 +225,9 @@ class Player:
                     if self._skip_album.is_set():
                         self._skip_album.clear()
                         break
+                    if self._replay.is_set():
+                        continue  # same track again, no gap
+                    i += 1
                     # Small gap between tracks in the same album.
                     time.sleep(0.3)
 

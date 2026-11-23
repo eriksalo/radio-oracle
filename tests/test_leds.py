@@ -8,7 +8,7 @@ from oracle.hardware.leds import _BLINK_PERIOD_S, MODE_COLORS, Color, StatusLEDs
 def test_mode_colors_cover_all_modes():
     expected = {
         "off", "boot", "waiting", "error",
-        "q_listen", "q_think", "q_speak",
+        "q_listen", "q_think", "q_speak", "q_paused",
         "music_play", "music_listen", "music_think", "music_speak",
         "book_read", "book_listen", "book_think", "book_speak", "book_paused",
     }  # fmt: skip

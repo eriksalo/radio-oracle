@@ -114,7 +114,9 @@ def record_until_silence(
                 pre = _preroll_source(t_call)
         if pre is not None and len(pre) >= block_size:
             pre = np.asarray(pre, dtype=np.float32)
-            blocks = [pre[i : i + block_size] for i in range(0, len(pre) - block_size + 1, block_size)]
+            blocks = [
+                pre[i : i + block_size] for i in range(0, len(pre) - block_size + 1, block_size)
+            ]
             # Keep the endpointer's model state in step with the audio.
             flags = [
                 endpointer.is_speech(b if vad_gain == 1.0 else np.clip(b * vad_gain, -1.0, 1.0))
@@ -386,9 +388,59 @@ _last_text = ""
 _last_text_end = 0.0
 
 
-def speech_playing() -> bool:
-    """True while a clip is going out of the speaker."""
-    return _playing.is_set()
+def speech_playing(grace: float = 0.0) -> bool:
+    """True while a clip is going out of the speaker — or, with *grace*,
+    if one ended within that many seconds (the gap between two sentences
+    of one answer still counts as "talking")."""
+    import time
+
+    if _playing.is_set():
+        return True
+    return grace > 0 and _last_text_end > 0 and time.monotonic() - _last_text_end < grace
+
+
+# Button pause for speech (oracle/app.py): while the request is set, the
+# clip that is playing stops, the radio says "Paused", and play_audio holds
+# the speaker until the request clears (the clip then starts over, so the
+# answer picks up at the sentence it stopped in) or the caller aborts.
+_pause_req = threading.Event()
+_pause_cue: tuple[np.ndarray, int] | None = None
+
+
+def set_pause_cue(audio: np.ndarray | None, sample_rate: int | None = None) -> None:
+    """The spoken "Paused." clip (synthesized once by the app)."""
+    global _pause_cue
+    _pause_cue = None if audio is None else (audio, sample_rate or settings.audio_sample_rate)
+
+
+def pause_speech() -> None:
+    _pause_req.set()
+
+
+def resume_speech() -> None:
+    _pause_req.clear()
+
+
+def speech_paused() -> bool:
+    return _pause_req.is_set()
+
+
+def _hold_pause(should_abort: AbortCheck) -> None:
+    """Say "Paused", then wait for resume_speech() or an abort. The abort
+    check is polled the whole time: it is what reads the button."""
+    import time
+
+    def done() -> bool:
+        return not _pause_req.is_set() or bool(should_abort and should_abort())
+
+    if _pause_cue is not None and not done():
+        try:
+            cue, sr = _resample_to_playback(*_pause_cue)
+            _stream_play(cue, sr, done)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Pause cue failed: {e}")
+    while not done():
+        time.sleep(0.05)
 
 
 def speaker_said(word: str) -> bool:
@@ -416,11 +468,35 @@ def play_audio(
     global _playing_text, _last_text, _last_text_end
     src_sr = sample_rate or settings.audio_sample_rate
     out, dst_sr = _resample_to_playback(audio, src_sr)
+
+    def aborted() -> bool:
+        return bool(should_abort and should_abort())
+
+    def interrupted() -> bool:
+        return aborted() or _pause_req.is_set()
+
     with _speaker_lock:
         _playing_text = text.lower()
         _playing.set()
         try:
-            _stream_play(out, dst_sr, should_abort)
+            while True:
+                if should_abort is None:
+                    # Nobody is reading the button for this clip (chimes,
+                    # book narration): it cannot be paused, or resumed.
+                    _stream_play(out, dst_sr, None)
+                    break
+                if not _pause_req.is_set():
+                    _stream_play(out, dst_sr, interrupted)
+                if aborted() or not _pause_req.is_set():
+                    break
+                # Paused mid-clip: hold, then say this clip again from its
+                # start. Nothing is "being said" meanwhile, so the wake
+                # word is never mistaken for the radio's own voice.
+                said, _playing_text = _playing_text, ""
+                _hold_pause(should_abort)
+                _playing_text = said
+                if aborted():
+                    break
         finally:
             _playing.clear()
             _last_text, _last_text_end = _playing_text, time.monotonic()

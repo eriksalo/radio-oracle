@@ -33,6 +33,7 @@ Every case, by mode name in the code:
 | `q_listen` | mic open after "Librarian" / button in question mode, follow-up window | blue, 1 s blink |
 | `q_think` | STT, retrieval, LLM generating an answer | blue, 0.3 s blink |
 | `q_speak` | speaking an answer, greeting, options menu, "about this device" | blue solid |
+| `q_paused` | an answer paused with the button (it said "Paused"); press again to carry on | blue, 2 s blink |
 | `music_play` | music playing | green solid |
 | `music_listen` | mic open while music is on (wake or button) | green, 1 s blink |
 | `music_think` | classifying / finding what to play | green, 0.3 s blink |
@@ -41,7 +42,7 @@ Every case, by mode name in the code:
 | `book_listen` | mic open in reader mode | purple, 1 s blink |
 | `book_think` | finding a book / chapter, classifying a command | purple, 0.3 s blink |
 | `book_speak` | announcing a book / chapter, answering "what am I reading?" | purple solid |
-| `book_paused` | reader paused (button) | purple, 2 s blink |
+| `book_paused` | reader paused (button or "pause") | purple, 2 s blink |
 
 Rules that keep it honest:
 

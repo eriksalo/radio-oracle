@@ -125,8 +125,9 @@ flip the active-low convention in `leds.py`.
 
 Two terminals, polarity-free.
 
-- **SW1** is *momentary* (closes only while held) — short press = next /
-  action, long press (≥ 1 s) = toggle Librarian mode.
+- **SW1** is *momentary* (closes only while held) — short vs long press (≥ 1 s);
+  what each does depends on what the radio is doing (table at the top of
+  `oracle/app.py`).
 - **SW2** is *latching* (toggles open ↔ closed) — closed = device on.
 
 Both switches are wired in a classic pull-up-to-rail configuration: one

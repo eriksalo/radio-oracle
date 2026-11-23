@@ -40,8 +40,7 @@ scripts/
 ### State machine integration (`oracle/app.py`)
 - **Radio mode**: `_ensure_music()` starts continuous playback if not already running
 - **Wake word detected**: pause music → one voice turn → resume music
-- **Long-press → Librarian**: pause music; long-press back → resume
-- **Short-press in Radio**: `_next_track()` skips immediately (double press → next album)
+- **Button while music plays** (2026-11-23): short press → next song (acts after the 0.4 s double-press window), two short presses → replay the song (`Player.replay()`), long press → next album. Full gesture table: top of `oracle/app.py`.
 - **Standby / power-off**: `_stop_music()` halts playback
 - **Shutdown**: `player.close()` stops playback and closes catalog DB
 

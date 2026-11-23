@@ -16,14 +16,23 @@ States:
   just a question turn with a longer follow-up window.)
 
 Transitions:
-  power-on               : STANDBY -> RADIO (music starts)
+  power-on               : STANDBY -> RADIO (welcome, then waiting or music)
   power-off              : *       -> STANDBY (music stops, all I/O halted)
-  long-press button      : RADIO <-> READER (channel toggle)
-  short-press button     : RADIO -> next track; READER -> pause/resume;
-                           during any voice turn -> barge-in (stop talking)
-  wake word over speech  : during a voice turn -> stop talking, chime, listen again
-  double-press button    : RADIO -> next album (AM intro); READER -> next chapter
   wake word              : chime, then one utterance — command, switch, or question
+  wake word over speech  : during a voice turn -> stop talking, chime, listen again
+
+The button (Erik's table, 2026-11-23) — what a press means depends on what
+the radio is doing:
+
+  | doing             | short press          | two short     | long press        |
+  |-------------------|----------------------|---------------|-------------------|
+  | nothing (waiting) | same as the wake word| —             | "about me" passage|
+  | talking (a turn)  | pause, says "Paused";| —             | stop talking      |
+  |                   | again = carry on     |               |                   |
+  | music             | next song            | replay song   | next album        |
+  | book              | pause / resume       | —             | back to waiting   |
+
+  A press while the mic is open (or the radio is thinking) cancels the turn.
 """
 
 from __future__ import annotations
@@ -41,6 +50,13 @@ from oracle.hardware import ActionButton, ButtonEvent, PowerSwitch, StatusLEDs
 from oracle.state import StateWriter
 
 State = Literal["standby", "radio", "librarian", "reader"]
+
+# What a long press in the waiting state "says" (keyword-matched to the
+# about_device passage in oracle/commands.py).
+_ABOUT_REQUEST = "Tell me about this device."
+# A press between two sentences of an answer is still a press "while it is
+# talking": the speaker counts as busy this long after a clip ends.
+_SENTENCE_GAP_S = 0.4
 
 
 class OracleApp:
@@ -73,10 +89,14 @@ class OracleApp:
         self._pending_book_chapter: str | None = None
         self._welcome_pending = False
         self._music_held = False  # "quiet" at power-on: don't auto-start music
-        # Double-press detection: buffer the first short press and wait
-        # up to _DOUBLE_PRESS_S to see if a second one arrives.
+        # Double-press detection (music): the first short press is held for
+        # _double_press_window to see whether a second one follows — one
+        # press is "next song", two are "replay this song", and the song
+        # must not skip before it is known which.
         self._pending_short_press: float | None = None
-        self._double_press_window = 0.4  # seconds
+        self._double_press_window = 0.4  # seconds, release -> next press
+        self._about_pending = False  # long press while waiting
+        self._led_before_pause: str | None = None
 
     def _get_player(self):
         """Lazily create the music player (only if catalog has tracks)."""
@@ -144,6 +164,7 @@ class OracleApp:
         self._barge.clear()
         self._barge_armed = False
         self._in_turn = True
+        self._clear_speech_pause()
         if self._wakeword and not settings.voice_barge_in:
             self._wakeword.mute()
 
@@ -151,17 +172,20 @@ class OracleApp:
         self._in_turn = False
         self._barge_armed = False
         self._barge.clear()
+        self._clear_speech_pause()
         if self._wakeword and not settings.voice_barge_in:
             self._wakeword.unmute()
+
+    def _clear_speech_pause(self) -> None:
+        from oracle import audio
+
+        audio.resume_speech()
+        self._led_before_pause = None
 
     def _user_kept_talking(self) -> bool:
         """Half a second after the wake word: is the person still speaking?
         Blocking (run in a thread). False whenever it cannot tell."""
-        if (
-            not settings.wake_preroll
-            or self._wakeword is None
-            or settings.vad_backend == "energy"
-        ):
+        if not settings.wake_preroll or self._wakeword is None or settings.vad_backend == "energy":
             return False
         import numpy as np
 
@@ -244,6 +268,7 @@ class OracleApp:
             from oracle import volume_bridge
 
             volume_bridge.start()  # knob works for speech even without music
+            await self._warm_pause_cue(voice_ctx)
             self._start_wakeword(loop)
             # Presses queued while the models loaded (~10 s) are stale.
             self._drain_events()
@@ -291,6 +316,17 @@ class OracleApp:
             # back: a missing mic at boot used to end the process with
             # status 0 and the radio stayed off until someone restarted it.
             raise SystemExit(1)
+
+    async def _warm_pause_cue(self, voice_ctx) -> None:
+        """Synthesize the spoken "Paused." once, so a button pause answers
+        at once instead of after a synthesis."""
+        from oracle import audio
+
+        try:
+            clip = await asyncio.to_thread(voice_ctx.tts.synthesize, "Paused.")
+            audio.set_pause_cue(clip, voice_ctx.tts.sample_rate)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"No spoken pause cue: {e}")
 
     async def _welcome(self, voice_ctx) -> None:
         """Power-on routine (oracle/welcome.py) before any music plays."""
@@ -348,6 +384,7 @@ class OracleApp:
             if self._wakeword:
                 self._wakeword.unmute()
             self._drain_events()
+            self._about_pending = False
         result = outcome.dispatched
         if result is not None and result.next_mode != "radio":
             self._pending_book_query = result.reader_query
@@ -376,9 +413,14 @@ class OracleApp:
             if self._state != "radio":
                 return
 
-            if self._wake_event.is_set():
+            about = self._about_pending
+            self._about_pending = False
+            if about or self._wake_event.is_set():
                 self._wake_event.clear()
-                logger.info("Wake word triggered — radio command turn")
+                if about:
+                    logger.info("Long press while waiting — about this device")
+                else:
+                    logger.info("Wake word triggered — radio command turn")
 
                 # LED was already flipped to blue in the on_wake callback.
 
@@ -389,7 +431,7 @@ class OracleApp:
                 # the speaker.
                 music_on = bool(self._player and self._player.is_playing)
                 preroll_fn = None
-                if not music_on and await asyncio.to_thread(self._user_kept_talking):
+                if not about and not music_on and await asyncio.to_thread(self._user_kept_talking):
                     logger.info("Request follows the wake word — no chime, using pre-roll")
                     preroll_fn = self._wakeword.audio_since_wake
                 self._pause_music()
@@ -406,19 +448,31 @@ class OracleApp:
                         # ~3.4s subprocess cost of the old MP3 chime nor
                         # leaks its tail into the recording (see
                         # oracle/chime.py).
-                        if settings.wake_chime and preroll_fn is None:
+                        if settings.wake_chime and preroll_fn is None and not about:
                             from oracle.chime import play_wake_chime
 
                             await asyncio.to_thread(play_wake_chime)
                         self._barge.clear()
+                        abort = self._make_turn_abort()
                         result = await dispatch_radio_command(
                             player=player,
                             catalog=catalog,
                             vc=voice_ctx,
                             leds=self.leds,
-                            should_abort=self._make_turn_abort(),
+                            should_abort=abort,
                             preroll_fn=preroll_fn,
+                            # The long press asks the question for you.
+                            **({"pre_text": _ABOUT_REQUEST} if about else {}),
                         )
+                        if about:
+                            # The passage ends "I'm listening" — so listen,
+                            # unless it was stopped with the button.
+                            about = False
+                            if not abort() or self._barged_in():
+                                if self._barged_in():
+                                    self.leds.set_mode("q_listen")
+                                continue
+                            break
                         # "Librarian" over the answer: listen again — with
                         # the chime if they paused, without it (and keeping
                         # their first words) if they carried straight on.
@@ -474,8 +528,8 @@ class OracleApp:
     async def _run_reader(self, voice_ctx) -> None:
         """Book channel: pick a book, read it aloud, service buttons + wake.
 
-        Controls while reading: short press = pause/resume, double press =
-        next chapter, long press = back to the music. The wake word stays
+        Controls while reading: short press = pause/resume, long press =
+        leave the book for the quiet waiting state. The wake word stays
         active (same reliability caveat as during music): "librarian" →
         reading pauses mid-sentence → chime → any command or question →
         reading resumes from that paragraph. Book choice by voice on entry
@@ -548,32 +602,20 @@ class OracleApp:
             if self._wake_event is not None:
                 self._wake_event.clear()
             read_task = asyncio.create_task(asyncio.to_thread(session.read_continuous, should_stop))
-            pending_press: float | None = None
+            to_waiting = False
             try:
                 while not read_task.done():
-                    now = time.monotonic()
                     for evt in self._drain_events():
                         self._state_writer.record_button(evt.kind, evt.duration)
                         if evt.kind == "long":
-                            pending_press = None
+                            # Back to the "main menu": quiet, waiting.
+                            logger.info("Long press in a book — back to waiting")
+                            to_waiting = True
                             exit_requested = True
                         elif evt.kind == "short":
-                            if (
-                                pending_press is not None
-                                and now - pending_press < self._double_press_window
-                            ):
-                                pending_press = None
-                                if not session.next_chapter():
-                                    logger.info("Already at the last chapter")
-                            else:
-                                pending_press = now
-                    if (
-                        pending_press is not None
-                        and now - pending_press >= self._double_press_window
-                    ):
-                        pending_press = None
-                        paused = session.toggle_pause()
-                        self.leds.set_mode("book_paused" if paused else "book_read")
+                            # Acts at once — no double press to wait for.
+                            paused = session.toggle_pause()
+                            self.leds.set_mode("book_paused" if paused else "book_read")
                     if self._wake_event is not None and self._wake_event.is_set():
                         self._wake_event.clear()
                         result = await self._reader_wake_turn(voice_ctx, session)
@@ -589,7 +631,10 @@ class OracleApp:
                 session.stop()  # persists the bookmark
 
             if switch is None:
-                break  # finished, long-press, or power-off → music
+                if to_waiting:
+                    self._stop_music()
+                    self._music_held = True
+                break  # finished or power-off → music; long press → waiting
             if switch.next_mode == "reader" and switch.reader_query:
                 self._pending_book_query = switch.reader_query
                 self._pending_book_chapter = switch.reader_chapter
@@ -794,6 +839,16 @@ class OracleApp:
         if player:
             player.next_album()
 
+    def _replay_track(self) -> None:
+        player = self._get_player()
+        if player:
+            player.replay()
+
+    def _idle(self) -> bool:
+        """Nothing is happening: no music coming out of the speaker."""
+        player = self._player
+        return self._music_held or player is None or not player.is_playing or player.is_paused
+
     # ---------------------------------------------------------------- state
 
     def _enter(self, state: State) -> None:
@@ -809,7 +864,7 @@ class OracleApp:
             self.leds.set_mode("off")
         elif state == "radio":
             self.leds.set_mode("waiting" if self._music_held else "music_play")
-            if old == "reader":
+            if old == "reader" and not self._music_held:
                 self._resume_music()
         elif state == "reader":
             self._pause_music()
@@ -830,50 +885,50 @@ class OracleApp:
                 return out
 
     def _handle_buttons(self) -> None:
+        """Button presses on the music channel and in the waiting state.
+        (A book and a voice turn read the button themselves.)"""
         now = time.monotonic()
         for evt in self._drain_events():
             self._state_writer.record_button(evt.kind, evt.duration)
-            if evt.kind == "long":
-                # Long press cancels any pending short press.
+            if self._state != "radio":
+                continue
+            if self._idle():
+                # Waiting quietly: a press is the wake word — never "put
+                # the music on" (2026-09-28: Erik pressed to ask a question
+                # and got a random album). A long press is "about me".
                 self._pending_short_press = None
-                if self._state == "radio":
-                    self._enter("reader")  # channel toggle (resumes current book)
-                elif self._state == "reader":
-                    self._enter("radio")
-            elif evt.kind == "short" and self._state == "radio":
-                if self._music_held:
-                    # Waiting quietly: a press is push-to-talk, the same as
-                    # saying the wake word — never "put the music on"
-                    # (2026-09-28: Erik pressed to ask a question and got a
-                    # random album). Say "play music" to start music.
-                    self._pending_short_press = None
-                    if self._wake_event is not None:
-                        logger.info("Button press while waiting — opening the mic")
-                        self.leds.set_mode("q_listen")
-                        self._wake_event.set()
-                    continue
-                if (
-                    self._pending_short_press is not None
-                    and now - self._pending_short_press < self._double_press_window
-                ):
-                    # Second short press within window → upgrade to next album.
-                    self._pending_short_press = None
-                    self._next_album()
-                    logger.debug("Double press → next album")
-                else:
-                    # Act immediately — buffering the press added a fixed
-                    # 0.4s lag to every single skip. A second press within
-                    # the window upgrades the skip to a new album, which is
-                    # fine: the caller wanted to move on either way.
-                    self._pending_short_press = now
-                    self._next_track()
+                if evt.kind == "long":
+                    self._about_pending = True
+                    self.leds.set_mode("q_think")
+                elif self._wake_event is not None:
+                    logger.info("Button press while waiting — opening the mic")
+                    self.leds.set_mode("q_listen")
+                    self._wake_event.set()
+            elif evt.kind == "long":
+                self._pending_short_press = None
+                logger.info("Long press → next album")
+                self._next_album()
+            elif (
+                self._pending_short_press is not None
+                and now - self._pending_short_press < self._double_press_window
+            ):
+                self._pending_short_press = None
+                logger.info("Double press → replay song")
+                self._replay_track()
+            else:
+                self._pending_short_press = now
 
-        # Expire the double-press window.
-        if (
-            self._pending_short_press is not None
-            and now - self._pending_short_press >= self._double_press_window
-        ):
-            self._pending_short_press = None
+        # One press and no second: next song. A button that is down again
+        # is the second press on its way (events arrive on release), so the
+        # window stays open until the finger lifts.
+        if self._pending_short_press is not None:
+            if getattr(self.button, "pressed", False):
+                self._pending_short_press = now
+            elif now - self._pending_short_press >= self._double_press_window:
+                self._pending_short_press = None
+                if self._state == "radio" and not self._idle():
+                    logger.info("Short press → next song")
+                    self._next_track()
 
     def _publish_hardware(self) -> None:
         """Publish pot/power readings into the state file so the dashboard
@@ -902,11 +957,15 @@ class OracleApp:
             self._hw_stop.wait(0.5)
 
     def _make_turn_abort(self):
-        """Abort check for one radio voice turn: power-off, or any button
-        press = barge-in ("stop talking"). The press is consumed here so it
-        doesn't later fire next-track; the latch keeps the whole turn
-        (recording, LLM stream, TTS queue) aborted once tripped. Called
-        from worker threads — Queue.get_nowait is thread-safe."""
+        """Abort check for one radio voice turn, and the turn's button
+        reader. A short press while the radio talks pauses it (it says
+        "Paused"; the next press carries on from that sentence) and is not
+        an abort. A long press, or any press while the mic is open or the
+        radio is thinking, ends the turn — as do power-off and a wake-word
+        barge-in. Presses are consumed here so they don't later fire
+        next-track; the latch keeps the whole turn (recording, LLM stream,
+        TTS queue) aborted once tripped. Called from worker threads —
+        Queue.get_nowait is thread-safe."""
         latch = {"hit": False}
         # From here on the radio may speak: the wake word can cut it off.
         self._barge_armed = self._in_turn
@@ -924,6 +983,22 @@ class OracleApp:
             except Empty:
                 return False
             self._state_writer.record_button(evt.kind, evt.duration)
+            from oracle import audio
+
+            if evt.kind == "short":
+                if audio.speech_paused():
+                    logger.info("Button press while paused — carrying on")
+                    audio.resume_speech()
+                    if self._led_before_pause:
+                        self.leds.set_mode(self._led_before_pause)
+                    self._led_before_pause = None
+                    return False
+                if audio.speech_playing(grace=_SENTENCE_GAP_S):
+                    logger.info("Button press while talking — paused")
+                    self._led_before_pause = self.leds.mode
+                    audio.pause_speech()
+                    self.leds.set_mode("q_paused")
+                    return False
             logger.info(f"Button {evt.kind}-press during voice turn — interrupting")
             latch["hit"] = True
             return True

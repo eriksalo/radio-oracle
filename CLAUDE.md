@@ -58,6 +58,16 @@ make test       # pytest
 - Speech playback (`oracle/audio.py::_stream_play`) writes a buffer's worth of silence behind every clip: `stream.stop()` on the pulse path drops the ring buffer instead of draining it, which clipped the last ~270 ms of every unit. Check with `scripts/probe_tail.py` (records the sink monitor; stop the radio first).
 - Memory budget on the Jetson is the hard constraint (llama-server ~3.2 GB + TTS sidecar ~1 GB pinned; app ~2 GB). zram swap (`nvzramconfig`) is **disabled** — it held swapped pages compressed in RAM and starved the box; the 8 GB NVMe swapfile takes the overflow. Never add a resident model without measuring `free -m`.
 - The ADS1115 (pot, button, power switch) has ONE reader: the app's SharedAdcPoller. A second reader interleaves on the mux and yields another channel's voltage (phantom button presses that cut speech off, pot jumps). The dashboard never touches the chip unless its "DIRECT ADS1115 READS" box is ticked (off after every restart, and only honoured while no `oracle --mode hardware` process exists); its readers are one-shot `DigitalSwitch` objects, never the `make_*_switch()` factories, which auto-start a poller thread. ADC probes: stop `radio-oracle-diag` too.
+- The button (Erik's table, 2026-11-23; `OracleApp._handle_buttons`, `_make_turn_abort`, the reader loop):
+
+  | doing | short | two short | long |
+  |---|---|---|---|
+  | waiting (nothing playing) | same as the wake word | — | "about this device" passage, then listens |
+  | talking in a turn | pause — says "Paused", blue 2 s blink; again = carry on from that sentence | — | stop talking |
+  | music | next song | replay the song | next album |
+  | book | pause / resume | — | leave the book for the waiting state |
+
+  A press while the mic is open or the radio is thinking cancels the turn. The speech pause lives in `oracle/audio.py` (`pause_speech`/`resume_speech`, honoured by `play_audio` only for clips that have a `should_abort` — that check is what reads the button). In music the single press acts after the 0.4 s double-press window (`ActionButton.pressed` keeps the window open while the second press is still held).
 - Status LED (`oracle/hardware/leds.py`, full table in `docs/led-behaviour.md`): colour = context, pattern = activity.
 
   | | listen (mic open) | think | speak / output | idle |
@@ -67,7 +77,7 @@ make test       # pytest
   | books — **purple** | 1 s blink | 0.3 s blink | solid (reading or announcing) | paused: 2 s blink |
   | standby **off** · boot **amber** 2 s · waiting **white** 2 s · error **red** 0.5 s | | | | |
 
-  Modes are `q_/music_/book_` + `listen/think/speak`, plus `music_play`, `book_read`, `book_paused`, `boot`, `waiting`, `error`, `off`. The base colour is picked from the command's context (`commands.py`: reader → book, music playing → music, else q). Keep `Color` a dataclass — the table is built from it at import.
+  Modes are `q_/music_/book_` + `listen/think/speak`, plus `music_play`, `book_read`, `book_paused`, `q_paused`, `boot`, `waiting`, `error`, `off`. The base colour is picked from the command's context (`commands.py`: reader → book, music playing → music, else q). Keep `Color` a dataclass — the table is built from it at import.
 - On-device probes must not leave state behind: use a scratch `ORACLE_DB_PATH`, and restore bookmarks (see `scripts/probe_reader.py`). A stray bookmark once made the radio resume a book nobody asked for.
 - Config via env vars with `ORACLE_` prefix (direnv-compatible). The Jetson's `/opt/radio-oracle/.env` sets `ORACLE_COLLECTION_BACKENDS` to route every collection to FAISS.
 

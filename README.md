@@ -14,7 +14,7 @@ Powered by a Jetson Orin Nano Super with a 1TB knowledge store spanning Wikipedi
 | 1TB NVMe SSD | Knowledge storage |
 | Seeed reSpeaker Lite (XMOS XU316) | Voice input — see [`firmware/`](firmware/) for on-chip DSP notes |
 | 4 Ω speaker on the reSpeaker Lite's amplifier output | Voice + music output through the vintage radio enclosure. Same USB device as the mic (16 kHz playback), so the XU316's on-chip AEC has a reference. Knob travel is capped at `ORACLE_SPEAKER_MAX_VOLUME_PCT` (default 80) to keep the USB-powered amp from browning out; see [`docs/SETUP.md`](docs/SETUP.md#16-audio-routing-pulseaudio-aec-mic-direct-speaker-music). |
-| PTT button (GPIO) | Push-to-talk |
+| Action button (ADS1115) | Waiting: press = wake word, long = about the device. Talking: pause / carry on. Music: next song, double = replay, long = next album. Book: pause / resume, long = back to waiting. |
 | Status LEDs (GPIO) | Idle / listening / thinking / speaking |
 | Enclosure | Vintage radio ([zionbrock.com/radio](https://zionbrock.com/radio)) |
 

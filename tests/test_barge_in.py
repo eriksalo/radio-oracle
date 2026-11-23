@@ -67,6 +67,7 @@ class _App:
     _end_turn = _O._end_turn
     _barged_in = _O._barged_in
     _make_turn_abort = _O._make_turn_abort
+    _clear_speech_pause = _O._clear_speech_pause
 
     def __init__(self):
         from queue import Queue
@@ -83,6 +84,9 @@ class _App:
         self.power = SimpleNamespace(is_on=True)
         self.button = SimpleNamespace(events=Queue())
         self._state_writer = SimpleNamespace(record_button=lambda *a: None)
+        self._led_before_pause = None
+        self.leds = SimpleNamespace(mode="q_speak")
+        self.leds.set_mode = lambda m: setattr(self.leds, "mode", m)
 
 
 def test_wake_word_latches_the_turn_abort_and_asks_for_a_relisten():
