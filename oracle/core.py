@@ -431,9 +431,36 @@ async def voice_init() -> VoiceContext:
 
     # Warm the LLM into VRAM now (keep_alive=-1 then pins it): otherwise
     # the first question of the session pays the model load.
+    # Then run the two prompts every turn begins with through it once, so
+    # their long fixed openings (the command classifier's instructions; the
+    # persona + memory block of a question) sit in llama-server's prompt
+    # cache. Otherwise the first question after a start reads ~2,500 tokens
+    # cold: prefill 4.7 s instead of ~1.6 s (2026-11-23).
     async def _warm_llm() -> None:
+        import time
+
+        from oracle.commands import _LLM_SYSTEM_PROMPT
+
         try:
-            await chat([{"role": "user", "content": "hi"}])
+            t0 = time.monotonic()
+            await chat([{"role": "user", "content": "hi"}], num_predict=1)
+            t1 = time.monotonic()
+            await chat(
+                [
+                    {"role": "system", "content": _LLM_SYSTEM_PROMPT},
+                    {"role": "user", "content": "hello"},
+                ],
+                num_predict=1,
+            )
+            t2 = time.monotonic()
+            await chat(
+                await ctx_builder.build(system_prompt, "", user_text="Hello."), num_predict=1
+            )
+            t3 = time.monotonic()
+            logger.info(
+                f"LLM warmed: load {t1 - t0:.1f}s, command prompt {t2 - t1:.1f}s, "
+                f"question prompt {t3 - t2:.1f}s"
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug(f"LLM warmup failed: {e}")
 
