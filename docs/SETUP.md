@@ -184,6 +184,9 @@ removed). What that changes relative to the description above:
   above room noise on the mic and clips it at 60 % sink volume. Pulse's
   canceller (`ORACLE_AUDIO_TOPOLOGY=aec`) adds only 4–7 dB. Moving the
   mic board away from the speaker cone is the lever, not software.
+  **That was firmware v2.0.7.** The v2.0.8 test build installed the same
+  day does cancel (≈26 dB once it has heard 15–20 s of playback); see
+  `firmware/README.md`.
 - Saying the wake word while the radio is answering stops it and opens
   the mic again (`ORACLE_VOICE_BARGE_IN`, default on). The button does the
   same and is the reliable one while the speaker is loud.

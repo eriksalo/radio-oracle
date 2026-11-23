@@ -74,6 +74,34 @@ def stop() -> None:
     _thread = None
 
 
+# The ReSpeaker Lite's echo canceller (firmware 2.0.8 test build) loses
+# its lock when the playback level jumps: 30 % -> 55 % in one step brought
+# the radio's own voice back at full level on the mic until it re-learned,
+# while the same change as 4-point steps every 0.25 s stayed cancelled, and
+# so did a sudden drop (measured 2026-11-23). So the knob ramps UP at most
+# this many knob-percent per pactl call; turning it down is immediate.
+_RAISE_STEP_PCT = 5
+
+
+class _Slew:
+    """Walks the applied volume toward the knob's target."""
+
+    def __init__(self) -> None:
+        self.target: int | None = None
+        self.applied: int | None = None
+
+    def pending(self) -> bool:
+        return self.target is not None and self.target != self.applied
+
+    def step(self) -> int:
+        assert self.target is not None
+        if self.applied is None or self.target <= self.applied:
+            self.applied = self.target  # first setting, or turning down
+        else:
+            self.applied = min(self.target, self.applied + _RAISE_STEP_PCT)
+        return self.applied
+
+
 class _KnobTracker:
     """Decides when a pot reading is a real knob move worth a `pactl` call."""
 
@@ -110,11 +138,14 @@ def _loop() -> None:
         return
     logger.info(f"Volume bridge started (initial gain={ctl.gain:.2f})")
     tracker = _KnobTracker()
+    slew = _Slew()
     last_applied = 0.0
     while not _stop.is_set():
         pct = tracker.update(ctl.gain)
-        if pct is not None and time.monotonic() - last_applied >= _MIN_INTERVAL_S:
-            set_sink_volume(pct / 100)
+        if pct is not None:
+            slew.target = pct
+        if slew.pending() and time.monotonic() - last_applied >= _MIN_INTERVAL_S:
+            set_sink_volume(slew.step() / 100)
             last_applied = time.monotonic()
         _stop.wait(_POLL_S)
     logger.debug("Volume bridge stopped")

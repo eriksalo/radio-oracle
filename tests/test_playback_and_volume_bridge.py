@@ -148,3 +148,19 @@ def test_full_knob_stops_at_the_speaker_ceiling(monkeypatch):
     assert volume_bridge.sink_percent(1.7) == 80
     monkeypatch.setattr(volume_bridge.settings, "speaker_max_volume_pct", 100)
     assert volume_bridge.sink_percent(1.0) == 100
+
+
+def test_volume_ramps_up_in_small_steps_but_drops_at_once():
+    """A jump in playback level unlocks the mic board's echo canceller; a
+    ramp does not, and neither does a sudden drop (measured 2026-11-23)."""
+    s = volume_bridge._Slew()
+    assert not s.pending()
+    s.target = 30
+    assert s.step() == 30  # first setting applies directly
+    s.target = 55
+    steps = []
+    while s.pending():
+        steps.append(s.step())
+    assert steps == [35, 40, 45, 50, 55]
+    s.target = 10
+    assert s.step() == 10 and not s.pending()
