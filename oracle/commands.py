@@ -343,6 +343,7 @@ def _speak(vc: VoiceContext, text: str, should_abort: AbortCheck = None) -> None
 # into feedback. Only worth it when the archives are actually consulted.
 _ACK_PHRASES = ("Checking the archives.", "Consulting the archives.", "One moment.")
 _ack_cache: list = []
+_last_ack = -1
 
 
 def warm_thinking_acks(vc: VoiceContext) -> None:
@@ -363,8 +364,13 @@ def _play_thinking_ack(vc: VoiceContext, should_abort: AbortCheck = None) -> Non
     import random
 
     try:
+        global _last_ack
         warm_thinking_acks(vc)
-        audio = random.choice(_ack_cache)
+        # Never the same phrase twice running: in a chain of follow-ups a
+        # repeated "Checking the archives." sounds like a stuck record.
+        choices = [i for i in range(len(_ack_cache)) if i != _last_ack] or [0]
+        _last_ack = random.choice(choices)
+        audio = _ack_cache[_last_ack]
         play_audio(audio, vc.tts.sample_rate, should_abort=should_abort)
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Thinking ack failed: {e}")
@@ -428,6 +434,9 @@ async def _question_turns(
         # A follow-up is a turn of its own for timing purposes: the
         # previous timer was finished by voice_turn.
         timing.start("followup")
+        from oracle.chime import play_close_cue, play_listen_cue
+
+        await asyncio.to_thread(play_listen_cue)  # "your turn"
         try:
             _audio, text = await asyncio.to_thread(
                 listen,
@@ -440,8 +449,12 @@ async def _question_turns(
             logger.warning(f"Mic unavailable for follow-up: {e}")
             timing.clear()
             return
-        if aborted() or not text.strip():
+        if aborted():
             timing.clear()
+            return None
+        if not text.strip():
+            timing.clear()
+            await asyncio.to_thread(play_close_cue)
             return None  # no follow-up — the channel resumes
         logger.info(f"Follow-up: {text!r}")
         # A follow-up may be a command ("read me Moby Dick", "play some
@@ -568,37 +581,64 @@ async def dispatch_radio_command(
         base = "music"
     else:
         base = "q"
-    if pre_text is not None:
-        # Already recorded and transcribed (the power-on welcome).
-        audio_in, text = pre_audio, pre_text
-        timer.speech_ended()
-    else:
-        if leds is not None:
-            leds.set_mode(f"{base}_listen")
-        try:
-            audio_in, text = listen(
-                vc.stt_fast,
-                silence_duration=settings.vad_silence_duration_radio,
-                should_abort=should_abort,
-            )
-        except (ValueError, OSError) as e:
-            logger.warning(f"Mic unavailable: {e}")
-            return DispatchResult(here)
-    if leds is not None:
-        leds.set_mode(f"{base}_think")
-    if aborted() or not text.strip():
-        return DispatchResult(here)
-    logger.info(f"Voice command ({context}): {text!r}")
-
-    # Who is this? Silent (~100 ms); an unknown voice gets asked *after*
-    # the command completes (see the end of this function), never mid-turn.
+    from oracle.chime import play_close_cue
     from oracle.speaker import maybe_ask, observe
 
-    if audio_in is not None:
-        await observe(vc, audio_in, reader=reader)
+    # Two tries: speech that came out as nothing usable gets one spoken
+    # "say it again" instead of a silent drop back to the channel. Nothing
+    # said at all (a false wake) closes with a soft tone after
+    # wake_onset_timeout_s.
+    for attempt in (0, 1):
+        if pre_text is not None and attempt == 0:
+            # Already recorded and transcribed (the power-on welcome).
+            audio_in, text = pre_audio, pre_text
+            timer.speech_ended()
+        else:
+            if leds is not None:
+                leds.set_mode(f"{base}_listen")
+            try:
+                audio_in, text = listen(
+                    vc.stt_fast,
+                    silence_duration=settings.vad_silence_duration_radio,
+                    onset_timeout=settings.wake_onset_timeout_s or None,
+                    should_abort=should_abort,
+                )
+            except (ValueError, OSError) as e:
+                logger.warning(f"Mic unavailable: {e}")
+                return DispatchResult(here)
+        if leds is not None:
+            leds.set_mode(f"{base}_think")
+        if aborted():
+            return DispatchResult(here)
+        heard_something = audio_in is not None and len(audio_in) > 0
+        if not text.strip():
+            if heard_something and attempt == 0:
+                logger.info("Speech heard but nothing transcribed — asking again")
+                _speak(vc, "Sorry, I didn't catch that. Say it again?", should_abort)
+                continue
+            if not heard_something:
+                logger.info("Nothing said after the wake word — closing the turn")
+            play_close_cue()
+            return DispatchResult(here)
+        logger.info(f"Voice command ({context}): {text!r}")
 
-    # 3. Classify.
-    action, query = await classify(vc, text)
+        # Who is this? Silent (~100 ms); an unknown voice gets asked *after*
+        # the command completes (see the end of this function), never
+        # mid-turn.
+        if audio_in is not None:
+            await observe(vc, audio_in, reader=reader)
+
+        # 3. Classify.
+        action, query = await classify(vc, text)
+        if action != "none":
+            break
+        if attempt == 0:
+            logger.info(f"Could not make sense of {text!r} — asking again")
+            _speak(vc, "Sorry, I didn't catch that. Say it again?", should_abort)
+        else:
+            _speak(vc, "I still didn't get that. Call me when you're ready.", should_abort)
+            timing.clear()
+            return DispatchResult(here)
 
     from oracle.activity import emit
 

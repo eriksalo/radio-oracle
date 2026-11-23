@@ -97,3 +97,41 @@ def play_wake_chime() -> None:
         play_audio(wake_chime_audio(), _SAMPLE_RATE)
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Wake chime playback failed: {e}")
+
+
+_listen_cue: np.ndarray | None = None
+_close_cue: np.ndarray | None = None
+
+
+def play_listen_cue() -> None:
+    """One soft rising blip: "your turn" — the mic is open again for a
+    follow-up. Quieter and shorter than the wake chime. Blocking."""
+    global _listen_cue
+    if not settings.listen_cues:
+        return
+    from oracle.audio import play_audio
+
+    try:
+        if _listen_cue is None:
+            _listen_cue = _tone(660.0, 880.0, 0.09, 0.25)
+        play_audio(_listen_cue, _SAMPLE_RATE)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Listen cue failed: {e}")
+
+
+def play_close_cue() -> None:
+    """Two soft falling notes: the mic has closed with nothing said."""
+    global _close_cue
+    if not settings.listen_cues:
+        return
+    from oracle.audio import play_audio
+
+    try:
+        if _close_cue is None:
+            gap = np.zeros(int(_SAMPLE_RATE * 0.03), dtype=np.float32)
+            _close_cue = np.concatenate(
+                [_tone(660.0, 620.0, 0.08, 0.22), gap, _tone(494.0, 440.0, 0.11, 0.22)]
+            )
+        play_audio(_close_cue, _SAMPLE_RATE)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Close cue failed: {e}")

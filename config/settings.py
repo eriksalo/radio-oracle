@@ -157,7 +157,14 @@ class OracleSettings(BaseSettings):
     # After the oracle answers a question, the mic stays open this many
     # seconds for a follow-up (no wake word needed). Silence resumes the
     # music. 0 disables.
-    followup_window_s: float = 5.0
+    followup_window_s: float = 8.0
+    # After the wake word the mic waits this long for speech to start. With
+    # no limit a false wake left the music paused and the mic open until
+    # some noise ended it. 0 disables.
+    wake_onset_timeout_s: float = 8.0
+    # Soft tones when the mic reopens for a follow-up and when a turn
+    # closes without anything said (the LED was the only cue before).
+    listen_cues: bool = True
     # PortAudio can't address ALSA `plughw`/`asym` PCMs, so we pin both
     # devices by name and open them at their native rates. Capture is
     # resampled to `audio_sample_rate` for Whisper.

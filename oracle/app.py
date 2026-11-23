@@ -150,6 +150,19 @@ class OracleApp:
         if self._wakeword and not settings.voice_barge_in:
             self._wakeword.unmute()
 
+    async def _apologise(self, voice_ctx) -> None:
+        """A turn blew up (LLM, TTS, mic): say so instead of dropping back
+        to the channel in silence. Best effort — the fault may be the
+        speaker path itself."""
+        from oracle.core import speak_text
+
+        try:
+            await asyncio.wait_for(
+                speak_text(voice_ctx, "Something went wrong. Please ask me again."), timeout=15
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Could not speak the apology: {e}")
+
     def _barged_in(self) -> bool:
         """The turn that just returned was cut off by the wake word."""
         return self._barge.is_set() and self.power.is_on
@@ -179,6 +192,7 @@ class OracleApp:
 
         voice_ctx: VoiceContext | None = None
 
+        fatal = False
         try:
             # Wait for power-on before doing anything expensive.
             logger.info("Waiting for power switch (close to start)...")
@@ -231,8 +245,14 @@ class OracleApp:
             logger.exception(f"Oracle error: {e}")
             self.leds.set_mode("error")
             await asyncio.sleep(2)
+            fatal = True
         finally:
             await self._shutdown(voice_ctx)
+        if fatal:
+            # Exit non-zero so systemd (Restart=on-failure) brings the radio
+            # back: a missing mic at boot used to end the process with
+            # status 0 and the radio stayed off until someone restarted it.
+            raise SystemExit(1)
 
     async def _welcome(self, voice_ctx) -> None:
         """Power-on routine (oracle/welcome.py) before any music plays."""
@@ -357,6 +377,7 @@ class OracleApp:
                         self.leds.set_mode("q_listen")
                 except Exception:  # noqa: BLE001
                     logger.exception("dispatch_radio_command failed; recovering to radio")
+                    await self._apologise(voice_ctx)
                     result = DispatchResult(next_mode="radio")
                 finally:
                     self._end_turn()
@@ -559,6 +580,7 @@ class OracleApp:
                 self.leds.set_mode("book_listen")
         except Exception:  # noqa: BLE001
             logger.exception("book dispatch failed; resuming reading")
+            await self._apologise(voice_ctx)
             result = DispatchResult("reader")
         finally:
             self._end_turn()

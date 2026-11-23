@@ -133,46 +133,66 @@ class WakeWordDetector:
         }
         wanted_src = src_map.get(settings.wakeword_source)
         prev_src = os.environ.get("PULSE_SOURCE")
+        logger.debug("Wake word listener started")
+        # The mic and the speaker are one USB device: when the board resets
+        # or is re-plugged the stream dies. Reopen it for as long as the
+        # detector is wanted — before 2026-11-23 the thread logged the error
+        # and exited, and the radio stayed deaf until a restart.
+        failures = 0
+        while not self._stop.is_set():
+            try:
+                self._listen(sd, wanted_src, prev_src)
+                failures = 0
+            except Exception as e:
+                if self._stop.is_set():
+                    break
+                failures += 1
+                if failures == 1 or failures % 20 == 0:
+                    logger.error(f"Wake word loop error (retrying every 3 s): {e}")
+                self._stop.wait(3.0)
+        logger.debug("Wake word listener stopped")
+
+    def _listen(self, sd, wanted_src: str | None, prev_src: str | None) -> None:
+        """Open the mic and run detection until stopped or the stream fails."""
+        import os
+
         if wanted_src is not None:
             os.environ["PULSE_SOURCE"] = wanted_src
-
-        logger.debug("Wake word listener started")
         try:
             # openWakeWord expects int16-range samples (not normalized float).
             # Read as int16 directly so model.predict() gets the scale it expects.
-            with sd.InputStream(
+            stream = sd.InputStream(
                 samplerate=_SAMPLE_RATE,
                 channels=1,
                 dtype="int16",
                 blocksize=_CHUNK_SAMPLES,
-            ) as stream:
-                # Restore env immediately after stream connects so other
-                # threads opening pulse streams aren't affected.
-                if wanted_src is not None:
-                    if prev_src is None:
-                        os.environ.pop("PULSE_SOURCE", None)
-                    else:
-                        os.environ["PULSE_SOURCE"] = prev_src
-                while not self._stop.is_set():
-                    # If muted, drain audio but don't process
-                    if not self._muted.is_set():
-                        stream.read(_CHUNK_SAMPLES)
-                        self._stop.wait(0.01)
-                        continue
-
-                    data, _ = stream.read(_CHUNK_SAMPLES)
-                    chunk = data.flatten()
-
-                    predictions = self._model.predict(chunk)
-                    score = predictions.get(self._model_key, 0.0)
-
-                    if score >= self._threshold:
-                        logger.info(f"Wake word detected: {self._model_key} (score={score:.3f})")
-                        self._model.reset()
-                        if self.on_wake is not None:
-                            self.on_wake()
-        except Exception as e:
-            if not self._stop.is_set():
-                logger.error(f"Wake word loop error: {e}")
+            )
         finally:
-            logger.debug("Wake word listener stopped")
+            # Restore env as soon as the stream has connected (or failed
+            # to) so other threads opening pulse streams aren't affected.
+            if wanted_src is not None:
+                if prev_src is None:
+                    os.environ.pop("PULSE_SOURCE", None)
+                else:
+                    os.environ["PULSE_SOURCE"] = prev_src
+        with stream:
+            if self._model is not None:
+                self._model.reset()
+            while not self._stop.is_set():
+                # If muted, drain audio but don't process
+                if not self._muted.is_set():
+                    stream.read(_CHUNK_SAMPLES)
+                    self._stop.wait(0.01)
+                    continue
+
+                data, _ = stream.read(_CHUNK_SAMPLES)
+                chunk = data.flatten()
+
+                predictions = self._model.predict(chunk)
+                score = predictions.get(self._model_key, 0.0)
+
+                if score >= self._threshold:
+                    logger.info(f"Wake word detected: {self._model_key} (score={score:.3f})")
+                    self._model.reset()
+                    if self.on_wake is not None:
+                        self.on_wake()
