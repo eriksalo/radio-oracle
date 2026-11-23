@@ -24,7 +24,7 @@ Powered by a Jetson Orin Nano Super with a 1TB knowledge store spanning Wikipedi
 |-------|--------|
 | LLM | Ollama + Qwen3-4B-Instruct-2507 (Q4_K_M) |
 | STT | whisper.cpp (small.en, GPU) |
-| TTS | Kokoro (am_michael, CPU, ONNX) |
+| TTS | Kokoro (af_heart, ONNX) |
 | RAG | FAISS IVF-PQ + nomic-embed-text-v1.5 (768-d) |
 | Memory | SQLite + conversation summaries |
 | Config | Pydantic BaseSettings (`ORACLE_` env prefix) |
