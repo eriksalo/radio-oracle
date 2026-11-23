@@ -134,6 +134,12 @@ def _load() -> None:
     )
 
 
+def _lang(voice: str) -> str:
+    """British voices (bf_*, bm_*) need British phonemes; the default
+    American ones flatten the accent."""
+    return "en-gb" if voice.startswith("b") else "en-us"
+
+
 def _synth(text: str, voice: str, speed: float):
     """One unit, serialized; on failure rebuild the session and retry once
     (only if something has synthesized since the last rebuild)."""
@@ -141,7 +147,7 @@ def _synth(text: str, voice: str, speed: float):
     with _lock:
         _stats["units"] += 1
         try:
-            out = _kokoro.create(text, voice=voice, speed=speed)
+            out = _kokoro.create(text, voice=voice, speed=speed, lang=_lang(voice))
             _ok_since_rebuild = True
             return out
         except Exception as e:  # noqa: BLE001
@@ -156,7 +162,7 @@ def _synth(text: str, voice: str, speed: float):
             _stats["rebuilds"] += 1
             _ok_since_rebuild = False
             _load()
-            out = _kokoro.create(text, voice=voice, speed=speed)
+            out = _kokoro.create(text, voice=voice, speed=speed, lang=_lang(voice))
             _ok_since_rebuild = True
             return out
 

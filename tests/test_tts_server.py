@@ -103,7 +103,7 @@ def test_failed_remote_call_drops_to_local(server_mode, monkeypatch):
     # sidecar and leave _kokoro None (the 2026-09-27 harness crash).
     def fake_local():
         tts._kokoro = types.SimpleNamespace(
-            create=lambda text, voice, speed: (np.array([0.5], dtype=np.float32), 24000)
+            create=lambda text, voice, speed, lang="en-us": (np.array([0.5], dtype=np.float32), 24000)
         )
 
     monkeypatch.setattr(tts, "_load_local", fake_local)
@@ -269,7 +269,7 @@ def test_sidecar_rebuilds_session_and_retries_once(monkeypatch, capsys):
         def __init__(self, fail_first):
             self.fail_first = fail_first
 
-        def create(self, text, voice="am_michael", speed=1.0):
+        def create(self, text, voice="am_michael", speed=1.0, lang="en-us"):
             if self.fail_first:
                 self.fail_first = False
                 raise RuntimeError("bfc_arena.cc: Available memory of 0 is smaller than requested")

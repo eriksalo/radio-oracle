@@ -300,6 +300,8 @@ class KokoroTTS:
                 text,
                 voice=settings.tts_voice,
                 speed=settings.tts_speed,
+                # British voices (bf_*, bm_*) need British phonemes.
+                lang="en-gb" if settings.tts_voice.startswith("b") else "en-us",
             )
             audio = samples.astype(np.float32)
         # Peak-normalize: Kokoro synthesizes well below full scale, so
