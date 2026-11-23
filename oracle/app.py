@@ -413,11 +413,16 @@ class OracleApp:
                             should_abort=self._make_turn_abort(),
                             preroll_fn=preroll_fn,
                         )
-                        preroll_fn = None  # a barge-in re-listen chimes
-                        # "Librarian" over the answer: chime and listen again.
+                        # "Librarian" over the answer: listen again — with
+                        # the chime if they paused, without it (and keeping
+                        # their first words) if they carried straight on.
                         if not self._barged_in():
                             break
                         self.leds.set_mode("q_listen")
+                        preroll_fn = None
+                        if await asyncio.to_thread(self._user_kept_talking):
+                            logger.info("Request follows the barge-in — no chime, using pre-roll")
+                            preroll_fn = self._wakeword.audio_since_wake
                 except Exception:  # noqa: BLE001
                     logger.exception("dispatch_radio_command failed; recovering to radio")
                     await self._apologise(voice_ctx)
