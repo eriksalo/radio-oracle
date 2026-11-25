@@ -298,3 +298,28 @@ async def test_resume_with_nothing_to_go_back_to(spoken):
     assert spoken == ["I don't have an earlier conversation to go back to."]
     assert commands._describe_threads(vc) == "We haven't had a longer conversation yet."
     store.close()
+
+
+def test_short_question_naming_a_topic_is_not_a_followup() -> None:
+    from oracle.core import _is_followup
+
+    for q in ("Who was Napoleon Bonaparte?", "What is photosynthesis?"):
+        assert not _is_followup(q), q
+    for q in ("Why is that?", "Where exactly?", "How long?", "How do I check it?"):
+        assert _is_followup(q), q
+
+
+def test_resumed_history_is_handed_out_once(tmp_path) -> None:
+    from oracle.memory.context import ContextBuilder
+    from oracle.memory.store import ConversationStore
+
+    store = ConversationStore(tmp_path / "o.db")
+    ctx = ContextBuilder(store, store.new_session(), embed_fn=_embed)
+    assert ctx.threads is not None
+    tid = ctx.threads.file_turn(ctx.user, None, "How do I feed a starter?", "Twice a day.")
+    assert ctx.resume_thread(tid) is not None
+    history = ctx.take_resumed_history()
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert history[0]["content"] == "How do I feed a starter?"
+    assert ctx.take_resumed_history() == []
+    store.close()

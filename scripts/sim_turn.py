@@ -74,7 +74,7 @@ async def _main(args: argparse.Namespace) -> int:
 
     if not args.play:
 
-        def fake_play(a, sample_rate=None, should_abort=None):
+        def fake_play(a, sample_rate=None, should_abort=None, text=""):
             time.sleep(len(a) / (sample_rate or 24000))
 
         audio.play_audio = fake_play  # voice_turn resolves this at call time

@@ -253,3 +253,27 @@ def test_clean_for_speech_drops_foreign_script():
     from oracle.tts import clean_for_speech
 
     assert clean_for_speech("germs—它 works") == "germs— works"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_for_turn_resolves_against_a_resumed_thread(monkeypatch):
+    seen: list[str] = []
+    calls: list[str] = []
+
+    async def fake_chat(messages, model=None, num_predict=None):
+        seen.append(messages[-1]["content"])
+        return "What to check next on a sourdough starter"
+
+    monkeypatch.setattr(core, "chat", fake_chat)
+    monkeypatch.setattr(core, "_try_rag_query", lambda t: calls.append(t) or f"CTX[{t}]")
+    monkeypatch.setattr(settings, "rag_query_rewrite", True)
+    # A new session: nothing before the question, which names no topic.
+    store = _Store([{"role": "user", "content": "What should I check next?"}])
+    resumed = [
+        {"role": "user", "content": "How often should I feed the starter?"},
+        {"role": "assistant", "content": "Every twelve hours."},
+    ]
+    ctx = await core._retrieve_for_turn(store, "s", "What should I check next?", resumed)
+    assert "feed the starter" in seen[0]
+    assert calls[-1] == "What to check next on a sourdough starter"
+    assert ctx == "CTX[What to check next on a sourdough starter]"

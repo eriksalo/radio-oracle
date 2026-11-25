@@ -270,10 +270,27 @@ def _needs_rewrite(text: str, has_prior_answer: bool = True) -> bool:
     return bool(_WH_RE.search(text)) and len(text.split()) <= 4
 
 
+# Words a bare follow-up is made of ("How long?", "Where exactly?").
+_FOLLOWUP_FILLER = frozenset(
+    {"exactly", "long", "much", "many", "often", "far", "soon", "more", "else", "next"}
+)
+
+
 def _is_followup(text: str) -> bool:
     """A turn that leans on the one before it — it belongs to the thread
     the conversation is already on (oracle/memory/threads.py)."""
-    return _needs_rewrite(text) or text.startswith("Please continue what you were")
+    if text.startswith("Please continue what you were"):
+        return True
+    if _PRONOUN_RE.search(text) or _DEICTIC_RE.search(text) or _CUE_RE.search(text):
+        return True
+    # A short wh-question is a follow-up only when it names nothing of its
+    # own: "Why is that?" leans on the last answer, "Who was Napoleon
+    # Bonaparte?" starts a topic (it was filed under sourdough, 2026-11-25).
+    from oracle.memory.threads import topic_words
+
+    if not (_WH_RE.search(text) and len(text.split()) <= 4):
+        return False
+    return not (topic_words(text) - _FOLLOWUP_FILLER)
 
 
 async def _rewrite_query(history: list[dict[str, str]], text: str) -> str:
@@ -307,12 +324,19 @@ def _token_overlap(a: str, b: str) -> float:
     return len(wa & wb) / len(wa | wb)
 
 
-async def _retrieve_for_turn(store: ConversationStore, session_id: str, text: str) -> str:
+async def _retrieve_for_turn(
+    store: ConversationStore,
+    session_id: str,
+    text: str,
+    resumed: list[dict[str, str]] | None = None,
+) -> str:
     """RAG context for *text*, rewriting follow-ups off the critical path.
 
     When a rewrite is needed, retrieval on the raw text runs concurrently
     with the LLM rewrite; the rewritten query only triggers a second
     retrieval if it actually differs (a pronoun resolved to a name).
+    *resumed* is the history of a thread the user just picked back up: the
+    question is then always resolved against it.
     Returns the formatted context ("" when nothing relevant).
     """
     if not settings.rag_query_rewrite:
@@ -320,8 +344,10 @@ async def _retrieve_for_turn(store: ConversationStore, session_id: str, text: st
     # The current user message was already stored; history is everything before.
     recent = store.get_messages(session_id, limit=5)
     prior = recent[:-1] if recent else []
+    if resumed:
+        prior = resumed + prior
     has_prior_answer = any(m["role"] == "assistant" for m in prior)
-    if not _needs_rewrite(text, has_prior_answer):
+    if not resumed and not _needs_rewrite(text, has_prior_answer):
         return await asyncio.to_thread(_try_rag_query, text)
 
     rewritten, raw_context = await asyncio.gather(
@@ -365,7 +391,9 @@ async def text_repl() -> None:
             break
 
         store.add_message(session_id, "user", user_input)
-        rag_context = await _retrieve_for_turn(store, session_id, user_input)
+        rag_context = await _retrieve_for_turn(
+            store, session_id, user_input, ctx.take_resumed_history()
+        )
         messages = await ctx.build(system_prompt, rag_context, user_text=user_input)
 
         print("Oracle: ", end="", flush=True)
@@ -684,7 +712,9 @@ async def _voice_turn(
     emit("asked", text=text)
     vc.store.add_message(vc.session_id, "user", text)
 
-    rag_context = await _retrieve_for_turn(vc.store, vc.session_id, text)
+    rag_context = await _retrieve_for_turn(
+        vc.store, vc.session_id, text, vc.ctx_builder.take_resumed_history()
+    )
     timer.mark("retrieve")
     messages = await vc.ctx_builder.build(vc.system_prompt, rag_context, user_text=text)
     timer.mark("build")

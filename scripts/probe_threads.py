@@ -55,7 +55,7 @@ async def _main() -> int:
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
 
-    def fake_play(a, sample_rate=None, should_abort=None, **_kw):
+    def fake_play(a, sample_rate=None, should_abort=None, text=""):
         time.sleep(min(0.05, len(a) / (sample_rate or 24000)))
 
     audio.play_audio = fake_play
@@ -133,4 +133,5 @@ async def _main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(_main()))
+    # Bounded: the radio is off while this runs.
+    raise SystemExit(asyncio.run(asyncio.wait_for(_main(), timeout=900)))

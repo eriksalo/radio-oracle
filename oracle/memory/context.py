@@ -54,6 +54,7 @@ class ContextBuilder:
             if thread_store is not None:
                 self.threads = threads.ThreadTracker(thread_store, embed_fn or _resident_embed)
         self._resumed: str | None = None  # prompt block of a thread picked back up
+        self._resumed_history: list[dict[str, str]] = []  # its last exchanges, used once
         self._filing: set[asyncio.Task] = set()
 
     @property
@@ -72,6 +73,7 @@ class ContextBuilder:
         journal.set_context(user, self._session_id)
         # Another person's thread is not theirs to continue.
         self._resumed = None
+        self._resumed_history = []
         if self.threads is not None:
             self.threads.leave()
 
@@ -88,9 +90,22 @@ class ContextBuilder:
             return None
         turns = self.threads.store.turns(thread_id, limit=4)
         self._resumed = threads.prompt_block(thread, turns)
+        self._resumed_history = [
+            {"role": role, "content": t[key][:400]}
+            for t in turns[-2:]
+            for role, key in (("user", "question"), ("assistant", "answer"))
+        ]
         self.threads.resume(thread_id)
         logger.info(f"Thread {thread_id} resumed: {thread.label!r}")
         return thread, turns
+
+    def take_resumed_history(self) -> list[dict[str, str]]:
+        """The resumed thread's last exchanges as chat messages, once: the
+        first question after "where did we leave off" starts a new session,
+        so retrieval has no history of its own to resolve it against
+        ("What should I check next?" fetched debugging advice, 2026-11-25)."""
+        history, self._resumed_history = self._resumed_history, []
+        return history
 
     def schedule_file_turn(self, question: str, answer: str, followup: bool = False) -> None:
         """File an answered question into its thread, off the turn's path
