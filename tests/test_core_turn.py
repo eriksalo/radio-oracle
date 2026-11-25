@@ -277,3 +277,68 @@ async def test_retrieve_for_turn_resolves_against_a_resumed_thread(monkeypatch):
     assert "feed the starter" in seen[0]
     assert calls[-1] == "What to check next on a sourdough starter"
     assert ctx == "CTX[What to check next on a sourdough starter]"
+
+
+# ------------------------------------------------- a worker that fails
+
+
+class _FakeTTS:
+    sample_rate = 24000
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+
+    def synthesize(self, text: str):
+        import numpy as np
+
+        if self.fail:
+            raise RuntimeError("synth broke")
+        return np.zeros(240, dtype=np.float32)
+
+
+async def _run_failing_turn(monkeypatch, tmp_path, tts: _FakeTTS, play) -> None:
+    from oracle import audio
+    from oracle.memory.context import ContextBuilder
+    from oracle.memory.store import ConversationStore
+
+    async def fake_stream(messages, stats=None, **_kw):
+        # More units than both queues hold, so a dead worker would block.
+        for i in range(20):
+            yield f"Sentence number {i} is here. "
+
+    async def no_rag(*_a, **_k):
+        return ""
+
+    monkeypatch.setattr(core, "stream_chat", fake_stream)
+    monkeypatch.setattr(core, "_retrieve_for_turn", no_rag)
+    monkeypatch.setattr(audio, "play_audio", play)
+    store = ConversationStore(tmp_path / "o.db")
+    sid = store.new_session()
+    vc = core.VoiceContext(
+        stt=None,  # type: ignore[arg-type]
+        stt_fast=None,  # type: ignore[arg-type]
+        tts=tts,  # type: ignore[arg-type]
+        store=store,
+        ctx_builder=ContextBuilder(store, sid),
+        system_prompt="You are a test.",
+        session_id=sid,
+    )
+    try:
+        await asyncio.wait_for(core.voice_turn(vc, pre_text="Tell me a long story."), timeout=5)
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_turn_raises_instead_of_hanging_when_playback_fails(monkeypatch, tmp_path):
+    def broken_play(*_a, **_k):
+        raise OSError("no output device")
+
+    with pytest.raises(OSError, match="no output device"):
+        await _run_failing_turn(monkeypatch, tmp_path, _FakeTTS(), broken_play)
+
+
+@pytest.mark.asyncio
+async def test_turn_raises_instead_of_hanging_when_synthesis_fails(monkeypatch, tmp_path):
+    with pytest.raises(RuntimeError, match="synth broke"):
+        await _run_failing_turn(monkeypatch, tmp_path, _FakeTTS(fail=True), lambda *a, **k: None)

@@ -735,6 +735,10 @@ async def _voice_turn(
     audio_q: asyncio.Queue[tuple[str, np.ndarray] | None] = asyncio.Queue(maxsize=3)
     enqueued: list[str] = []
     skip: set[str] = set()  # units past a length cut-off, not yet spoken
+    # A worker that fails keeps draining its queue: a dead play worker left
+    # the synth worker blocked on a full audio_q and the turn hung for good
+    # (probe, 2026-11-25). The first error is re-raised once both are done.
+    failed: list[BaseException] = []
 
     async def _synth_worker() -> None:
         while True:
@@ -742,9 +746,15 @@ async def _voice_turn(
             if unit is None:
                 await audio_q.put(None)
                 return
-            if aborted() or unit in skip:
+            if failed or aborted() or unit in skip:
                 continue  # keep draining so the producer never blocks
-            await audio_q.put((unit, await asyncio.to_thread(vc.tts.synthesize, unit)))
+            try:
+                audio_out = await asyncio.to_thread(vc.tts.synthesize, unit)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Synthesis failed on {unit[:40]!r}: {e}")
+                failed.append(e)
+                continue
+            await audio_q.put((unit, audio_out))
 
     async def _play_worker() -> None:
         while True:
@@ -752,10 +762,16 @@ async def _voice_turn(
             if item is None:
                 return
             unit, audio_out = item
-            if aborted() or unit in skip:
+            if failed or aborted() or unit in skip:
                 continue
             timer.mark_once("first_audio")
-            await asyncio.to_thread(play_audio, audio_out, vc.tts.sample_rate, should_abort, unit)
+            try:
+                await asyncio.to_thread(
+                    play_audio, audio_out, vc.tts.sample_rate, should_abort, unit
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Playback failed on {unit[:40]!r}: {e}")
+                failed.append(e)
 
     synth = asyncio.create_task(_synth_worker())
     play = asyncio.create_task(_play_worker())
@@ -763,7 +779,7 @@ async def _voice_turn(
     stats: dict = {}
     try:
         async for token in stream_chat(messages, stats=stats):
-            if aborted():
+            if aborted() or failed:
                 break
             token = strip_foreign(token)
             if not token:
@@ -794,6 +810,8 @@ async def _voice_turn(
         await text_q.put(None)
         await synth
         await play
+    if failed:
+        raise failed[0]
 
     response_text = "".join(response_parts)
     timer.note(done_reason=stats.get("done_reason") or "stop")
