@@ -270,6 +270,12 @@ def _needs_rewrite(text: str, has_prior_answer: bool = True) -> bool:
     return bool(_WH_RE.search(text)) and len(text.split()) <= 4
 
 
+def _is_followup(text: str) -> bool:
+    """A turn that leans on the one before it — it belongs to the thread
+    the conversation is already on (oracle/memory/threads.py)."""
+    return _needs_rewrite(text) or text.startswith("Please continue what you were")
+
+
 async def _rewrite_query(history: list[dict[str, str]], text: str) -> str:
     """Ask the LLM for a self-contained query; falls back to *text*."""
     hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
@@ -371,6 +377,7 @@ async def text_repl() -> None:
 
         response_text = "".join(full_response)
         store.add_message(session_id, "assistant", response_text)
+        ctx.schedule_file_turn(user_input, response_text, _is_followup(user_input))
         ctx.schedule_summarize()
 
     if not catch_up.done():
@@ -718,9 +725,7 @@ async def _voice_turn(
             if aborted() or unit in skip:
                 continue
             timer.mark_once("first_audio")
-            await asyncio.to_thread(
-                play_audio, audio_out, vc.tts.sample_rate, should_abort, unit
-            )
+            await asyncio.to_thread(play_audio, audio_out, vc.tts.sample_rate, should_abort, unit)
 
     synth = asyncio.create_task(_synth_worker())
     play = asyncio.create_task(_play_worker())
@@ -765,6 +770,7 @@ async def _voice_turn(
     logger.info(f"Oracle: {response_text}")
     emit("answered", text=response_text)
     vc.store.add_message(vc.session_id, "assistant", response_text)
+    vc.ctx_builder.schedule_file_turn(text, response_text, _is_followup(text))
     vc.ctx_builder.schedule_summarize()
     timer.finish()
     return True

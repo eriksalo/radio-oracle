@@ -37,6 +37,16 @@ def _get_shared_embedder(model_name: str, trust_remote_code: bool = True) -> Emb
         return _EMBEDDER_CACHE[model_name]
 
 
+def resident_embedder() -> Embedder | None:
+    """An embedder that is already in memory, or None. For callers that
+    want a vector but must never be the reason a model gets loaded
+    (conversation threads)."""
+    with _EMBEDDER_LOCK:
+        for embedder in _EMBEDDER_CACHE.values():
+            return embedder
+    return None
+
+
 class FaissIvfPqBackend:
     """FAISS IVF-PQ over a positional id-map.
 

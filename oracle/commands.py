@@ -122,6 +122,29 @@ def _build_keyword_table() -> list[_KeywordRule]:
     # Order matters — first match wins. Boundaries (\b) keep "skip" from
     # firing on "skipper", etc.
     raw: list[tuple[str, str]] = [
+        # Earlier conversations (oracle/memory/threads.py). Ahead of the
+        # book rules: "where were we" stays a book question, "where did we
+        # leave off" is the conversation unless a book is being read.
+        (
+            r"\bwhat\s+(?:have|did)\s+we\s+(?:talk(?:ed)?|discuss(?:ed)?|spoken|speak|cover(?:ed)?|say|said)\b|"
+            r"\bwhat\s+were\s+we\s+(?:talking|speaking)\s+about\s+"
+            r"(?:last|this|the\s+other|yesterday|earlier|before|recently|lately)\b|"
+            r"\b(?:list|what\s+are)\s+(?:our|my|the)\s+(?:conversations|discussions|topics)\b",
+            "thread_list",
+        ),
+        (
+            r"\bwhere\s+did\s+(?:we|i)\s+leave\s+off\b|\bwhere\s+(?:we|i)\s+left\s+off\b|"
+            r"\bwhat\s+(?:were\s+we|we\s+were)\s+(?:talking\s+about|speaking\s+about|saying|discussing)\b|"
+            r"\b(?:go|get|going|getting)\s+back\s+to\s+(?:the|our|that|my)\s+(?:.+\s+)?"
+            r"(?:conversation|discussion|talk|chat)\b|"
+            r"\b(?:our|the|that)\s+(?:conversation|discussion|talk|chat)\s+(?:about|on)\b",
+            "thread_resume",
+        ),
+        (
+            r"\bwe(?:'?re|\s+are)\s+(?:done|finished)\s+with\s+(?:that|this)\b|"
+            r"\b(?:close|set\s+aside)\s+(?:that|this)\s+(?:conversation|discussion|topic)\b",
+            "thread_done",
+        ),
         # Channel switches / conversation first so they don't get eaten
         # by the generic transport words below.
         (
@@ -460,6 +483,13 @@ async def _question_turns(
         # A follow-up may be a command ("read me Moby Dick", "play some
         # jazz", "next song"): act on it instead of chatting about it.
         action, query = await classify(vc, text)
+        if action == "thread_resume":
+            # "Go back to our conversation about …" said as a follow-up:
+            # recap it, then carry on in this same window.
+            text = await _resume_thread(vc, query, should_abort) or ""
+            if not text:
+                return None
+            continue
         if action not in ("question", "none"):
             from oracle.activity import emit
 
@@ -534,6 +564,10 @@ async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
             action, query = "play", _extract_play_object(text)
         elif action in ("list_music", "list_books"):
             query = _extract_qualifier(text)
+        elif action in ("thread_list", "thread_resume"):
+            query = _thread_query(text)
+            if query:  # "what did we say about the pump" names one thread
+                action = "thread_resume"
         logger.info(f"Keyword intent: action={action} query={query!r}")
     return action, query
 
@@ -692,6 +726,32 @@ async def dispatch_radio_command(
             await maybe_ask(vc)
         return DispatchResult(here)
 
+    if action == "thread_resume" and context == "book" and not query and _LEFT_OFF_RE.search(text):
+        action = "book_status"  # mid-book, "where did we leave off" is the book
+    if action == "thread_resume":
+        # Recap the thread from the stored turns, then listen: the next
+        # question continues it with the thread's summary in the prompt.
+        if leds is not None:
+            leds.set_mode("q_speak")
+        opening = await _resume_thread(vc, query, should_abort)
+        if opening:
+            switched = await _question_turns(
+                vc,
+                opening,
+                leds,
+                should_abort,
+                window=max(settings.followup_window_s * 2, 8.0),
+                player=player,
+                catalog=catalog,
+                context=context,
+                reader=reader,
+            )
+            if switched is not None:
+                return switched
+        else:
+            timing.clear()
+        return DispatchResult(here)
+
     if action == "mode_librarian":
         # "I have a question" — same overlay, just an invitation first
         # and a longer follow-up window for open-ended conversation.
@@ -740,6 +800,111 @@ async def dispatch_radio_command(
     if context == "music" and result.next_mode == "radio" and action != "none" and not aborted():
         await maybe_ask(vc)
     return result
+
+
+_LEFT_OFF_RE = re.compile(r"\bleave\s+off\b|\bleft\s+off\b", re.IGNORECASE)
+# The topic in "our conversation about the well pump" / "go back to the
+# sourdough discussion".
+_THREAD_TOPIC_RES = (
+    re.compile(
+        r"\b(?:conversation|discussion|talk(?:ing|ed)?|chat|say(?:ing)?|said|discuss(?:ing|ed)?|"
+        r"spoken|speak(?:ing)?|cover(?:ed)?)\s+(?:about|on)\s+(.+?)[\s.?!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bback\s+to\s+(?:the|our|that|my)\s+(.+?)\s+(?:conversation|discussion|talk|chat)\b",
+        re.IGNORECASE,
+    ),
+)
+_THREAD_TIME_RE = re.compile(
+    r"^(?:last|this|the\s+other|yesterday|earlier|before|recently|lately|today|just\s+now)\b",
+    re.IGNORECASE,
+)
+
+
+def _thread_query(text: str) -> str | None:
+    """The topic a recall request names, or None ("where did we leave
+    off", "what did we talk about last week")."""
+    for pattern in _THREAD_TOPIC_RES:
+        m = pattern.search(text)
+        if m:
+            topic = re.sub(r"^(?:the|our|my|that|a|an)\s+", "", m.group(1).strip(), flags=re.I)
+            if topic and not _THREAD_TIME_RE.match(m.group(1).strip()):
+                return topic
+    return None
+
+
+def _thread_tracker(vc: VoiceContext):
+    return getattr(getattr(vc, "ctx_builder", None), "threads", None)
+
+
+async def _resume_thread(
+    vc: VoiceContext, query: str | None, should_abort: AbortCheck
+) -> str | None:
+    """Pick an earlier conversation back up: say where it stood, then
+    listen. Returns what the user said next (None on silence, or when
+    there is nothing to resume)."""
+    import asyncio
+
+    from oracle.memory import threads
+
+    tracker = _thread_tracker(vc)
+    if tracker is None:
+        _speak(vc, "I can't recall earlier conversations right now.", should_abort)
+        return None
+    user = vc.ctx_builder.user
+    thread_id: int | None
+    if query:
+        thread_id = await asyncio.to_thread(tracker.find, user, query)
+        if thread_id is None:
+            _speak(vc, f"I couldn't find a conversation about {query}.", should_abort)
+            return None
+    else:
+        open_threads = tracker.store.recent(
+            user, limit=10, min_turns=settings.thread_recall_min_turns, status="open"
+        )
+        # "Left off" means before now: prefer a thread this session has
+        # not touched.
+        earlier = [t for t in open_threads if t.last_session != vc.session_id]
+        pick = (earlier or open_threads)[:1]
+        if not pick:
+            _speak(vc, "I don't have an earlier conversation to go back to.", should_abort)
+            return None
+        thread_id = pick[0].id
+    resumed = vc.ctx_builder.resume_thread(thread_id)
+    if resumed is None:
+        _speak(vc, "I couldn't bring that conversation back.", should_abort)
+        return None
+    thread, turns = resumed
+    from oracle.activity import emit
+
+    emit("thread_resumed", thread=thread.id, title=thread.label)
+    _speak(vc, threads.recap_text(thread, turns) + " Go ahead.", should_abort)
+    if should_abort and should_abort():
+        return None
+    return await _listen_once(vc, onset_timeout=max(settings.followup_window_s * 2, 8.0))
+
+
+def _describe_threads(vc: VoiceContext) -> str:
+    from oracle.memory import threads
+
+    tracker = _thread_tracker(vc)
+    if tracker is None:
+        return "I can't recall earlier conversations right now."
+    recent = tracker.store.recent(
+        vc.ctx_builder.user, limit=3, min_turns=settings.thread_recall_min_turns
+    )
+    return threads.list_text(recent)
+
+
+def _close_thread(vc: VoiceContext) -> str:
+    tracker = _thread_tracker(vc)
+    thread = tracker.store.get(tracker.current_id) if tracker and tracker.current_id else None
+    if thread is None:
+        return "There's no conversation open right now."
+    tracker.store.set_status(thread.id, "done")
+    tracker.leave()
+    return f"All right, I'll set {thread.label} aside."
 
 
 async def _listen_once(vc: VoiceContext, onset_timeout: float) -> str | None:
@@ -986,6 +1151,16 @@ def _do_action(
         return DispatchResult(here)
     if action == "about_device":
         _speak(vc, describe_device(catalog), should_abort)
+        return DispatchResult(here)
+    if action == "thread_list":
+        _speak(vc, _describe_threads(vc), should_abort)
+        return DispatchResult(here)
+    if action == "thread_done":
+        _speak(vc, _close_thread(vc), should_abort)
+        return DispatchResult(here)
+    if action == "thread_resume":
+        # Reached only from a path that cannot listen afterwards.
+        _speak(vc, _describe_threads(vc), should_abort)
         return DispatchResult(here)
 
     # ---- book channel transport --------------------------------------------

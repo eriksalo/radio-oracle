@@ -8,9 +8,13 @@ from datetime import datetime
 from loguru import logger
 
 from config.settings import settings
-from oracle.memory import journal
+from oracle.memory import journal, threads
 from oracle.memory.store import ConversationStore
-from oracle.memory.summarizer import fold_into_profile, summarize_conversation
+from oracle.memory.summarizer import (
+    fold_into_profile,
+    summarize_conversation,
+    summarize_thread,
+)
 
 
 class ContextBuilder:
@@ -27,7 +31,13 @@ class ContextBuilder:
     re-prefilled every turn, ~5 s.)
     """
 
-    def __init__(self, store: ConversationStore, session_id: str, user: str | None = None):
+    def __init__(
+        self,
+        store: ConversationStore,
+        session_id: str,
+        user: str | None = None,
+        embed_fn: threads.EmbedFn | None = None,
+    ):
         self._store = store
         self._session_id = session_id
         self._user = user or settings.default_user
@@ -36,6 +46,15 @@ class ContextBuilder:
         self._long_term: str | None = self._load_long_term()
         self._bg_task: asyncio.Task | None = None
         journal.set_context(self._user, session_id)
+        # Conversation threads: which topic each answered question belongs
+        # to, across sessions. None when disabled or the db is unavailable.
+        self.threads: threads.ThreadTracker | None = None
+        if settings.threads_enabled:
+            thread_store = threads.get_store()
+            if thread_store is not None:
+                self.threads = threads.ThreadTracker(thread_store, embed_fn or _resident_embed)
+        self._resumed: str | None = None  # prompt block of a thread picked back up
+        self._filing: set[asyncio.Task] = set()
 
     @property
     def user(self) -> str:
@@ -51,6 +70,40 @@ class ContextBuilder:
         self._store.set_session_user(self._session_id, user)
         self._long_term = self._load_long_term()
         journal.set_context(user, self._session_id)
+        # Another person's thread is not theirs to continue.
+        self._resumed = None
+        if self.threads is not None:
+            self.threads.leave()
+
+    # --------------------------------------------------------------- threads
+
+    def resume_thread(self, thread_id: int) -> tuple[threads.Thread, list[dict]] | None:
+        """Pick a thread back up: its summary and last exchanges join the
+        system prompt (one prefix-cache miss, then stable again) and the
+        next question is filed into it."""
+        if self.threads is None:
+            return None
+        thread = self.threads.store.get(thread_id)
+        if thread is None or thread.user != self._user:
+            return None
+        turns = self.threads.store.turns(thread_id, limit=4)
+        self._resumed = threads.prompt_block(thread, turns)
+        self.threads.resume(thread_id)
+        logger.info(f"Thread {thread_id} resumed: {thread.label!r}")
+        return thread, turns
+
+    def schedule_file_turn(self, question: str, answer: str, followup: bool = False) -> None:
+        """File an answered question into its thread, off the turn's path
+        (one embedding, ~64 ms on the Jetson, after the answer was spoken)."""
+        if self.threads is None:
+            return
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                self.threads.file_turn, self._user, self._session_id, question, answer, followup
+            )
+        )
+        self._filing.add(task)
+        task.add_done_callback(self._filing.discard)
 
     def _recent_activity(self) -> str | None:
         """Deterministic block from the activity journal (what the user
@@ -125,6 +178,11 @@ class ContextBuilder:
         if recent_activity:
             blocks.append(recent_activity)
 
+        # A thread the user asked to pick back up. Set once per resume, so
+        # the prefix is stable again from the next turn on.
+        if self._resumed:
+            blocks.append(self._resumed)
+
         # Session summary (if we've summarized older turns)
         if self._summary:
             blocks.append(f"Previous conversation summary: {self._summary}")
@@ -189,10 +247,57 @@ class ContextBuilder:
                 await self._bg_task
             except Exception:  # noqa: BLE001
                 pass
+        if self._filing:
+            await asyncio.gather(*list(self._filing), return_exceptions=True)
         try:
             await finalize_session(self._store, self._session_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Session finalize failed: {e}")
+        await summarize_threads()
+
+
+def _resident_embed(text: str):
+    """Embed with the retriever's model *if it is already loaded*. Threads
+    never load a model of their own (8 GB box); without one, turns are
+    filed by follow-up continuity only."""
+    try:
+        from oracle.rag.backends.faiss_ivfpq import resident_embedder
+    except Exception:  # noqa: BLE001 — faiss not installed on this host
+        return None
+    embedder = resident_embedder()
+    return None if embedder is None else embedder.embed_single(text)
+
+
+async def summarize_threads(limit: int = 3) -> int:
+    """Give threads with new exchanges a title and a rolling summary.
+    Returns how many were updated. Never raises."""
+    thread_store = threads.get_store() if settings.threads_enabled else None
+    if thread_store is None:
+        return 0
+    done = 0
+    try:
+        pending = thread_store.unsummarized(limit=limit, min_turns=settings.thread_recall_min_turns)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Thread summarize: could not list threads: {e}")
+        return 0
+    for thread in pending:
+        try:
+            # Only the exchanges the last summary has not seen (capped).
+            fresh = max(1, min(8, thread.turns - thread.summarized_turns))
+            turns = thread_store.turns(thread.id, limit=fresh)
+            title, summary = await summarize_thread(thread.summary, turns)
+            if summary is None:
+                logger.warning(f"Thread {thread.id}: summarizer returned nothing usable")
+                continue
+            # A title, once given, stays: it is what the user says to get back.
+            thread_store.set_label(
+                thread.id, None if thread.title else title, summary, thread.turns
+            )
+            logger.info(f"Thread {thread.id} labelled {thread.title or title!r}")
+            done += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Thread {thread.id} summarize failed: {e}")
+    return done
 
 
 async def finalize_session(store: ConversationStore, session_id: str) -> None:
@@ -228,6 +333,7 @@ async def catch_up_summaries(store: ConversationStore, current_session: str) -> 
             await asyncio.sleep(10)  # breathing room between LLM jobs
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Catch-up summarize failed for {sess['session_id'][:8]}: {e}")
+    await summarize_threads()
 
 
 def _humanize_date(iso: str) -> str:

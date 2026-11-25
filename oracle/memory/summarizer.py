@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from loguru import logger
 
 from oracle.llm import chat
@@ -66,3 +68,53 @@ async def fold_into_profile(existing: str | None, new_summary: str) -> str:
     profile = await chat(messages)
     logger.debug(f"Updated profile: {profile[:100]}...")
     return profile.strip()
+
+
+THREAD_PROMPT = (
+    "You label one ongoing topic of conversation between a person and a voice "
+    "assistant. Reply with exactly two lines:\n"
+    "Title: a short name for the topic, 2 to 5 words, no quotes, the way you would "
+    "say it aloud after 'we were talking about' (for example: the well pump)\n"
+    "Summary: under 60 words. What was asked, what was established, and what was "
+    "still open. Use only what is in the text; never invent."
+)
+
+_TITLE_RE = re.compile(r"^\s*title\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+_SUMMARY_RE = re.compile(r"^\s*summary\s*:\s*(.+)", re.IGNORECASE | re.MULTILINE | re.DOTALL)
+
+
+def parse_thread_label(raw: str) -> tuple[str | None, str | None]:
+    """(title, summary) from the model's two lines; None for a part that
+    is missing or unusable (a title has to be short enough to say)."""
+    title = None
+    m = _TITLE_RE.search(raw)
+    if m:
+        cand = m.group(1).strip().strip("\"'.").strip()
+        if 0 < len(cand) <= 60 and len(cand.split()) <= 8:
+            # Spoken mid-sentence: "we were talking about the well pump".
+            # Headline capitals ("The Well Pump") are a model habit, not a
+            # name; the title is only ever spoken.
+            if cand.istitle() and len(cand.split()) > 1:
+                title = cand.lower()
+            else:
+                title = "the " + cand[4:] if cand.startswith("The ") else cand
+    m = _SUMMARY_RE.search(raw)
+    summary = " ".join(m.group(1).split()) if m else None
+    return title, (summary or None)
+
+
+async def summarize_thread(
+    prior_summary: str | None, turns: list[dict[str, str]]
+) -> tuple[str | None, str | None]:
+    """Title and rolling summary for one conversation thread. *turns* are
+    ``{"question", "answer"}`` dicts, oldest first."""
+    body = "\n".join(f"Q: {t['question']}\nA: {t['answer'][:500]}" for t in turns)
+    if prior_summary:
+        body = f"Summary so far: {prior_summary}\n\nNewer exchanges:\n{body}"
+    raw = await chat(
+        [
+            {"role": "system", "content": THREAD_PROMPT},
+            {"role": "user", "content": body},
+        ]
+    )
+    return parse_thread_label(raw)

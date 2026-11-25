@@ -330,6 +330,16 @@ class OracleSettings(BaseSettings):
     speaker_answer_timeout: float = 6.0
     max_context_turns: int = 10
     summary_threshold: int = 20
+    # Conversation threads (oracle/memory/threads.py): a topic that spans
+    # sessions. Cosine thresholds for "this question belongs to that
+    # thread" — calibration notes in the module docstring.
+    threads_enabled: bool = True
+    thread_join_sim: float = 0.75  # joins any recent thread
+    thread_join_sim_shared: float = 0.65  # ... if it also shares a topic word
+    thread_continue_sim: float = 0.68  # stays on the thread just talked about
+    # "Where did we leave off" only offers threads with at least this many
+    # exchanges; one-off questions stay out of the way.
+    thread_recall_min_turns: int = 2
 
     # Music player
     music_path: Path = Path("music")
