@@ -63,6 +63,7 @@ async def _main() -> int:
     system_prompt, store, session_id = await core._init_common()
     tts = KokoroTTS()
     await asyncio.gather(asyncio.to_thread(tts.load), asyncio.to_thread(core._get_retriever))
+    await asyncio.to_thread(core.warm_shelves)
 
     def make_vc(sid: str) -> core.VoiceContext:
         return core.VoiceContext(
@@ -101,7 +102,10 @@ async def _main() -> int:
     print(f"# close + summaries: {time.monotonic() - t0:.1f}s")
     tstore = vc.ctx_builder.threads.store
     for th in tstore.recent(vc.ctx_builder.user):
-        print(f"  thread {th.id} turns={th.turns} title={th.title!r}\n    summary={th.summary!r}")
+        print(
+            f"  thread {th.id} shelf={th.shelf} turns={th.turns} title={th.title!r}\n"
+            f"    summary={th.summary!r}"
+        )
 
     print("# session 2")
     sid2 = store.new_session()
@@ -123,6 +127,9 @@ async def _main() -> int:
     print(f"  answer: {answer!r}")
     found = vc2.ctx_builder.threads.find(vc2.ctx_builder.user, "sourdough")
     print(f"  find('sourdough') -> thread {found}")
+    print(f"  'where did that come from' -> {commands._describe_last_source()!r}")
+    print(f"  'what's on the fixing shelf' -> {commands._describe_shelf(vc2, 'fixing')!r}")
+    print(f"  talked about on fixing -> {commands._describe_threads(vc2, 'fixing')!r}")
 
     from oracle.llm import close_client
 

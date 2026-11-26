@@ -200,8 +200,26 @@ def _get_retriever():
     return _retriever
 
 
-def _try_rag_query(user_input: str) -> str:
-    """Attempt RAG retrieval. Returns empty string if RAG unavailable."""
+# Fire-and-forget startup tasks (a reference keeps them from being collected).
+_background: set[asyncio.Task] = set()
+
+# What the last answer was looked up from, for "where did that come from"
+# (oracle/commands.py): the shelf and the (collection, title) of each
+# passage. Empty sources = nothing passed the relevance gate.
+_last_lookup: dict = {"shelf": None, "sources": []}
+
+
+def last_lookup() -> tuple[str | None, list[tuple[str, str]]]:
+    return _last_lookup["shelf"], list(_last_lookup["sources"])
+
+
+def _try_rag_query(user_input: str, shelf: str | None = None, hint: str | None = None) -> str:
+    """Attempt RAG retrieval. Returns empty string if RAG unavailable.
+
+    *hint* is the question that opened the thread this one carries on; it
+    rides along in the search text so the lookup stays on the topic."""
+    global _last_lookup
+    _last_lookup = {"shelf": shelf, "sources": []}
     retriever = _get_retriever()
     if retriever is None:
         return ""
@@ -212,7 +230,10 @@ def _try_rag_query(user_input: str) -> str:
         # "tell me more" / "go deeper" style wording upgrades to deep mode:
         # wider candidate pool + cross-encoder rerank. Plot questions get
         # the words a plot summary would use appended (router.augment_query).
-        results = retriever.query(augment_query(user_input), mode=detect_mode(user_input))
+        search = augment_query(user_input)
+        if hint and hint.strip().lower() != user_input.strip().lower():
+            search = f"{search} ({hint.strip()})"
+        results = retriever.query(search, mode=detect_mode(user_input), shelf=shelf)
         # A checked plot summary for a canonical work goes first: the model
         # invents endings from chunk one of a novel (rag/plots.py).
         from oracle.rag.plots import as_result
@@ -227,7 +248,14 @@ def _try_rag_query(user_input: str) -> str:
             titles = [
                 (r.get("metadata") or {}).get("title") or r.get("source", "?") for r in results[:3]
             ]
-            emit("consulted", sources=titles, hits=len(results))
+            emit("consulted", sources=titles, hits=len(results), shelf=shelf)
+            _last_lookup = {
+                "shelf": shelf,
+                "sources": [
+                    (r.get("source", ""), (r.get("metadata") or {}).get("title") or "")
+                    for r in results
+                ],
+            }
         return retriever.format_context(results)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"RAG query failed: {e}")
@@ -329,6 +357,8 @@ async def _retrieve_for_turn(
     session_id: str,
     text: str,
     resumed: list[dict[str, str]] | None = None,
+    shelf: str | None = None,
+    hint: str | None = None,
 ) -> str:
     """RAG context for *text*, rewriting follow-ups off the critical path.
 
@@ -336,11 +366,14 @@ async def _retrieve_for_turn(
     with the LLM rewrite; the rewritten query only triggers a second
     retrieval if it actually differs (a pronoun resolved to a name).
     *resumed* is the history of a thread the user just picked back up: the
-    question is then always resolved against it.
+    question is then always resolved against it. *shelf* weights the
+    sources (oracle/rag/shelves.py); *hint* is the current thread's
+    opening question, for a question that carries the thread on without
+    a pronoun (no LLM rewrite needed).
     Returns the formatted context ("" when nothing relevant).
     """
     if not settings.rag_query_rewrite:
-        return await asyncio.to_thread(_try_rag_query, text)
+        return await asyncio.to_thread(_try_rag_query, text, shelf, hint)
     # The current user message was already stored; history is everything before.
     recent = store.get_messages(session_id, limit=5)
     prior = recent[:-1] if recent else []
@@ -348,11 +381,11 @@ async def _retrieve_for_turn(
         prior = resumed + prior
     has_prior_answer = any(m["role"] == "assistant" for m in prior)
     if not resumed and not _needs_rewrite(text, has_prior_answer):
-        return await asyncio.to_thread(_try_rag_query, text)
+        return await asyncio.to_thread(_try_rag_query, text, shelf, hint)
 
     rewritten, raw_context = await asyncio.gather(
         _rewrite_query(prior, text),
-        asyncio.to_thread(_try_rag_query, text),
+        asyncio.to_thread(_try_rag_query, text, shelf, hint),
     )
     t = timing.current()
     if t is not None:
@@ -360,7 +393,77 @@ async def _retrieve_for_turn(
     if rewritten == text or _token_overlap(rewritten, text) >= 0.8:
         return raw_context
     logger.debug("Rewrite changed the query — retrieving again")
-    return await asyncio.to_thread(_try_rag_query, rewritten)
+    return await asyncio.to_thread(_try_rag_query, rewritten, shelf)
+
+
+# "the starter", "the pressure tank": a definite noun names something
+# already on the table. Similarity alone cannot tell a question that
+# carries a thread on from a new one of the same shape — "How do I make
+# cheese from milk?" scores 0.75 against a sourdough thread and "Who was
+# Julius Caesar?" 0.84 against Napoleon (2026-11-25) — and a hint on a
+# new question fetches the old topic.
+_DEFINITE_RE = re.compile(r"\bthe\s+[a-z]", re.IGNORECASE)
+
+
+def _refers_back(text: str) -> bool:
+    return bool(_DEFINITE_RE.search(text))
+
+
+def _shelf_embed_fn() -> Callable[[str], object]:
+    from oracle.memory.context import _resident_embed
+
+    return _resident_embed
+
+
+async def _turn_shelf(
+    ctx: ContextBuilder, text: str, sticky: bool = False
+) -> tuple[str | None, str | None]:
+    """(shelf, hint) for this question's lookup; either may be None.
+
+    The shelf is its subject (oracle/rag/shelves.py). A follow-up, or the
+    first question after a thread was picked back up (*sticky*), stays on
+    its thread's shelf — the LLM rewrite resolves what it refers to.
+    Otherwise the question is classified (one embedding once the example
+    questions are embedded, keywords only until then). If it also points
+    back at something ("the starter") and carries the current thread on,
+    the thread's opening question becomes the *hint* and lends its shelf
+    to a question that has none. One embedding (~0.1 s on the Jetson),
+    two when it points back. Never raises.
+    """
+    if not settings.shelves_enabled:
+        return None, None
+    try:
+        from oracle.rag import shelves
+
+        if sticky or _is_followup(text):
+            return ctx.current_shelf() or shelves.classify(text), None
+        embed_fn = _shelf_embed_fn()
+        if not shelves.ready(embed_fn):
+            embed_fn = None  # warm-up has not finished: keywords only
+        if not _refers_back(text):
+            return await asyncio.to_thread(shelves.classify, text, embed_fn), None
+        shelf, thread = await asyncio.gather(
+            asyncio.to_thread(shelves.classify, text, embed_fn),
+            asyncio.to_thread(ctx.continued_thread, text),
+        )
+        if thread is None:
+            return shelf, None
+        # Its thread is better evidence than its own wording: "How far
+        # apart should the plants be?" alone reads as science.
+        return thread.shelf or shelf, thread.first_question or None
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Shelf classification failed: {e}")
+        return None, None
+
+
+def warm_shelves() -> None:
+    """Embed the shelves' example questions (startup, off the turn's path)."""
+    if not settings.shelves_enabled:
+        return
+    from oracle.rag import shelves
+
+    ok = shelves.warm(_shelf_embed_fn())
+    logger.info(f"Shelves: example questions {'embedded' if ok else 'not embedded (no embedder)'}")
 
 
 # ---------------------------------------------------------------------------
@@ -391,9 +494,9 @@ async def text_repl() -> None:
             break
 
         store.add_message(session_id, "user", user_input)
-        rag_context = await _retrieve_for_turn(
-            store, session_id, user_input, ctx.take_resumed_history()
-        )
+        resumed = ctx.take_resumed_history()
+        shelf, hint = await _turn_shelf(ctx, user_input, sticky=bool(resumed))
+        rag_context = await _retrieve_for_turn(store, session_id, user_input, resumed, shelf, hint)
         messages = await ctx.build(system_prompt, rag_context, user_text=user_input)
 
         print("Oracle: ", end="", flush=True)
@@ -405,7 +508,7 @@ async def text_repl() -> None:
 
         response_text = "".join(full_response)
         store.add_message(session_id, "assistant", response_text)
-        ctx.schedule_file_turn(user_input, response_text, _is_followup(user_input))
+        ctx.schedule_file_turn(user_input, response_text, _is_followup(user_input), shelf)
         ctx.schedule_summarize()
 
     if not catch_up.done():
@@ -542,6 +645,10 @@ async def voice_init() -> VoiceContext:
     from oracle.commands import warm_thinking_acks
 
     await asyncio.to_thread(warm_thinking_acks, vc_stub)
+    # ~5 s of embeddings; a question asked before it finishes is put on a
+    # shelf by keywords alone.
+    _background.add(t := asyncio.create_task(asyncio.to_thread(warm_shelves)))
+    t.add_done_callback(_background.discard)
 
     return VoiceContext(
         stt=stt,
@@ -712,9 +819,10 @@ async def _voice_turn(
     emit("asked", text=text)
     vc.store.add_message(vc.session_id, "user", text)
 
-    rag_context = await _retrieve_for_turn(
-        vc.store, vc.session_id, text, vc.ctx_builder.take_resumed_history()
-    )
+    resumed = vc.ctx_builder.take_resumed_history()
+    shelf, hint = await _turn_shelf(vc.ctx_builder, text, sticky=bool(resumed))
+    timer.note(shelf=shelf or "-")
+    rag_context = await _retrieve_for_turn(vc.store, vc.session_id, text, resumed, shelf, hint)
     timer.mark("retrieve")
     messages = await vc.ctx_builder.build(vc.system_prompt, rag_context, user_text=text)
     timer.mark("build")
@@ -818,7 +926,7 @@ async def _voice_turn(
     logger.info(f"Oracle: {response_text}")
     emit("answered", text=response_text)
     vc.store.add_message(vc.session_id, "assistant", response_text)
-    vc.ctx_builder.schedule_file_turn(text, response_text, _is_followup(text))
+    vc.ctx_builder.schedule_file_turn(text, response_text, _is_followup(text), shelf)
     vc.ctx_builder.schedule_summarize()
     timer.finish()
     return True

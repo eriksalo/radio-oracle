@@ -127,12 +127,15 @@ class Retriever:
         collection_names: list[str] | None = None,
         top_k: int | None = None,
         mode: RetrievalMode = "snappy",
+        shelf: str | None = None,
     ) -> list[dict]:
         """Search across one or more collections.
 
         Returns dicts shaped `{text, source, distance, metadata, chunk_id}`,
         sorted by distance (lower = more relevant), truncated to the mode's
         `final_top_k` (or the explicit `top_k` override if provided).
+        *shelf* (oracle/rag/shelves.py) picks the source weighting; without
+        one the router's coarser question type does.
         """
         params = params_for(mode, settings)
         per_coll_k = params.per_collection_top_k
@@ -189,7 +192,11 @@ class Retriever:
         # Gutenberg + Wikipedia); Gutenberg loses close races everywhere
         # else. Then keep the top hits diverse: one collection may not
         # take every slot while another has a hit under the gate.
-        bias = bias_for(query_text) if settings.rag_collection_bias else {}
+        bias: dict[str, float] = {}
+        if settings.rag_collection_bias:
+            from oracle.rag import shelves
+
+            bias = shelves.bias(shelf) or bias_for(query_text)
         qtype = question_type(query_text)
         if qtype == "literature" and top_k is None and settings.rag_collection_bias:
             # Plot and character facts live deep in the article or the book
@@ -210,7 +217,7 @@ class Retriever:
             hits = picked + spill
         if hits:
             logger.debug(
-                f"RAG[{qtype}]: "
+                f"RAG[{shelf or qtype}]: "
                 + ", ".join(f"{h.source}@{h.distance:.2f}" for h in hits[:final_k])
             )
 

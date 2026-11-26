@@ -121,6 +121,9 @@ class _KeywordRule:
 def _build_keyword_table() -> list[_KeywordRule]:
     # Order matters — first match wins. Boundaries (\b) keep "skip" from
     # firing on "skipper", etc.
+    from oracle.rag import shelves  # light: regexes and numpy only
+
+    shelf_names = "|".join(f"(?:{s.aliases.pattern})" for s in shelves.SHELVES)
     raw: list[tuple[str, str]] = [
         # Earlier conversations (oracle/memory/threads.py). Ahead of the
         # book rules: "where were we" stays a book question, "where did we
@@ -144,6 +147,30 @@ def _build_keyword_table() -> list[_KeywordRule]:
             r"\bwe(?:'?re|\s+are)\s+(?:done|finished)\s+with\s+(?:that|this)\b|"
             r"\b(?:close|set\s+aside)\s+(?:that|this)\s+(?:conversation|discussion|topic)\b",
             "thread_done",
+        ),
+        # Shelves (oracle/rag/shelves.py). After the thread rules, so "what
+        # have we talked about on the health shelf" stays a thread question.
+        (
+            r"\bwhere\s+did\s+(?:that|this)\s+come\s+from\b|"
+            r"\bwhere\s+did\s+you\s+(?:get|find|read|learn|hear)\s+that\b|"
+            r"\bwhat(?:'s|\s+is|\s+was)\s+(?:your|the)\s+source\b|"
+            r"\bhow\s+do\s+you\s+know\s+that\b|"
+            r"\b(?:which|what)\s+(?:shelf|book|article)\s+(?:was|is|did)\s+that\b",
+            "source_last",
+        ),
+        (
+            r"\b(?:what|which)\s+(?:shelves|subjects|categories|sections)\b|"
+            r"\b(?:list|name|tell\s+me)\s+(?:the|your|all\s+the)\s+shelves\b|"
+            r"\bwhat(?:'s|\s+is)\s+in\s+(?:the|your)\s+library\b|"
+            r"\bwhat\s+(?:can|could|should)\s+i\s+ask\s+you(?:\s+about)?\s*[?.!]*$|"
+            r"\bwhat\s+do\s+you\s+know(?:\s+about)?\s*[?.!]*$",
+            "shelf_list",
+        ),
+        (
+            r"\b(?:shelf|shelves)\b|"
+            r"\bwhat\s+(?:do|have)\s+you\s+(?:have|got|know)\s+(?:on|about|for|in)\s+"
+            rf"(?:the\s+)?(?:{shelf_names})\s*[?.!]*$",
+            "shelf_describe",
         ),
         # Channel switches / conversation first so they don't get eaten
         # by the generic transport words below.
@@ -566,8 +593,16 @@ async def classify(vc: VoiceContext, text: str) -> tuple[str, str | None]:
             query = _extract_qualifier(text)
         elif action in ("thread_list", "thread_resume"):
             query = _thread_query(text)
-            if query:  # "what did we say about the pump" names one thread
+            if _thread_shelf(text):  # "…on the health shelf" lists that shelf
+                action, query = "thread_list", None
+            elif query:  # "what did we say about the pump" names one thread
                 action = "thread_resume"
+        elif action == "shelf_describe":
+            from oracle.rag import shelves
+
+            query = shelves.named(text)
+            if query is None:  # "the shelves", or a shelf I don't have
+                action = "shelf_list"
         logger.info(f"Keyword intent: action={action} query={query!r}")
     return action, query
 
@@ -834,6 +869,23 @@ def _thread_query(text: str) -> str | None:
     return None
 
 
+def _thread_shelf(text: str) -> str | None:
+    """The shelf a recall request is narrowed to ("what have we talked
+    about on the health shelf", "…in medicine"), or None."""
+    from oracle.rag import shelves
+
+    if re.search(r"\b(?:shelf|shelves)\b", text, re.IGNORECASE):
+        return shelves.named(text)
+    topic = _thread_query(text)
+    if not topic:
+        return None
+    topic = re.sub(r"^(?:on|in|under|for)\s+(?:the\s+)?", "", topic, flags=re.IGNORECASE)
+    for shelf in shelves.SHELVES:
+        if shelf.aliases.fullmatch(topic):
+            return shelf.key
+    return None
+
+
 def _thread_tracker(vc: VoiceContext):
     return getattr(getattr(vc, "ctx_builder", None), "threads", None)
 
@@ -885,16 +937,48 @@ async def _resume_thread(
     return await _listen_once(vc, onset_timeout=max(settings.followup_window_s * 2, 8.0))
 
 
-def _describe_threads(vc: VoiceContext) -> str:
+def _describe_threads(vc: VoiceContext, shelf: str | None = None) -> str:
     from oracle.memory import threads
+    from oracle.rag import shelves
 
     tracker = _thread_tracker(vc)
     if tracker is None:
         return "I can't recall earlier conversations right now."
     recent = tracker.store.recent(
-        vc.ctx_builder.user, limit=3, min_turns=settings.thread_recall_min_turns
+        vc.ctx_builder.user, limit=3, min_turns=settings.thread_recall_min_turns, shelf=shelf
     )
-    return threads.list_text(recent)
+    return threads.list_text(recent, shelf_name=shelves.name(shelf) or None)
+
+
+def _describe_shelf(vc: VoiceContext, shelf: str) -> str:
+    """One shelf: what is on it, what we have talked about there, and a
+    question to try."""
+    from oracle.rag import shelves
+
+    labels: list[str] = []
+    tracker = _thread_tracker(vc)
+    if tracker is not None:
+        try:
+            labels = [
+                t.label
+                for t in tracker.store.recent(
+                    vc.ctx_builder.user,
+                    limit=3,
+                    min_turns=settings.thread_recall_min_turns,
+                    shelf=shelf,
+                )
+            ]
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not list the shelf's conversations: {e}")
+    return shelves.describe_text(shelf, labels)
+
+
+def _describe_last_source() -> str:
+    from oracle.core import last_lookup
+    from oracle.rag import shelves
+
+    shelf, sources = last_lookup()
+    return shelves.sources_text(shelf, sources)
 
 
 def _close_thread(vc: VoiceContext) -> str:
@@ -1153,7 +1237,21 @@ def _do_action(
         _speak(vc, describe_device(catalog), should_abort)
         return DispatchResult(here)
     if action == "thread_list":
-        _speak(vc, _describe_threads(vc), should_abort)
+        _speak(vc, _describe_threads(vc, _thread_shelf(raw_text)), should_abort)
+        return DispatchResult(here)
+    if action == "shelf_list":
+        from oracle.rag import shelves
+
+        _speak(vc, shelves.list_text(), should_abort)
+        return DispatchResult(here)
+    if action == "shelf_describe":
+        from oracle.rag import shelves
+
+        shelf = query if shelves.get(query) else shelves.named(raw_text)
+        _speak(vc, _describe_shelf(vc, shelf) if shelf else shelves.list_text(), should_abort)
+        return DispatchResult(here)
+    if action == "source_last":
+        _speak(vc, _describe_last_source(), should_abort)
         return DispatchResult(here)
     if action == "thread_done":
         _speak(vc, _close_thread(vc), should_abort)

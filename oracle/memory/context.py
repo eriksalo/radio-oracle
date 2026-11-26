@@ -107,14 +107,39 @@ class ContextBuilder:
         history, self._resumed_history = self._resumed_history, []
         return history
 
-    def schedule_file_turn(self, question: str, answer: str, followup: bool = False) -> None:
+    def current_shelf(self) -> str | None:
+        """The shelf of the thread the conversation is on, if it has one."""
+        if self.threads is None or self.threads.current_id is None:
+            return None
+        thread = self.threads.store.get(self.threads.current_id)
+        return thread.shelf if thread is not None and thread.user == self._user else None
+
+    def continued_thread(self, question: str) -> threads.Thread | None:
+        """The current thread, if *question* carries it on (one embedding)."""
+        if self.threads is None:
+            return None
+        try:
+            return self.threads.continues(self._user, question)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Thread continuity test failed: {e}")
+            return None
+
+    def schedule_file_turn(
+        self, question: str, answer: str, followup: bool = False, shelf: str | None = None
+    ) -> None:
         """File an answered question into its thread, off the turn's path
         (one embedding, ~64 ms on the Jetson, after the answer was spoken)."""
         if self.threads is None:
             return
         task = asyncio.create_task(
             asyncio.to_thread(
-                self.threads.file_turn, self._user, self._session_id, question, answer, followup
+                self.threads.file_turn,
+                self._user,
+                self._session_id,
+                question,
+                answer,
+                followup,
+                shelf,
             )
         )
         self._filing.add(task)

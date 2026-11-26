@@ -79,7 +79,7 @@ async def test_retrieve_for_turn_runs_rewrite_and_raw_retrieval_concurrently(mon
         assert num_predict == settings.ollama_rewrite_num_predict
         return "Where did Nikola Tesla die?"
 
-    def fake_rag(text):
+    def fake_rag(text, shelf=None, hint=None):
         calls.append(text)
         order.append(f"rag:{text}")
         return f"CTX[{text}]"
@@ -111,7 +111,9 @@ async def test_retrieve_for_turn_keeps_raw_when_rewrite_is_noop(monkeypatch):
         return "where did he die"
 
     monkeypatch.setattr(core, "chat", fake_chat)
-    monkeypatch.setattr(core, "_try_rag_query", lambda t: calls.append(t) or "ctx")
+    monkeypatch.setattr(
+        core, "_try_rag_query", lambda t, shelf=None, hint=None: calls.append(t) or "ctx"
+    )
     monkeypatch.setattr(settings, "rag_query_rewrite", True)
     store = _Store(
         [
@@ -129,7 +131,7 @@ async def test_retrieve_for_turn_skips_llm_for_plain_questions(monkeypatch):
         raise AssertionError("rewrite must not run")
 
     monkeypatch.setattr(core, "chat", boom)
-    monkeypatch.setattr(core, "_try_rag_query", lambda t: "ctx")
+    monkeypatch.setattr(core, "_try_rag_query", lambda t, shelf=None, hint=None: "ctx")
     monkeypatch.setattr(settings, "rag_query_rewrite", True)
     store = _Store([{"role": "assistant", "content": "x"}, {"role": "user", "content": "q"}])
     assert await core._retrieve_for_turn(store, "s", "Who wrote Pride and Prejudice?") == "ctx"
@@ -265,7 +267,9 @@ async def test_retrieve_for_turn_resolves_against_a_resumed_thread(monkeypatch):
         return "What to check next on a sourdough starter"
 
     monkeypatch.setattr(core, "chat", fake_chat)
-    monkeypatch.setattr(core, "_try_rag_query", lambda t: calls.append(t) or f"CTX[{t}]")
+    monkeypatch.setattr(
+        core, "_try_rag_query", lambda t, shelf=None, hint=None: calls.append(t) or f"CTX[{t}]"
+    )
     monkeypatch.setattr(settings, "rag_query_rewrite", True)
     # A new session: nothing before the question, which names no topic.
     store = _Store([{"role": "user", "content": "What should I check next?"}])

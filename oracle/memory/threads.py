@@ -83,6 +83,7 @@ class Thread:
     turns: int
     summarized_turns: int
     first_question: str
+    shelf: str | None = None  # oracle/rag/shelves.py key
 
     @property
     def label(self) -> str:
@@ -129,17 +130,20 @@ class ThreadStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_thread_turns_thread ON thread_turns(thread_id, id);
             """)
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(threads)")}
+            if "shelf" not in cols:  # databases from before the shelves
+                self._conn.execute("ALTER TABLE threads ADD COLUMN shelf TEXT")
             self._conn.commit()
 
     # ------------------------------------------------------------- write
 
-    def create(self, user: str, first_question: str) -> int:
+    def create(self, user: str, first_question: str, shelf: str | None = None) -> int:
         now = datetime.now(UTC).isoformat()
         with self._lock:
             cur = self._conn.execute(
-                "INSERT INTO threads (user, created_at, last_ts, first_question) "
-                "VALUES (?, ?, ?, ?)",
-                (user, now, now, first_question.strip()),
+                "INSERT INTO threads (user, created_at, last_ts, first_question, shelf) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user, now, now, first_question.strip(), shelf),
             )
             self._conn.commit()
             return int(cur.lastrowid)
@@ -191,6 +195,14 @@ class ThreadStore:
             )
             self._conn.commit()
 
+    def set_shelf(self, thread_id: int, shelf: str) -> None:
+        """Label a thread that has no shelf yet (the first one sticks)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE threads SET shelf = ? WHERE id = ? AND shelf IS NULL", (shelf, thread_id)
+            )
+            self._conn.commit()
+
     def set_status(self, thread_id: int, status: str) -> None:
         with self._lock:
             self._conn.execute("UPDATE threads SET status = ? WHERE id = ?", (status, thread_id))
@@ -200,7 +212,7 @@ class ThreadStore:
 
     _COLS = (
         "id, user, title, summary, status, created_at, last_ts, last_session, turns, "
-        "summarized_turns, first_question"
+        "summarized_turns, first_question, shelf"
     )
 
     def get(self, thread_id: int) -> Thread | None:
@@ -216,10 +228,14 @@ class ThreadStore:
         limit: int = 40,
         min_turns: int = 1,
         status: str | None = None,
+        shelf: str | None = None,
     ) -> list[Thread]:
         """The user's threads, most recently touched first."""
         sql = f"SELECT {self._COLS} FROM threads WHERE user = ? AND turns >= ?"
         args: list = [user, min_turns]
+        if shelf:
+            sql += " AND shelf = ?"
+            args.append(shelf)
         if status:
             sql += " AND status = ?"
             args.append(status)
@@ -293,6 +309,7 @@ class ThreadTracker:
         # After a resume the next question belongs to that thread whatever
         # its wording ("what should I check next?" names no topic).
         self._sticky = False
+        self._last_vec: tuple[str, np.ndarray | None] | None = None
         self._lock = threading.Lock()
 
     def _embed(self, text: str) -> np.ndarray | None:
@@ -323,6 +340,35 @@ class ThreadTracker:
                 best = (score, tid)
         return best[1] if best else None
 
+    def continues(self, user: str, question: str) -> Thread | None:
+        """The thread the conversation is on, if *question* carries it on
+        (same test as filing: close to the thread, or fairly close and
+        sharing a topic word). Asked *before* the answer, so the lookup
+        can be told the topic: "How often should I feed the starter?"
+        fetched infant feeding in the middle of a sourdough conversation
+        (2026-11-25). The embedding is kept for :meth:`file_turn`."""
+        with self._lock:
+            current = self.store.get(self.current_id) if self.current_id else None
+        if current is None or current.user != user:
+            return None
+        vec = self._embed(question)
+        self._last_vec = (question, vec)
+        if vec is None:
+            return None
+        words = topic_words(question)
+        for tid, centroid, twords in self.store.match_data(user):
+            if tid != current.id:
+                continue
+            if centroid is None or centroid.shape != vec.shape:
+                return None
+            sim = float(vec @ centroid)
+            if sim >= settings.thread_continue_sim or (
+                sim >= settings.thread_join_sim_shared and bool(words & twords)
+            ):
+                return current
+            return None
+        return None
+
     def _match(self, user: str, question: str, vec: np.ndarray | None) -> int | None:
         if vec is None:
             return None
@@ -350,8 +396,10 @@ class ThreadTracker:
         question: str,
         answer: str,
         followup: bool = False,
+        shelf: str | None = None,
     ) -> int | None:
-        """File one answered question; returns the thread id. Never raises."""
+        """File one answered question; returns the thread id. *shelf* is
+        the subject shelf the question was put on, if any. Never raises."""
         if not question.strip() or not answer.strip():
             return None
         try:
@@ -362,14 +410,20 @@ class ThreadTracker:
                 sticky, self._sticky = self._sticky, False
                 if (followup or sticky) and current is not None:
                     self.store.add_turn(current.id, session_id, question, answer)
+                    if shelf and current.shelf is None:
+                        self.store.set_shelf(current.id, shelf)
                     return current.id
-                vec = self._embed(question)
+                cached = self._last_vec
+                vec = cached[1] if cached and cached[0] == question else self._embed(question)
+                self._last_vec = None
                 tid = self._match(user, question, vec)
                 if tid is None:
-                    tid = self.store.create(user, question)
-                    logger.info(f"Thread {tid} opened: {question!r}")
+                    tid = self.store.create(user, question, shelf)
+                    logger.info(f"Thread {tid} opened ({shelf or 'no shelf'}): {question!r}")
                 else:
                     logger.info(f"Thread {tid} continues: {question!r}")
+                    if shelf:
+                        self.store.set_shelf(tid, shelf)
                 self.store.add_turn(tid, session_id, question, answer, vec)
                 self.current_id = tid
                 return tid
@@ -414,12 +468,18 @@ def recap_text(thread: Thread, turns: list[dict], now: datetime | None = None) -
     return text
 
 
-def list_text(threads: list[Thread], now: datetime | None = None) -> str:
+def list_text(
+    threads: list[Thread], now: datetime | None = None, shelf_name: str | None = None
+) -> str:
+    """The spoken list; *shelf_name* when it was narrowed to one shelf."""
     if not threads:
+        if shelf_name:
+            return f"We haven't had a longer conversation on the {shelf_name} shelf yet."
         return "We haven't had a longer conversation yet."
     parts = [f"{t.label}, {when_phrase(t.last_ts, now).lower()}" for t in threads]
+    lead = f"On the {shelf_name} shelf we have talked about " if shelf_name else ""
     return (
-        "We have talked about "
+        (lead or "We have talked about ")
         + "; ".join(parts)
         + ". Say 'go back to our conversation about', and the topic, to pick one up."
     )

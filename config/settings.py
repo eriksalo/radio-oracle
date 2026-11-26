@@ -340,6 +340,9 @@ class OracleSettings(BaseSettings):
     # "Where did we leave off" only offers threads with at least this many
     # exchanges; one-off questions stay out of the way.
     thread_recall_min_turns: int = 2
+    # Shelves (oracle/rag/shelves.py): put each question on one of seven
+    # subject shelves; the shelf weights the sources and labels the thread.
+    shelves_enabled: bool = True
 
     # Music player
     music_path: Path = Path("music")
