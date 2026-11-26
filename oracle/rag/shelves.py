@@ -55,7 +55,8 @@ SHELVES: tuple[Shelf, ...] = (
         key="health",
         name="health and first aid",
         blurb=(
-            "Injuries, illness, medicines and the body, mostly from the WikiMed medical reference."
+            "Injuries, illness, medicines and the body, from the WikiMed medical reference and "
+            "the NHS medicines guide."
         ),
         aliases=_rx(r"health|medical|medicine|first[- ]aid|doctor(?:ing)?"),
         keywords=re.compile(
@@ -87,14 +88,19 @@ SHELVES: tuple[Shelf, ...] = (
             "crashcourse": 0.02,
             "ifixit": 0.08,
             "gutenberg": 0.12,
+            # The practical guides (config/knowledge_sources.json).
+            "guides_health": -0.04,
+            "guides_outdoors": 0.02,
+            "guides_food": 0.06,
+            "guides_workshop": 0.08,
         },
     ),
     Shelf(
         key="survival",
         name="survival and outdoors",
         blurb=(
-            "Shelter, water, fire, finding your way and the weather, from the encyclopedia "
-            "and the textbooks."
+            "Shelter, water, fire, finding your way and the weather, from the encyclopedia, "
+            "the textbooks and people's answers to outdoors questions."
         ),
         aliases=_rx(r"survival|outdoors?|wilderness|camping|bushcraft|emergenc(?:y|ies)"),
         keywords=_rx(
@@ -129,6 +135,11 @@ SHELVES: tuple[Shelf, ...] = (
             "ifixit": 0.03,
             "crashcourse": 0.03,
             "gutenberg": 0.06,
+            # The practical guides (config/knowledge_sources.json).
+            "guides_outdoors": -0.04,
+            "guides_health": 0.0,
+            "guides_food": 0.02,
+            "guides_workshop": 0.03,
         },
     ),
     Shelf(
@@ -136,7 +147,7 @@ SHELVES: tuple[Shelf, ...] = (
         name="food and growing",
         blurb=(
             "Cooking, baking, keeping food, the garden and animals, from the cookbook "
-            "textbooks and the encyclopedia."
+            "textbooks, a recipe collection and the encyclopedia."
         ),
         aliases=_rx(r"food|cook(?:ing|ery)?|recipes?|growing|garden(?:ing)?|farm(?:ing)?|kitchen"),
         keywords=_rx(
@@ -174,6 +185,11 @@ SHELVES: tuple[Shelf, ...] = (
             "crashcourse": 0.03,
             "ifixit": 0.06,
             "gutenberg": 0.08,
+            # The practical guides (config/knowledge_sources.json).
+            "guides_food": -0.04,
+            "guides_outdoors": 0.02,
+            "guides_health": 0.03,
+            "guides_workshop": 0.06,
         },
     ),
     Shelf(
@@ -221,6 +237,11 @@ SHELVES: tuple[Shelf, ...] = (
             "crashcourse": 0.03,
             "wikimed": 0.06,
             "gutenberg": 0.08,
+            # The practical guides (config/knowledge_sources.json).
+            "guides_workshop": -0.03,
+            "guides_outdoors": 0.02,
+            "guides_food": 0.06,
+            "guides_health": 0.06,
         },
     ),
     Shelf(
@@ -266,6 +287,11 @@ SHELVES: tuple[Shelf, ...] = (
             "wikimed": 0.02,
             "ifixit": 0.06,
             "gutenberg": 0.08,
+            # The practical guides (config/knowledge_sources.json).
+            "guides_health": 0.04,
+            "guides_outdoors": 0.04,
+            "guides_food": 0.04,
+            "guides_workshop": 0.04,
         },
     ),
     Shelf(
@@ -304,6 +330,11 @@ SHELVES: tuple[Shelf, ...] = (
             "wikimed": 0.04,
             "gutenberg": 0.05,
             "ifixit": 0.08,
+            # The practical guides (config/knowledge_sources.json).
+            "guides_health": 0.06,
+            "guides_outdoors": 0.06,
+            "guides_food": 0.06,
+            "guides_workshop": 0.06,
         },
     ),
     Shelf(
@@ -336,6 +367,11 @@ SHELVES: tuple[Shelf, ...] = (
             "crashcourse": 0.30,
             "wikimed": 0.50,
             "ifixit": 0.50,
+            # The practical guides (config/knowledge_sources.json).
+            "guides_health": 0.5,
+            "guides_outdoors": 0.5,
+            "guides_food": 0.5,
+            "guides_workshop": 0.5,
         },
     ),
 )
@@ -546,6 +582,28 @@ _SOURCE_BARE: dict[str, str] = {
 }
 
 
+_GUIDE_LABELS: dict[str, str] | None = None
+
+
+def _guide_label(source: str) -> str | None:
+    """How a practical-guide source is named aloud ("the NHS medicines
+    guide"), from config/knowledge_sources.json; None for anything else."""
+    global _GUIDE_LABELS
+    if _GUIDE_LABELS is None:
+        labels: dict[str, str] = {}
+        try:
+            import json
+            from pathlib import Path
+
+            manifest = Path(__file__).resolve().parents[2] / "config" / "knowledge_sources.json"
+            for entry in json.loads(manifest.read_text())["sources"]:
+                labels[entry["name"]] = entry["label"]
+        except Exception as e:  # noqa: BLE001 — a missing list only costs the nicer name
+            logger.warning(f"Knowledge source list unreadable: {e}")
+        _GUIDE_LABELS = labels
+    return _GUIDE_LABELS.get(source)
+
+
 def sources_text(shelf_key: str | None, sources: list[tuple[str, str]]) -> str:
     """Where the last answer came from. *sources* are (collection, title)
     pairs in the order they were used."""
@@ -562,7 +620,13 @@ def sources_text(shelf_key: str | None, sources: list[tuple[str, str]]) -> str:
         if key in seen:
             continue
         seen.add(key)
-        if title:
+        guide = _guide_label(collection)
+        if guide and title:
+            # A question or a recipe name: said as it is, after its source.
+            phrases.append(f"{guide}, {title.removeprefix('Recipe: ').rstrip(' .')}")
+        elif guide:
+            phrases.append(guide)
+        elif title:
             template = _SOURCE_PHRASES.get(collection, "{title}")
             if collection == "wikibooks" and title.lower().startswith("cookbook:"):
                 template, title = "the cookbook page on {title}", title[len("cookbook:") :]

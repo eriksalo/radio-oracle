@@ -311,6 +311,34 @@ class OracleSettings(BaseSettings):
             "ef_search": 128,
             "score_scale": 20.0,
         },
+        # Practical guides built by scripts/ingest_sources.py from
+        # config/knowledge_sources.json — one collection per shelf. They are
+        # small (tens of thousands of chunks, nlist ~100), so 32 probes
+        # already cover a third of the index.
+        "guides_health": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 32,
+            "score_scale": 20.0,
+        },
+        "guides_outdoors": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 32,
+            "score_scale": 20.0,
+        },
+        "guides_food": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 32,
+            "score_scale": 20.0,
+        },
+        "guides_workshop": {
+            "model": "nomic-ai/nomic-embed-text-v1.5",
+            "query_prefix": "search_query: ",
+            "ef_search": 32,
+            "score_scale": 20.0,
+        },
     }
 
     # Memory

@@ -91,6 +91,10 @@ _DEFAULT_ORDER: tuple[str, ...] = (
     "wikibooks",
     "gutenberg",
     "crashcourse",
+    "guides_health",
+    "guides_outdoors",
+    "guides_food",
+    "guides_workshop",
     "music",
 )
 
@@ -161,6 +165,10 @@ _BIAS: dict[QuestionType, dict[str, float]] = {
         "crashcourse": 0.02,
         "ifixit": 0.08,
         "gutenberg": 0.12,
+        "guides_health": -0.03,
+        "guides_outdoors": 0.02,
+        "guides_food": 0.06,
+        "guides_workshop": 0.08,
     },
     "howto": {
         "ifixit": -0.03,
@@ -169,6 +177,11 @@ _BIAS: dict[QuestionType, dict[str, float]] = {
         "wikimed": 0.02,
         "crashcourse": 0.02,
         "gutenberg": 0.08,
+        # Practical questions and answers (scripts/ingest_sources.py).
+        "guides_workshop": -0.02,
+        "guides_outdoors": -0.02,
+        "guides_food": -0.02,
+        "guides_health": 0.02,
     },
     "literature": {
         # Only the two shelves that hold books; the rest are effectively out.
@@ -178,6 +191,10 @@ _BIAS: dict[QuestionType, dict[str, float]] = {
         "crashcourse": 0.30,
         "wikimed": 0.50,
         "ifixit": 0.50,
+        "guides_health": 0.50,
+        "guides_outdoors": 0.50,
+        "guides_food": 0.50,
+        "guides_workshop": 0.50,
     },
     "factual": {
         "wikipedia": -0.03,
@@ -186,6 +203,10 @@ _BIAS: dict[QuestionType, dict[str, float]] = {
         "wikimed": 0.02,
         "ifixit": 0.05,
         "gutenberg": 0.06,
+        "guides_health": 0.03,
+        "guides_outdoors": 0.03,
+        "guides_food": 0.03,
+        "guides_workshop": 0.03,
     },
     "general": {
         "wikipedia": -0.02,
@@ -194,6 +215,10 @@ _BIAS: dict[QuestionType, dict[str, float]] = {
         "wikimed": 0.02,
         "ifixit": 0.04,
         "gutenberg": 0.06,
+        "guides_health": 0.02,
+        "guides_outdoors": 0.02,
+        "guides_food": 0.02,
+        "guides_workshop": 0.02,
     },
 }
 

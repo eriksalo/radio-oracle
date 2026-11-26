@@ -66,6 +66,7 @@ def test_ready_only_after_warm() -> None:
 
 def test_every_shelf_weights_every_source() -> None:
     sources = {"wikipedia", "wikimed", "wikibooks", "ifixit", "crashcourse", "gutenberg"}
+    sources |= {"guides_health", "guides_outdoors", "guides_food", "guides_workshop"}
     for shelf in shelves.SHELVES:
         assert set(shelf.bias) == sources, shelf.key
     assert shelves.bias(None) is None
@@ -277,3 +278,17 @@ def test_last_lookup_feeds_the_source_answer(monkeypatch) -> None:
     monkeypatch.setattr(core, "_get_retriever", lambda: None)
     core._try_rag_query("Hello", None)
     assert "what I already know" in commands._describe_last_source()
+
+
+def test_guide_sources_are_named_by_their_own_label() -> None:
+    said = shelves.sources_text(
+        "health",
+        [
+            ("nhs_medicines", "Side effects of ibuprofen"),
+            ("based_cooking", "Recipe: Ketchup"),
+            ("wikimed", "Ibuprofen"),
+        ],
+    )
+    assert "the NHS medicines guide, Side effects of ibuprofen" in said
+    assert "the recipe collection, Ketchup" in said
+    assert "the WikiMed medical article on Ibuprofen" in said

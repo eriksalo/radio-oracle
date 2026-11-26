@@ -251,8 +251,15 @@ def _try_rag_query(user_input: str, shelf: str | None = None, hint: str | None =
             emit("consulted", sources=titles, hits=len(results), shelf=shelf)
             _last_lookup = {
                 "shelf": shelf,
+                # A guides_* collection holds several sources; the passage's
+                # own source ("nhs_medicines") is what gets named aloud.
                 "sources": [
-                    (r.get("source", ""), (r.get("metadata") or {}).get("title") or "")
+                    (
+                        (r.get("metadata") or {}).get("source") or r.get("source", "")
+                        if str(r.get("source", "")).startswith("guides_")
+                        else r.get("source", ""),
+                        (r.get("metadata") or {}).get("title") or "",
+                    )
                     for r in results
                 ],
             }

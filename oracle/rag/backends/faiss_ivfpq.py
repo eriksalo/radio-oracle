@@ -37,6 +37,22 @@ def _get_shared_embedder(model_name: str, trust_remote_code: bool = True) -> Emb
         return _EMBEDDER_CACHE[model_name]
 
 
+# The retriever asks every collection the same question in turn; the
+# vector is the same for all of them (same model, same prefix), so only
+# the first one pays for it (~64 ms each on the Jetson).
+_LAST_QUERY: tuple[str, str, np.ndarray] | None = None
+
+
+def _query_vector(model_name: str, embedder: Embedder, text: str) -> np.ndarray:
+    global _LAST_QUERY
+    last = _LAST_QUERY
+    if last is not None and last[0] == model_name and last[1] == text:
+        return last[2]
+    q = np.asarray([embedder.embed_single(text)], dtype=np.float32)
+    _LAST_QUERY = (model_name, text, q)
+    return q
+
+
 def resident_embedder() -> Embedder | None:
     """An embedder that is already in memory, or None. For callers that
     want a vector but must never be the reason a model gets loaded
@@ -114,8 +130,7 @@ class FaissIvfPqBackend:
         assert self._index is not None and self._con is not None and self._embedder is not None
 
         text = f"{self._query_prefix}{query_text}" if self._query_prefix else query_text
-        emb = self._embedder.embed_single(text)
-        q = np.asarray([emb], dtype=np.float32)
+        q = _query_vector(self._model_name, self._embedder, text)
         distances, indices = self._index.search(q, top_k)
 
         rows = indices[0].tolist()

@@ -1,0 +1,97 @@
+{
+  "_comment": "Extra knowledge sources for scripts/ingest_sources.py. Several sources share one FAISS collection (tier1_top_k is per collection, so collections are kept few: one per shelf). 'extractor' picks the page cleaner; 'label' is how the source is named aloud.",
+  "base_url": "https://download.kiwix.org/zim/",
+  "sources": [
+    {
+      "name": "nhs_medicines",
+      "file": "zimit/nhs.uk_en_medicines_2026-09b.zim",
+      "collection": "guides_health",
+      "extractor": "nhs",
+      "label": "the NHS medicines guide"
+    },
+    {
+      "name": "se_medicalsciences",
+      "file": "stack_exchange/medicalsciences.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_health",
+      "extractor": "stackexchange",
+      "label": "the medical questions and answers"
+    },
+    {
+      "name": "se_outdoors",
+      "file": "stack_exchange/outdoors.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_outdoors",
+      "extractor": "stackexchange",
+      "label": "the outdoors questions and answers"
+    },
+    {
+      "name": "se_ham",
+      "file": "stack_exchange/ham.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_outdoors",
+      "extractor": "stackexchange",
+      "label": "the amateur radio questions and answers"
+    },
+    {
+      "name": "se_sustainability",
+      "file": "stack_exchange/sustainability.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_outdoors",
+      "extractor": "stackexchange",
+      "label": "the sustainable living questions and answers"
+    },
+    {
+      "name": "based_cooking",
+      "file": "zimit/based.cooking_en_all_2026-11.zim",
+      "collection": "guides_food",
+      "extractor": "recipes",
+      "label": "the recipe collection"
+    },
+    {
+      "name": "foss_cooking",
+      "file": "zimit/foss.cooking_en_all_2026-11.zim",
+      "collection": "guides_food",
+      "extractor": "recipes",
+      "label": "the recipe collection"
+    },
+    {
+      "name": "se_cooking",
+      "file": "stack_exchange/cooking.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_food",
+      "extractor": "stackexchange",
+      "label": "the cooking questions and answers"
+    },
+    {
+      "name": "se_homebrew",
+      "file": "stack_exchange/homebrew.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_food",
+      "extractor": "stackexchange",
+      "label": "the home brewing questions and answers"
+    },
+    {
+      "name": "se_gardening",
+      "file": "stack_exchange/gardening.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_food",
+      "extractor": "stackexchange",
+      "label": "the gardening questions and answers"
+    },
+    {
+      "name": "se_woodworking",
+      "file": "stack_exchange/woodworking.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_workshop",
+      "extractor": "stackexchange",
+      "label": "the woodworking questions and answers"
+    },
+    {
+      "name": "se_mechanics",
+      "file": "stack_exchange/mechanics.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_workshop",
+      "extractor": "stackexchange",
+      "label": "the vehicle repair questions and answers"
+    },
+    {
+      "name": "se_diy",
+      "file": "stack_exchange/diy.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_workshop",
+      "extractor": "stackexchange",
+      "label": "the home improvement questions and answers"
+    }
+  ]
+}
