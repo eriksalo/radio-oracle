@@ -68,6 +68,7 @@ class Source:
     collection: str
     extractor: str
     label: str
+    skip: tuple[str, ...] = ()  # pages whose path contains any of these are left out
 
     @property
     def zim_path(self) -> Path:
@@ -203,10 +204,223 @@ def extract_recipes(path: str, title: str, tree) -> tuple[str, list[str]] | None
     return f"Recipe: {title}", ["\n\n".join(paras)]
 
 
+_PAGE_CHROME = (
+    "nav, header, footer, aside, script, style, noscript, form, svg, img, figure, iframe, "
+    "button, video, audio, select, [role=navigation], [role=banner], [role=contentinfo], "
+    "[class*=breadcrumb], [class*=share], [class*=social], [class*=cookie], [class*=sidebar], "
+    "[class*=newsletter], [class*=comment], [class*=pagination], [class*=skip], "
+    "[class*=related], [class*=menu], [class*=advert], [class*=affiliate], [class*=author-box], "
+    "[class*=visually-hidden], [class*=sr-only], [aria-hidden=true], [class*=language], "
+    "[class*=lang-switch], [class*=toc], [class*=byline], [class*=post-meta], [class*=widget]"
+)
+_END_SECTIONS = (
+    "references",
+    "external links",
+    "see also",
+    "further reading",
+    "notes",
+    "sources",
+    "footnotes",
+    "bibliography",
+    "related",
+    "gallery",
+    "navigation",
+    "contents",
+    "species",
+    "selected species",
+    "cultivars",
+    "synonyms",
+)
+_TITLE_TAIL = re.compile(r"\s+[|–—-]\s+.*$")
+# Lines a site puts on every page; never part of the text.
+_PAGE_JUNK = re.compile(
+    r"^(return to top|back to top|top|top of page|last (updated|reviewed|modified)\b.*|english|espa.ol|print|"
+    r"share( this)?( page)?|skip to .*|table of contents|read more|learn more|click here|"
+    r"an official website of .*|page last reviewed.*|related (content|pages|links|articles)|"
+    r"jump to:? .*|tags?:.*|categor(y|ies):.*|posted (on|by|in)\b.*|leave a (comment|reply).*)\.?$",
+    re.I,
+)
+
+
+def _is_english(tree) -> bool:
+    html = tree.css_first("html")
+    lang = (html.attributes.get("lang") or "") if html is not None else ""
+    return not lang or lang.lower().startswith("en")
+
+
+def _sections(node, min_words: int = 25) -> list[str]:
+    """*node*'s text cut at its h2/h3 headings, each section led by its
+    heading; reference-style sections and stubs are dropped."""
+    out: list[str] = []
+    heading, body = "", []
+
+    def close() -> None:
+        name = heading.rstrip(".:").lower()
+        if body and name not in _END_SECTIONS and sum(len(p.split()) for p in body) >= min_words:
+            out.append("\n\n".join(([heading] if heading else []) + body))
+
+    for el in node.css(_BLOCKS):
+        if el.mem_id == node.mem_id:
+            continue
+        if _has_inner(el, "li, p" if el.tag == "li" else _BLOCKS):
+            continue
+        text = _clean(el.text(separator=" "))
+        if not text or _PAGE_JUNK.match(text):
+            continue
+        if len(text) < 30 and not text.isascii():
+            continue  # a language switcher's entries
+        if el.tag in ("h1", "h2", "h3"):
+            close()
+            heading, body = (text if text[-1] in ".?!:" else text + "."), []
+        else:
+            body.append(text)
+    close()
+    return _merge_short(out)
+
+
+def _merge_short(sections: list[str], floor: int = 90) -> list[str]:
+    """Join neighbouring sections until each has *floor* words: a passage
+    of two sentences answers nothing, but it matches a question as well as
+    a full one does."""
+    merged: list[str] = []
+    pending = ""
+    for section in sections:
+        pending = f"{pending}\n\n{section}" if pending else section
+        if len(pending.split()) >= floor:
+            merged.append(pending)
+            pending = ""
+    if pending:
+        if merged:
+            merged[-1] = f"{merged[-1]}\n\n{pending}"
+        else:
+            merged.append(pending)
+    return merged
+
+
+def extract_webpage(path: str, title: str, tree) -> tuple[str, list[str]] | None:
+    """An ordinary web page from a site crawl: the main content, cut at its
+    headings. English pages only; search and listing URLs are skipped."""
+    if "?" in path or not _is_english(tree):
+        return None
+    main = (
+        tree.css_first("main")
+        or tree.css_first("[role=main]")
+        or tree.css_first("article")
+        or tree.css_first("#content")
+        or tree.css_first("#main")
+        or tree.body
+    )
+    if main is None:
+        return None
+    _drop(main, _PAGE_CHROME)
+    sections = _sections(main)
+    if sum(len(s.split()) for s in sections) < 80:
+        return None  # a hub or listing page
+    title = _TITLE_TAIL.sub("", title).strip() or title
+    site = path.split("/")[0].replace(".", "").lower()
+    if title.replace(" ", "").lower() in site:
+        # Every page carries the site's name as its title: use the heading.
+        first_line = sections[0].split("\n")[0].rstrip(".")
+        if 0 < len(first_line.split()) <= 12:
+            title = first_line[0].upper() + first_line[1:]
+    return title, sections
+
+
+_WIKI_NAMESPACES = re.compile(
+    r"^(A/)?(Category|File|User|Talk|Template|Help|Special|MediaWiki|Portal|Project|Module|"
+    r"[A-Za-z_ ]+[ _]talk|Appropedia|Gardenology|Restarters|Glossary|Image|Draft|_assets_)[:_/]",
+    re.I,
+)
+# Translated copies of a wiki page live at Page/fr, Page/zh-hans …
+_WIKI_TRANSLATION = re.compile(r"/([a-z]{2,3}(?:-[a-z]{2,4})?)$")
+
+
+def extract_mediawiki(path: str, title: str, tree) -> tuple[str, list[str]] | None:
+    """A wiki article as packed by mwoffliner: prose only, one section per
+    heading; lists of links, tables of data and other namespaces are skipped."""
+    if _WIKI_NAMESPACES.match(path) or _WIKI_NAMESPACES.match(title):
+        return None
+    if title.lower().startswith(("list of ", "index of ", "main page")):
+        return None
+    translation = _WIKI_TRANSLATION.search(path)
+    if translation and translation.group(1) != "en":
+        return None
+    title = re.sub(r"/en$", "", title)
+    main = tree.css_first("#mw-content-text") or tree.css_first(".mw-parser-output")
+    if main is None:
+        return None
+    _drop(main, "script, style, img, figure, table, .reference, .references, .reflist, .navbox")
+    _drop(main, ".mw-editsection, .thumb, .gallery, .noprint, .infobox, .toc, #toc, .hatnote")
+    _drop(
+        main, ".metadata, .ambox, .catlinks, .printfooter, sup, .mw-cite-backlink, .external.free"
+    )
+    sections = _sections(main)
+    if sum(len(s.split()) for s in sections) < 80:
+        return None  # a stub, a redirect page or a list of links
+    return title, sections
+
+
+def extract_medlineplus(path: str, title: str, tree) -> tuple[str, list[str]] | None:
+    """MedlinePlus health topics, the medical encyclopedia, drug and
+    lab-test pages. Spanish pages, indexes and news are skipped."""
+    if "?" in path or not path.startswith("medlineplus.gov/") or not _is_english(tree):
+        return None
+    if any(part in path for part in _MEDLINEPLUS_SKIP):
+        return None
+    is_topic = path.count("/") == 1  # medlineplus.gov/asthma.html: a summary, then link lists
+    main = tree.css_first("#topic-summary") if is_topic else tree.css_first("article")
+    if main is None:
+        return None
+    _drop(main, _PAGE_CHROME)
+    _drop(main, ".section-button, .adam-info, .page-actions, .side, .attribution, #section-version")
+    sections = [s for s in _sections(main) if not s.lower().startswith(_MEDLINEPLUS_LISTS)]
+    if sum(len(s.split()) for s in sections) < 60:
+        return None
+    title = re.split(r"\s*[:|]\s", title)[0].strip() or title
+    return title, sections
+
+
+_MEDLINEPLUS_SKIP = (
+    "/spanish/",
+    "/languages/",
+    "/genetics/gene/",
+    "/genetics/chromosome/",
+    "/ency/imagepages/",
+    "/ency/presentations/",
+    "/ency/quiz/",
+    "/ency/anatomyvideos/",
+    "/ency/encyclopedia_",
+    "/about/",
+    "/medwords/",
+    "/webeval/",
+    "/recipes/",
+    "/medlineplus-connect/",
+    "/medlineplus-videos/",
+    "/videofiles/",
+)
+_MEDLINEPLUS_LISTS = (
+    "alternative names",
+    "patient instructions",
+    "images",
+    "review date",
+    "other names for this condition",
+    "additional information",
+    "related health topics",
+    "related medlineplus",
+    "learn more",
+    "brand names",
+    "other names",
+    "browse the encyclopedia",
+)
+
+
 EXTRACTORS: dict[str, Callable] = {
     "stackexchange": extract_stackexchange,
     "nhs": extract_nhs,
     "recipes": extract_recipes,
+    "webpage": extract_webpage,
+    "mediawiki": extract_mediawiki,
+    "medlineplus": extract_medlineplus,
 }
 
 
@@ -218,9 +432,10 @@ def iter_documents(src: Source) -> Iterator[tuple[str, str, list[str]]]:
     extractor = EXTRACTORS[src.extractor]
     zim = Archive(str(src.zim_path))
     get_entry = getattr(zim, "_get_entry_by_id", None) or zim.get_entry_by_id
+    seen: set[int] = set()  # a site crawl holds the same page under several URLs
     for i in range(zim.entry_count):
         entry = get_entry(i)
-        if entry.is_redirect:
+        if entry.is_redirect or any(part in entry.path for part in src.skip):
             continue
         item = entry.get_item()
         if not item.mimetype.startswith("text/html"):
@@ -231,8 +446,13 @@ def iter_documents(src: Source) -> Iterator[tuple[str, str, list[str]]]:
         except Exception as e:  # noqa: BLE001 — one bad page must not end the run
             logger.warning(f"{src.name}: skipped {entry.path}: {e}")
             continue
-        if doc is not None:
-            yield entry.path, doc[0], doc[1]
+        if doc is None:
+            continue
+        fingerprint = hash((doc[0], doc[1][0][:600]))
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        yield entry.path, doc[0], doc[1]
 
 
 def _open_chunks(path: Path) -> sqlite3.Connection:

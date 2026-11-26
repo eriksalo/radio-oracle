@@ -92,6 +92,138 @@
       "collection": "guides_workshop",
       "extractor": "stackexchange",
       "label": "the home improvement questions and answers"
+    },
+    {
+      "name": "medlineplus",
+      "file": "zimit/medlineplus.gov_en_all_2025-01.zim",
+      "collection": "guides_health",
+      "extractor": "medlineplus",
+      "label": "the MedlinePlus health encyclopedia"
+    },
+    {
+      "name": "cdc_travel",
+      "file": "zimit/wwwnc.cdc.gov_en_all_2024-11.zim",
+      "collection": "guides_health",
+      "extractor": "webpage",
+      "label": "the CDC travel health guide",
+      "skip": [
+        "/travel/destinations/",
+        "/travel/notices"
+      ]
+    },
+    {
+      "name": "se_fitness",
+      "file": "stack_exchange/fitness.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_health",
+      "extractor": "stackexchange",
+      "label": "the fitness questions and answers"
+    },
+    {
+      "name": "se_pets",
+      "file": "stack_exchange/pets.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_health",
+      "extractor": "stackexchange",
+      "label": "the pet care questions and answers"
+    },
+    {
+      "name": "se_parenting",
+      "file": "stack_exchange/parenting.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_health",
+      "extractor": "stackexchange",
+      "label": "the parenting questions and answers"
+    },
+    {
+      "name": "ready_gov",
+      "file": "zimit/ready.gov_en_all_2026-10.zim",
+      "collection": "guides_outdoors",
+      "extractor": "webpage",
+      "label": "the Ready.gov emergency guide",
+      "skip": [
+        "/about",
+        "/business",
+        "/teen-cert",
+        "/kids/educators",
+        "/cert",
+        "/ready-campaign",
+        "toolkit"
+      ]
+    },
+    {
+      "name": "beready_uk",
+      "file": "zimit/beready.campaign.gov.uk_en_all_2026-11.zim",
+      "collection": "guides_outdoors",
+      "extractor": "webpage",
+      "label": "the UK emergency preparation guide"
+    },
+    {
+      "name": "grimgrains",
+      "file": "zimit/grimgrains_en_all_2026-11.zim",
+      "collection": "guides_food",
+      "extractor": "webpage",
+      "label": "the Grimgrains recipes"
+    },
+    {
+      "name": "gardenology",
+      "file": "other/gardenology.org_en_all_2026-09.zim",
+      "collection": "guides_food",
+      "extractor": "mediawiki",
+      "label": "the plant encyclopedia"
+    },
+    {
+      "name": "se_coffee",
+      "file": "stack_exchange/coffee.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_food",
+      "extractor": "stackexchange",
+      "label": "the coffee questions and answers"
+    },
+    {
+      "name": "se_alcohol",
+      "file": "stack_exchange/alcohol.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_food",
+      "extractor": "stackexchange",
+      "label": "the beer, wine and spirits questions and answers"
+    },
+    {
+      "name": "se_vegetarianism",
+      "file": "stack_exchange/vegetarianism.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_food",
+      "extractor": "stackexchange",
+      "label": "the vegetarian questions and answers"
+    },
+    {
+      "name": "appropedia",
+      "file": "other/appropedia_en_all_maxi_2026-02.zim",
+      "collection": "guides_workshop",
+      "extractor": "mediawiki",
+      "label": "the Appropedia appropriate technology wiki"
+    },
+    {
+      "name": "restarters",
+      "file": "other/restarters_en_all_maxi_2026-10.zim",
+      "collection": "guides_workshop",
+      "extractor": "mediawiki",
+      "label": "the Restarters repair wiki"
+    },
+    {
+      "name": "se_bicycles",
+      "file": "stack_exchange/bicycles.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_workshop",
+      "extractor": "stackexchange",
+      "label": "the bicycle questions and answers"
+    },
+    {
+      "name": "se_crafts",
+      "file": "stack_exchange/crafts.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_workshop",
+      "extractor": "stackexchange",
+      "label": "the arts and crafts questions and answers"
+    },
+    {
+      "name": "se_lifehacks",
+      "file": "stack_exchange/lifehacks.stackexchange.com_en_all_2026-10.zim",
+      "collection": "guides_workshop",
+      "extractor": "stackexchange",
+      "label": "the household tips questions and answers"
     }
   ]
 }

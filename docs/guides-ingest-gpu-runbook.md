@@ -28,6 +28,88 @@ and the result is live on the radio.
 The sections below are the original hand-over, corrected where the run
 showed something different.
 
+## More sources, 2026-11-26
+
+Seventeen sources were added to `config/knowledge_sources.json` after a pass
+through the Kiwix catalogue (`zimit/`, `other/`, `stack_exchange/`) for
+anything that fits the four guide shelves. Three new page cleaners in
+`scripts/ingest_sources.py` handle them: `medlineplus`, `webpage` (any
+crawled site: main content, English only, cut at headings) and `mediawiki`
+(wiki articles packed by mwoffliner). Sections shorter than 90 words are
+joined to their neighbours, and a page that appears under several URLs is
+taken once. A source can list `skip` path fragments in the manifest.
+
+| Collection | New source | Chunks |
+|---|---|---|
+| guides_health | MedlinePlus (encyclopedia, drugs, health topics, genetic conditions) | 38,224 |
+| | CDC travel health (Yellow Book, disease pages) | 2,487 |
+| | fitness Q&A | 15,151 |
+| | pet care Q&A | 13,754 |
+| | parenting Q&A | 21,412 |
+| guides_outdoors | Ready.gov | 361 |
+| | UK "Prepare" campaign | 146 |
+| guides_food | Grimgrains | 484 |
+| | Gardenology plant encyclopedia | 7,455 |
+| | coffee Q&A | 2,259 |
+| | beer, wine and spirits Q&A | 2,158 |
+| | vegetarian Q&A | 1,489 |
+| guides_workshop | Appropedia | 60,815 |
+| | Restarters repair wiki | 1,027 |
+| | bicycles Q&A | 40,020 |
+| | arts and crafts Q&A | 4,735 |
+| | household tips Q&A | 5,102 |
+
+That is 217,079 new chunks, embedded in 18 minutes; with the first batch,
+442,701 in 30 sources. Collection
+sizes: `guides_health` 101,929, `guides_outdoors` 30,127, `guides_food`
+90,749, `guides_workshop` 219,896.
+
+Looked at and left out, with the reason:
+
+- `publicdomainrecipes.com`: a fork of based.cooking — 471 of its 473
+  chunks have a title based.cooking already has. `foss.cooking`, which was
+  in the first batch and is still in, is the same: 486 of 489. That is why
+  the radio names "the recipe collection, Sourdough starter" twice. One of
+  the two should go.
+- `survivors_en_all_maxi`: a video-game wiki (Vampire Survivors).
+- `scoutwiki.org`: scouting organisations and jamborees, not outdoor skills.
+- `trueprepper.com`: mostly gear reviews with affiliate copy.
+- `energypedia`: energy policy, projects and NGO pages rather than how-to.
+- `cd3wdproject.org` (546 MB): a large practical library (farming, food
+  processing, metalwork, health), but its pages carry no usable titles,
+  several languages are mixed without `lang` attributes, and books are
+  split into frames. Worth a dedicated cleaner that takes each book's
+  title from its index page — an estimated 80,000 chunks.
+- Stack Exchange `electronics` (4.0 GB): circuit design at a depth that
+  would outnumber everything else on the workshop shelf. `3dprinting`,
+  `engineering`, `arduino`, `raspberrypi` likewise left for a decision.
+- PDF collections (`zimgit-water`, `-medicine`, `-food-preparation`,
+  `-knots`, `-post-disaster`, `armypubs`, `irp.fas.org` military medicine):
+  still need the PDF text step.
+- `theworldfactbook` and the science Stack Exchange sites do not belong on
+  a guide shelf; they would need their own collection.
+
+Ready.gov is 2 GB for 97 English pages: the crawl holds every page in a
+dozen languages, and the business, CERT and social-media-toolkit pages are
+skipped.
+
+The radio names a source aloud from this manifest, so
+`config/knowledge_sources.json` has to be copied to the Jetson together
+with the indices.
+
+Checked on the PC only (ranking, sixteen questions straight against the
+indices): the NHS page is still first for amoxicillin; the second-degree
+burn question now gets MedlinePlus "Minor burns - aftercare" first; broken
+bone → MedlinePlus; chocolate and dogs → pet care Q&A; malaria → CDC;
+emergency kit and tornado → Ready.gov; tomatoes → Gardenology; flat tyre →
+bicycles Q&A; composting toilet → Appropedia; kettle → Restarters.
+`scripts/probe_guides.py` has seven more questions for these.
+
+**Not on the radio yet** as of this writing: the four rebuilt indices are
+in `data/faiss/` on the PC (about 730 MB with their text). Steps 7 and 8
+apply unchanged, plus the manifest. The index files the radio loads grow
+from 21 MB to 39 MB; check the last `Mem:` line of the probe.
+
 ## State when this was written
 
 - Code is on `main`: `scripts/ingest_sources.py` (the whole pipeline),
@@ -239,7 +321,10 @@ radio-oracle.local` with `ssh-keygen -F radio-oracle.local` there.
   shelves if so.
 - "Where did that come from" repeats the label when two passages come from
   one source ("the NHS medicines guide, X, the NHS medicines guide, Y").
-- Not in the source list yet: army field manuals (`zimit/armypubs_en_all`,
-  7.7 GB, PDF-based — needs a PDF text step), MedlinePlus (1.8 GB), CDC
-  (170 MB), ready.gov (1.9 GB). Each needs an extractor in
-  `scripts/ingest_sources.py` and an entry in `config/knowledge_sources.json`.
+- MedlinePlus, CDC and ready.gov are in (see "More sources, 2026-11-26").
+  Still not in the source list: army field manuals (`zimit/armypubs_en_all`,
+  7.7 GB) and the other PDF collections, which need a PDF text step, and
+  CD3WD, which needs its own cleaner.
+- Parenting Q&A sits in `guides_health` for want of a better shelf; much of
+  it is about behaviour rather than health. Watch whether it turns up on
+  medical questions.
