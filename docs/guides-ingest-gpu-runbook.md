@@ -105,10 +105,24 @@ emergency kit and tornado → Ready.gov; tomatoes → Gardenology; flat tyre →
 bicycles Q&A; composting toilet → Appropedia; kettle → Restarters.
 `scripts/probe_guides.py` has seven more questions for these.
 
-**Not on the radio yet** as of this writing: the four rebuilt indices are
-in `data/faiss/` on the PC (about 730 MB with their text). Steps 7 and 8
-apply unchanged, plus the manifest. The index files the radio loads grow
-from 21 MB to 39 MB; check the last `Mem:` line of the probe.
+**On the radio since 2026-11-26 10:44**: the four rebuilt indices,
+`config/knowledge_sources.json` and `scripts/probe_guides.py` (steps 7 and
+8, plus the manifest; no `.env` change). `probe_guides.py` on the device:
+20/20 as expected, lookup 259-386 ms (was 260-383 ms with the smaller
+indices), 2.4 GB available at the end of the probe, service restarted
+active. The previous build is in
+`/opt/radio-oracle/data/faiss-bak-guides-build1/` (indices, manifest,
+probe); copy it back over `data/faiss/` and `config/` to roll back.
+
+Seen in that run, not fixed:
+
+- "Is chocolate dangerous for dogs?" gets no shelf (`shelf=None`); the pet
+  care Q&A still answers it first, and the source is named without a shelf.
+- "What should I put in an emergency kit?" ranks Ready.gov's "People with
+  Disabilities" just above "Build A Kit" (0.15 vs 0.16).
+- The radio was in standby (power switch open) when the service came back,
+  so the app itself has not loaded the new indices yet; nothing has been
+  asked by voice.
 
 ## State when this was written
 
