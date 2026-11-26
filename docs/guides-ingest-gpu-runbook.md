@@ -9,6 +9,25 @@ Commands are PowerShell unless a block says **Jetson**. Run them from the
 repository folder. If you resume with Claude Code on the PC, point it at
 this file — the "State" and "Open items" sections are the context it needs.
 
+## Done on 2026-11-25 (evening, US Mountain)
+
+The whole runbook was run on the GPU PC (RTX 4070 SUPER, Ryzen 9 9950X3D)
+and the result is live on the radio.
+
+- 13 sources, 225,622 chunks, embedded in 18 minutes (140–210 chunks/s) with
+  `--batch 16`; four indices built and installed on the Jetson.
+- All four `guides_…` collections are in the Jetson's
+  `ORACLE_COLLECTION_BACKENDS`. Previous `.env`: `.env.bak-guides`. The
+  NHS-only `guides_health` files it replaced are in
+  `/opt/radio-oracle/data/faiss-bak-guides/`.
+- `probe_guides.py` on the radio: 13/13 as expected (details in step 8).
+- The PC keeps `data\knowledge\` (the ZIMs), `data\embeddings\` (text and
+  vectors) and `.venv-ingest`, so adding a source is download → extract →
+  embed → build for that source only.
+
+The sections below are the original hand-over, corrected where the run
+showed something different.
+
 ## State when this was written
 
 - Code is on `main`: `scripts/ingest_sources.py` (the whole pipeline),
@@ -23,7 +42,8 @@ this file — the "State" and "Open items" sections are the context it needs.
 - Nothing built on the dev box needs copying. The PC redoes all of it; with
   a GPU that is the quick part.
 
-Chunk counts measured on the dev box (after the quality filter):
+Chunk counts after the quality filter (dev box; the PC's extraction matched
+every one, and supplied the two that were not downloaded there):
 
 | Collection | Source | Chunks |
 |---|---|---|
@@ -36,10 +56,13 @@ Chunk counts measured on the dev box (after the quality filter):
 | | foss.cooking recipes | 489 |
 | | cooking Q&A | 43,957 |
 | | home brewing Q&A | 8,905 |
-| | gardening Q&A | not downloaded yet (890 MB) |
+| | gardening Q&A | 23,051 |
 | guides_workshop | woodworking Q&A | 7,654 |
 | | vehicle repair Q&A | 24,731 |
-| | home improvement Q&A | not downloaded yet (1.9 GB) |
+| | home improvement Q&A | 75,812 |
+
+Per collection: `guides_health` 10,901, `guides_outdoors` 29,620,
+`guides_food` 76,904, `guides_workshop` 108,197.
 
 ## 1. Get the code
 
@@ -64,11 +87,13 @@ python -m venv .venv-ingest
 .\.venv-ingest\Scripts\python.exe -m pip install "onnxruntime-gpu[cuda,cudnn]" tokenizers numpy loguru libzim selectolax faiss-cpu pydantic pydantic-settings
 ```
 
-The `[cuda,cudnn]` extra pulls NVIDIA's CUDA 12 and cuDNN 9 libraries as pip
+The `[cuda,cudnn]` extra pulls NVIDIA's CUDA and cuDNN libraries as pip
 packages, so no separate CUDA install is needed; only a current NVIDIA
-driver. Not tested on this PC — if step 5 stops with "CUDA was asked for but
-onnxruntime fell back to CPUExecutionProvider", that is the thing to fix
-(driver version, or install the CUDA 12 toolkit and cuDNN 9 by hand).
+driver. Worked first time on the PC (2026-11-25): Python 3.13.6 (the only
+Python installed there — outside the 3.10–3.12 range above, but every wheel
+installed), onnxruntime-gpu 1.32.0, which pulled CUDA 13 and cuDNN 9, driver
+610.88. If step 5 ever stops with "CUDA was asked for but onnxruntime fell
+back to CPUExecutionProvider", the driver is the first thing to check.
 
 ## 3. The embedding model
 
@@ -95,12 +120,30 @@ means its page layout was not recognised.
 ## 5. Embed on the GPU
 
 ```powershell
-.\.venv-ingest\Scripts\python.exe scripts\ingest_sources.py embed --provider cuda --batch 64
+.\.venv-ingest\Scripts\python.exe scripts\ingest_sources.py embed --provider cuda --batch 16
 ```
 
 It logs the rate and time left per source. It can be stopped and started
-again; it carries on where it was. The speed on this card has not been
-measured — if `--batch 64` runs out of GPU memory, use 32.
+again; it carries on where it was. Stage names go before the options:
+`embed status --provider cuda` works, `embed --provider cuda status` does
+not.
+
+**Use `--batch 16` on the 12 GB card, not 64.** Measured 2026-11-25 on
+worst-case 512-token chunks:
+
+| Batch | Chunks/s | GPU memory used |
+|---|---|---|
+| 8 | 120 | 2.9 GB |
+| 16 | 111 | 5.0 GB |
+| 32 | 104 | 9.1 GB |
+| 64 | 21 | 11.8 GB (card full, spills to system memory) |
+
+A bigger batch buys nothing and 64 is five times slower. Other programs on
+the PC (Fusion 360, DJI Studio) were holding 7 GB of the card at one point;
+with that much taken even batch 32 does not fit. The real run averaged
+140–210 chunks/s because most chunks are shorter than 512 tokens.
+
+GPU and CPU vectors for the same text agree to cosine 0.9999998.
 
 ## 6. Build the four indices
 
@@ -164,11 +207,31 @@ What to look for:
 To undo: `sudo cp -p /opt/radio-oracle/.env.bak-guides /opt/radio-oracle/.env`
 and `sudo systemctl restart radio-oracle`.
 
+### Result, 2026-11-25
+
+- All four collections listed, with the sizes above. `# as expected: 13/13`.
+- Amoxicillin: NHS page first at 0.10, unchanged from the CPU-built index.
+- Hiking, bear bag and ketchup now get a guide passage first (0.15, 0.20,
+  0.18). Napoleon, the sky and Moby Dick get none.
+- `lookup` 260–383 ms per question with all four loaded.
+- "available" 1.9 GB after the restart.
+- Flagged by the probe for a look, not failed: "How do I treat a
+  second-degree burn?" has the medical Q&A "Third-degree burn - Home
+  treatment" first at 0.22, ahead of WikiMed's "Burn" at 0.23.
+
+A PC that has never connected to the radio needs its host key accepted
+first. The dev box already trusts it: compare `ssh-keyscan -t ed25519
+radio-oracle.local` with `ssh-keygen -F radio-oracle.local` there.
+
 ## Open items
 
 - The shelf weights for the new collections (`oracle/rag/shelves.py`,
-  `oracle/rag/router.py`) are first guesses. Only the health one has been
-  seen working, on four medicine questions.
+  `oracle/rag/router.py`) are first guesses. Each has now been seen working
+  on the probe's questions (2026-11-25), which is one to five questions per
+  shelf.
+- The second-degree burn question (step 8 result): a Q&A page about a
+  different degree of burn narrowly outranks the WikiMed article. Wrong
+  first-aid advice is the costly kind of near-miss.
 - Nothing has been tried with a real voice.
 - A Q&A passage starts with the question as its title, so it can match a
   spoken question very closely. Watch for guides crowding out Wikipedia on
