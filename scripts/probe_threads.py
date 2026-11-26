@@ -36,8 +36,9 @@ SESSION_1 = [
     "How do I make a sourdough starter?",
     "How often should I feed the starter?",
     "Who was Napoleon Bonaparte?",
+    "Who was Julius Caesar?",  # same wording, another subject: its own thread
 ]
-EXPECTED = [0, 0, 0, 1, 1, 2]  # thread index per question
+EXPECTED = [0, 0, 0, 1, 1, 2, 3]  # thread index per question
 SESSION_2_QUESTION = "What should I check next?"
 
 

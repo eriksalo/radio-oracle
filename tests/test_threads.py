@@ -323,3 +323,107 @@ def test_resumed_history_is_handed_out_once(tmp_path) -> None:
     assert history[0]["content"] == "How do I feed a starter?"
     assert ctx.take_resumed_history() == []
     store.close()
+
+
+# ---------------------------------------------------------------- joining
+# Similarity alone never decides (see the threads module docstring): the
+# embedder below makes every question equally close to every thread.
+
+
+def _flat_tracker(tmp_path, sim: float) -> ThreadTracker:
+    """An embedder under which the first question filed is the reference
+    direction and every later question sits at cosine *sim* to it, each
+    along a direction of its own."""
+    seen: dict[str, int] = {}
+
+    def embed(text: str) -> np.ndarray:
+        i = seen.setdefault(text, len(seen))
+        v = np.zeros(64, dtype=np.float32)
+        v[0] = 1.0 if i == 0 else sim
+        if i:
+            v[i] = float(np.sqrt(1 - sim * sim))
+        return v
+
+    return ThreadTracker(ThreadStore(tmp_path / "t.db"), embed)
+
+
+@pytest.mark.parametrize(
+    ("earlier", "question"),
+    [
+        ("Who was Napoleon Bonaparte?", "Who was Julius Caesar?"),
+        ("Who was Julius Caesar?", "Who was Alexander the Great?"),
+        ("When should I plant tomatoes?", "When should I plant potatoes?"),
+        ("How do I make a sourdough starter?", "How do I make cheese from milk?"),
+        ("How do I treat a second degree burn?", "How do I treat a sprained ankle?"),
+        ("Why are my tomato leaves turning yellow?", "Why are my cucumber leaves turning yellow?"),
+        ("What is Moby Dick about?", "What is Hamlet about?"),
+        ("How do I keep chickens warm in winter?", "How do I keep bees warm in winter?"),
+    ],
+)
+def test_same_question_about_something_else_is_a_sibling(earlier, question):
+    assert threads.is_sibling(question, earlier, threads.topic_words(earlier))
+
+
+@pytest.mark.parametrize(
+    ("earlier", "question"),
+    [
+        ("Who was Napoleon Bonaparte?", "Why did Napoleon invade Russia?"),
+        ("Who was Napoleon Bonaparte?", "Where was Napoleon exiled?"),
+        ("How do I start a fire without matches?", "How do I keep a fire going in the rain?"),
+        ("How do I make a sourdough starter?", "How do I bake the loaf?"),
+        ("How do I make a sourdough starter?", "How often should I feed the starter?"),
+        ("Who was Napoleon Bonaparte?", "Who was Napoleon Bonaparte?"),
+    ],
+)
+def test_a_continuation_is_not_a_sibling(earlier, question):
+    assert not threads.is_sibling(question, earlier, threads.topic_words(earlier))
+
+
+def test_points_back_needs_a_noun_that_is_already_known():
+    assert threads.points_back("What temperature should I bake the loaf at?")
+    assert threads.points_back("When should the dressing be changed?")
+    assert not threads.points_back("What happened at the battle of Hastings?")
+    assert not threads.points_back("What is the capital of Australia?")
+    assert not threads.points_back("What is the best tinder?")
+    assert not threads.points_back("How do I make soap?")
+
+
+def test_generic_verbs_are_not_topic_words():
+    assert threads.topic_words("When should I plant tomatoes?") == {"tomato"}
+    assert threads.topic_sequence("How do I keep a fire going in the rain?") == ["fire", "rain"]
+
+
+def test_sibling_question_opens_its_own_thread_however_close(tmp_path):
+    t = _flat_tracker(tmp_path, 0.95)
+    a = t.file_turn("erik", "s1", "Who was Napoleon Bonaparte?", "A French emperor.")
+    b = t.file_turn("erik", "s1", "Who was Julius Caesar?", "A Roman general.")
+    assert a != b
+    # ... and the thread it opened is the one a question about it joins.
+    c = t.file_turn("erik", "s1", "Why was Caesar assassinated?", "The senators feared him.")
+    assert c == b
+
+
+def test_close_question_without_shared_word_opens_a_thread(tmp_path):
+    t = _flat_tracker(tmp_path, 0.78)  # above the old 0.75 "joins anything" line
+    a = t.file_turn("erik", "s1", "Why does my well pump short cycle?", "Often the tank.")
+    b = t.file_turn("erik", "s1", "How do I tie a bowline knot?", "Make a loop.")
+    assert a != b
+
+
+def test_pointing_back_joins_only_the_thread_just_talked_about(tmp_path):
+    t = _flat_tracker(tmp_path, 0.70)
+    a = t.file_turn("erik", "s1", "How do I make a sourdough starter?", "Flour and water.")
+    assert t.continues("erik", "What temperature should I bake the loaf at?") is not None
+    b = t.file_turn("erik", "s1", "What temperature should I bake the loaf at?", "230 degrees.")
+    assert a == b
+    t.leave()  # the same wording with no conversation under way
+    c = t.file_turn("erik", "s2", "How long should the dough rest?", "An hour.")
+    assert c != a
+
+
+def test_shared_topic_word_joins_an_older_thread(tmp_path):
+    t = _flat_tracker(tmp_path, 0.70)
+    a = t.file_turn("erik", "s1", "Why does my well pump short cycle?", "Often the tank.")
+    b = t.file_turn("erik", "s1", "How do I tie a bowline knot?", "Make a loop.")
+    c = t.file_turn("erik", "s2", "Could the pump be losing its prime?", "Check the foot valve.")
+    assert c == a != b

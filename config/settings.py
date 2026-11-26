@@ -334,9 +334,12 @@ class OracleSettings(BaseSettings):
     # sessions. Cosine thresholds for "this question belongs to that
     # thread" — calibration notes in the module docstring.
     threads_enabled: bool = True
-    thread_join_sim: float = 0.75  # joins any recent thread
-    thread_join_sim_shared: float = 0.65  # ... if it also shares a topic word
-    thread_continue_sim: float = 0.68  # stays on the thread just talked about
+    # A question joins a thread on evidence in its wording, never on
+    # similarity alone (oracle/memory/threads.py::ThreadTracker._joins).
+    thread_join_sim_shared: float = 0.65  # any recent thread it shares a topic word with
+    thread_continue_sim: float = 0.68  # the thread just talked about, if it says "the ..."
+    thread_join_sim: float = 0.80  # the thread just talked about, on similarity alone
+    thread_find_sim: float = 0.75  # "go back to ..." when no word of the title matches
     # "Where did we leave off" only offers threads with at least this many
     # exchanges; one-off questions stay out of the way.
     thread_recall_min_turns: int = 2

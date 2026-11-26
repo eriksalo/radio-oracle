@@ -15,12 +15,31 @@ or the catch-up at next boot). What the radio *says* when it picks a
 thread back up is built from the stored turns, not from a model, so
 "you last asked …" is always what was actually asked.
 
-Thresholds (settings.thread_*) were set on 22 hand-written questions in
-7 topics with nomic-v1.5 and the ``clustering:`` prefix (2026-11-25):
-question-to-question cosine is 0.60–0.85 within a topic and up to 0.72
-across topics, so similarity alone cannot separate them. A shared topic
-word in the 0.65–0.75 band does: 13/15 same-topic questions joined,
-2/129 cross-topic ones did. Not yet checked on real conversations.
+Similarity alone cannot say whether a question carries a thread on.
+Measured with nomic-v1.5 (``clustering:`` prefix) on 12 hand-written
+topics, 28 continuations and 35 same-shaped questions about something
+else (2026-11-26): a continuation scores 0.56-0.89 against its thread,
+"Who was Julius Caesar?" scores 0.84 against a Napoleon thread, and a
+plain change of topic reaches 0.68 a quarter of the time. So a question
+joins a thread only on evidence in its wording (:meth:`ThreadTracker._joins`):
+
+* it shares a topic word with the thread (and is not far off) - 1 wrong
+  join in 440 cross-topic pairs;
+* or it points back with "the ..." ("the loaf", "the dressing" -
+  :func:`points_back`) and is near the thread the conversation is on;
+* or it is very close (0.80) to the thread the conversation is on;
+
+and never when it is an earlier question of the thread asked about
+something else (:func:`is_sibling`). On scripted sessions with the real
+embedder, before -> after: a same-shaped question straight after a
+topic's first question merged 29 -> 0 of 35; an unrelated question after
+a whole topic merged 74 -> 19 of 192 (those left say "the toilet", "the
+oil"); continuations kept 24 -> 20 of 28 - the ones lost name something
+new without pointing back ("What file size do I need?", "How much
+paracetamol can I give?") and open a thread of their own. Known wrong
+joins: "the battle of Hastings" into a thread that has "the battle of
+Waterloo", car tyre pressure into the pressure-tank thread. Not yet
+checked on real conversations.
 
 Thread-safety: turns are filed from a worker thread while commands read
 from the event loop — same sqlite pattern as journal.py.
@@ -28,6 +47,7 @@ from the event loop — same sqlite pattern as journal.py.
 
 from __future__ import annotations
 
+import difflib
 import re
 import sqlite3
 import threading
@@ -55,19 +75,96 @@ _STOP = frozenset(
 )
 
 
-def topic_words(text: str) -> set[str]:
-    """Lowercase content words, crudely stemmed — the lexical half of the
-    same-topic test ("pump", "starter", "napoleon")."""
-    out: set[str] = set()
+def _stem(word: str) -> str:
+    for suffix in ("ing", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
+
+
+# Verbs that say what is being done, not what it is about: "plant" is
+# shared by tomatoes and potatoes, "treat" by a burn and a sprained ankle.
+# They never count as a topic word.
+_GENERIC = frozenset(
+    _stem(form)
+    for form in (
+        "make makes making made plant plants planting planted treat treats treating treated "
+        "start starts starting started keeps keeping kept bring brings bringing brought "
+        "feed feeds feeding fed work works working worked happen happens happening happened "
+        "invade invades invading invaded end ends ending ended sharpen sharpens sharpening "
+        "sharpened fix fixes fixing fixed repair repairs repairing repaired grow grows growing "
+        "grew grown build builds building built clean cleans cleaning cleaned use uses using "
+        "used check checks checking checked change changes changing changed remove removes "
+        "removing removed replace replaces replacing replaced stop stops stopping stopped "
+        "prevent prevents preventing prevented cook cooks cooking cooked bake bakes baking "
+        "baked find finds finding found put puts putting take takes taking took give gives "
+        "giving gave run runs running ran turn turns turning turned help helps helping helped "
+        "cause causes causing caused call calls called show shows showing showed look looks "
+        "looking looked try tries trying tried want wants wanted going went come comes coming "
+        "came"
+    ).split()
+)
+
+
+def topic_sequence(text: str) -> list[str]:
+    """Lowercase content words in spoken order, crudely stemmed, without
+    the generic verbs — the lexical half of the same-topic test ("pump",
+    "starter", "napoleon")."""
+    out: list[str] = []
     for w in re.findall(r"[a-z]+", text.lower()):
         if w in _STOP or len(w) < 3:
             continue
-        for suffix in ("ing", "ed", "es", "s"):
-            if w.endswith(suffix) and len(w) - len(suffix) >= 3:
-                w = w[: -len(suffix)]
-                break
-        out.add(w)
+        w = _stem(w)
+        if w in _GENERIC or w in out:
+            continue
+        out.append(w)
     return out
+
+
+def topic_words(text: str) -> set[str]:
+    return set(topic_sequence(text))
+
+
+_DEFINITE_RE = re.compile(r"\bthe\s+([a-z]+)((?:\s+[a-z]+){0,2})", re.IGNORECASE)
+_NOT_POINTING = frozenset({"best", "most", "same", "difference", "world", "sky", "sun", "moon"})
+
+
+def points_back(text: str) -> bool:
+    """True when *text* names something as already known: "the loaf",
+    "the dressing", "the pressure tank". "The battle of Hastings" and
+    "the capital of Australia" say what they mean themselves, and "the
+    best ..." asks for something new, so they do not point back."""
+    for m in _DEFINITE_RE.finditer(text):
+        if m.group(1).lower() in _NOT_POINTING:
+            continue
+        if "of" in m.group(2).lower().split():
+            continue
+        return True
+    return False
+
+
+def is_sibling(question: str, earlier: str, thread_words: set[str]) -> bool:
+    """True when *question* is *earlier* asked again about something else:
+    "Who was Julius Caesar?" after "Who was Napoleon Bonaparte?", "When
+    should I plant potatoes?" after "... tomatoes?". Such a pair is as
+    close in embedding space as a real continuation (0.84 and 0.87;
+    "Why did Napoleon invade Russia?" is 0.81), so wording decides: the
+    two open alike, share at least half their words in order, and the
+    first thing the new one names is new to the thread. A subject
+    introduced with "the" points back ("How do I bake the loaf?") and is
+    never a sibling."""
+    q = re.findall(r"[a-z']+", question.lower())
+    p = re.findall(r"[a-z']+", earlier.lower())
+    if len(q) < 3 or len(p) < 3 or q[0] != p[0] or q == p:
+        return False
+    matcher = difflib.SequenceMatcher(a=p, b=q, autojunk=False)
+    same = sum(block.size for block in matcher.get_matching_blocks())
+    if same < 2 or same / min(len(q), len(p)) < 0.5:
+        return False
+    subject = next(iter(topic_sequence(question)), None)
+    if subject is None or subject in thread_words:
+        return False
+    return not re.search(rf"\bthe\s+{re.escape(subject)}", question.lower())
 
 
 @dataclass(frozen=True)
@@ -245,18 +342,34 @@ class ThreadStore:
             rows = self._conn.execute(sql, args).fetchall()
         return [Thread(**dict(r)) for r in rows]
 
-    def match_data(self, user: str, limit: int = 40) -> list[tuple[int, np.ndarray | None, set]]:
-        """(id, unit centroid, topic words) of the user's recent threads."""
+    def match_data(
+        self, user: str, limit: int = 40
+    ) -> list[tuple[int, np.ndarray | None, set[str], list[str]]]:
+        """(id, unit centroid, topic words, last questions) of the user's
+        recent threads."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, vec_sum, words, title FROM threads WHERE user = ? AND turns >= 1 "
                 "ORDER BY last_ts DESC, id DESC LIMIT ?",
                 (user, limit),
             ).fetchall()
+            ids = [int(r["id"]) for r in rows]
+            asked: dict[int, list[str]] = {tid: [] for tid in ids}
+            if ids:
+                marks = ",".join("?" * len(ids))
+                for t in self._conn.execute(
+                    f"SELECT thread_id, question FROM thread_turns WHERE thread_id IN ({marks}) "
+                    "ORDER BY id",
+                    ids,
+                ):
+                    asked[int(t["thread_id"])].append(t["question"])
         out = []
         for r in rows:
-            words = set(r["words"].split()) | topic_words(r["title"] or "")
-            out.append((int(r["id"]), _unit(_from_blob(r["vec_sum"])), words))
+            # Re-derived, so words stored before the generic verbs were
+            # dropped do not count either.
+            words = topic_words(r["words"]) | topic_words(r["title"] or "")
+            tid = int(r["id"])
+            out.append((tid, _unit(_from_blob(r["vec_sum"])), words, asked[tid][-12:]))
         return out
 
     def turns(self, thread_id: int, limit: int | None = None) -> list[dict]:
@@ -330,10 +443,10 @@ class ThreadTracker:
         words = topic_words(text)
         vec = self._embed(text)
         best: tuple[float, int] | None = None
-        for tid, centroid, twords in self.store.match_data(user):
+        for tid, centroid, twords, _asked in self.store.match_data(user):
             overlap = len(words & twords)
             sim = float(vec @ centroid) if vec is not None and centroid is not None else 0.0
-            if overlap == 0 and sim < settings.thread_join_sim:
+            if overlap == 0 and sim < settings.thread_find_sim:
                 continue
             score = overlap + sim
             if best is None or score > best[0]:
@@ -342,8 +455,7 @@ class ThreadTracker:
 
     def continues(self, user: str, question: str) -> Thread | None:
         """The thread the conversation is on, if *question* carries it on
-        (same test as filing: close to the thread, or fairly close and
-        sharing a topic word). Asked *before* the answer, so the lookup
+        (same test as filing, :meth:`_joins`). Asked *before* the answer, so the lookup
         can be told the topic: "How often should I feed the starter?"
         fetched infant feeding in the middle of a sourdough conversation
         (2026-11-25). The embedding is kept for :meth:`file_turn`."""
@@ -355,37 +467,43 @@ class ThreadTracker:
         self._last_vec = (question, vec)
         if vec is None:
             return None
-        words = topic_words(question)
-        for tid, centroid, twords in self.store.match_data(user):
+        for tid, centroid, twords, asked in self.store.match_data(user):
             if tid != current.id:
                 continue
             if centroid is None or centroid.shape != vec.shape:
                 return None
-            sim = float(vec @ centroid)
-            if sim >= settings.thread_continue_sim or (
-                sim >= settings.thread_join_sim_shared and bool(words & twords)
-            ):
-                return current
-            return None
+            joins = self._joins(question, float(vec @ centroid), twords, asked, True)
+            return current if joins else None
         return None
+
+    @staticmethod
+    def _joins(
+        question: str, sim: float, twords: set[str], asked: list[str], current: bool
+    ) -> bool:
+        """Does *question* belong to the thread with these topic words and
+        questions? *current*: it is the thread the conversation is on.
+        See the module docstring for why similarity is not enough."""
+        if any(is_sibling(question, earlier, twords) for earlier in asked):
+            return False  # the same question about something else
+        if sim >= settings.thread_join_sim_shared and topic_words(question) & twords:
+            return True
+        if not current:
+            return False
+        if sim >= settings.thread_join_sim:
+            return True
+        return sim >= settings.thread_continue_sim and points_back(question)
 
     def _match(self, user: str, question: str, vec: np.ndarray | None) -> int | None:
         if vec is None:
             return None
-        words = topic_words(question)
         best: tuple[float, int] | None = None
-        for tid, centroid, twords in self.store.match_data(user):
+        for tid, centroid, twords, asked in self.store.match_data(user):
             if centroid is None or centroid.shape != vec.shape:
                 continue
             sim = float(vec @ centroid)
-            joins = (
-                sim >= settings.thread_join_sim
-                or (sim >= settings.thread_join_sim_shared and bool(words & twords))
-                # The thread the conversation is on right now needs less
-                # evidence than one from last week.
-                or (tid == self.current_id and sim >= settings.thread_continue_sim)
-            )
-            if joins and (best is None or sim > best[0]):
+            if self._joins(question, sim, twords, asked, tid == self.current_id) and (
+                best is None or sim > best[0]
+            ):
                 best = (sim, tid)
         return best[1] if best else None
 
