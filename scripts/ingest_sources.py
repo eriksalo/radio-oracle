@@ -8,6 +8,7 @@ collection*: one collection per subject shelf keeps the prompt short.
 
 Stages, each resumable and each per source:
 
+    model      fetch the embedding model (fp32 ONNX + tokenizer) into models/
     download   fetch the ZIM into data/knowledge/
     extract    pages → cleaned, chunked text in data/embeddings/<source>.text.sqlite
     embed      chunks → data/embeddings/<source>.vectors.f32 (row N = chunk row N)
@@ -187,8 +188,10 @@ def extract_nhs(path: str, title: str, tree) -> tuple[str, list[str]] | None:
 
 def extract_recipes(path: str, title: str, tree) -> tuple[str, list[str]] | None:
     slug = path.strip("/").split("/")
-    if len(slug) != 2 or slug[1] in ("tags", "index.html", "about", "contribute"):
-        return None  # the front page, tag lists
+    if len(slug) > 2 and slug[1] == "recipe":
+        pass  # foss.cooking/recipe/<author>/<name>
+    elif len(slug) != 2 or slug[1] in ("tags", "index.html", "about", "contribute"):
+        return None  # the front page, tag and author lists
     main = tree.css_first("article") or tree.css_first("main")
     if main is None:
         return None
@@ -309,10 +312,18 @@ class DocEmbedder:
         so.intra_op_num_threads = threads
         so.log_severity_level = 3
         providers = ["CUDAExecutionProvider"] if provider == "cuda" else []
+        if provider == "cuda" and hasattr(ort, "preload_dlls"):
+            ort.preload_dlls()  # the CUDA/cuDNN wheels pip installed, on Windows too
         self._sess = ort.InferenceSession(
             str(model_path), so, providers=[*providers, "CPUExecutionProvider"]
         )
         self.providers = self._sess.get_providers()
+        if provider == "cuda" and self.providers[0] != "CUDAExecutionProvider":
+            raise RuntimeError(
+                "CUDA was asked for but onnxruntime fell back to "
+                f"{self.providers[0]}: install onnxruntime-gpu with its CUDA and cuDNN "
+                "libraries (see docs/guides-ingest-gpu-runbook.md)"
+            )
         self._inputs = {i.name for i in self._sess.get_inputs()}
 
     def encode(self, texts: list[str]) -> np.ndarray:
@@ -340,7 +351,7 @@ def embedded_rows(src: Source) -> int:
 def embed(src: Source, embedder: DocEmbedder, batch: int, window: int = 256) -> None:
     """Append vectors for the chunks that have none yet, in row order.
     Safe to stop and restart."""
-    con = sqlite3.connect(f"file:{src.text_path}?mode=ro", uri=True)
+    con = sqlite3.connect(str(src.text_path))
     total = con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     done = embedded_rows(src)
     logger.info(f"{src.name}: {done:,}/{total:,} chunks embedded ({embedder.providers[0]})")
@@ -380,7 +391,7 @@ def build(collection: str, sources: list[Source]) -> int:
     for src in sources:
         if not src.text_path.exists():
             continue
-        con = sqlite3.connect(f"file:{src.text_path}?mode=ro", uri=True)
+        con = sqlite3.connect(str(src.text_path))
         n = con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         con.close()
         if n and embedded_rows(src) == n:
@@ -397,7 +408,7 @@ def build(collection: str, sources: list[Source]) -> int:
     parts = []
     offset = 0
     for src, n in ready:
-        con = sqlite3.connect(f"file:{src.text_path}?mode=ro", uri=True)
+        con = sqlite3.connect(str(src.text_path))
         rows = con.execute(
             "SELECT row_id, chunk_id, text, source, url, title, chunk_index FROM chunks ORDER BY row_id"
         )
@@ -438,11 +449,31 @@ def download(base_url: str, src: Source) -> None:
     logger.info(f"{src.name}: {src.zim_path.stat().st_size / 1e6:.0f} MB")
 
 
+MODEL_URL = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/"
+MODEL_FILES = ("onnx/model.onnx", "tokenizer.json", "tokenizer_config.json", "config.json")
+
+
+def fetch_model(model_path: Path) -> None:
+    """The fp32 ONNX encoder and its tokenizer, next to each other."""
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    for name in MODEL_FILES:
+        target = model_path.parent / Path(name).name
+        if target.exists():
+            continue
+        logger.info(f"downloading {name}")
+        request = urllib.request.Request(MODEL_URL + name, headers={"User-Agent": "Mozilla/5.0"})
+        tmp = target.with_suffix(target.suffix + ".part")
+        with urllib.request.urlopen(request, timeout=60) as resp, open(tmp, "wb") as fp:
+            while block := resp.read(1 << 20):
+                fp.write(block)
+        tmp.rename(target)
+
+
 def status(sources: list[Source]) -> None:
     for src in sources:
         chunks = 0
         if src.text_path.exists():
-            con = sqlite3.connect(f"file:{src.text_path}?mode=ro", uri=True)
+            con = sqlite3.connect(str(src.text_path))
             chunks = con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
             con.close()
         zim = (
@@ -456,7 +487,9 @@ def status(sources: list[Source]) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("stages", nargs="+", choices=["download", "extract", "embed", "build", "status"])
+    p.add_argument(
+        "stages", nargs="+", choices=["model", "download", "extract", "embed", "build", "status"]
+    )
     p.add_argument("--source", action="append", help="source name (repeatable); default: all")
     p.add_argument("--collection", action="append", help="limit to these collections")
     p.add_argument("--force", action="store_true", help="extract again, discarding vectors")
@@ -481,6 +514,8 @@ def main() -> None:
     for stage in args.stages:
         if stage == "status":
             status(chosen)
+        elif stage == "model":
+            fetch_model(args.model)
         elif stage == "build":
             for collection in dict.fromkeys(s.collection for s in chosen):
                 build(collection, [s for s in sources if s.collection == collection])
@@ -492,7 +527,7 @@ def main() -> None:
                     extract(src, args.force)
                 elif stage == "embed":
                     embedder = embedder or DocEmbedder(args.model, args.provider, args.threads)
-                    embed(src, embedder, args.batch)
+                    embed(src, embedder, args.batch, window=max(256, args.batch * 8))
 
 
 if __name__ == "__main__":
