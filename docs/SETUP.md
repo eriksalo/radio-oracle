@@ -19,7 +19,7 @@ There are three major sections:
 | Jetson Orin Nano Super Developer Kit (8GB) | The "Super" variant has 40 TOPS and faster clocks |
 | 1TB M.2 2280 NVMe SSD | Samsung 980 Pro, WD SN770, or similar. The built-in SD card slot is too slow. |
 | USB microphone | **Seeed reSpeaker Lite** (XMOS XU316, 2-mic) — this is what we ship with. On-chip IC/NS/AGC/VNR help with noise; on-chip AEC only works if playback also routes through the same chip (we don't — see "Echo cancellation" below). Any USB mic works in principle. |
-| Speaker | A 4–8 Ω speaker on the reSpeaker Lite's amplifier connector (what we ship with since 2026-11; 4 Ω fitted). A separate USB DAC + speaker also works — set `ORACLE_SPEAKER_SINK_BASE` to its Pulse sink name prefix. |
+| Speaker | A 4–8 Ω speaker on the reSpeaker Lite's amplifier connector (what we ship with since 2026-11; replaced with a better driver 2026-11-27). A separate USB DAC + speaker also works — set `ORACLE_SPEAKER_SINK_BASE` to its Pulse sink name prefix. |
 | MicroSD card (32GB+) | Only needed for initial JetPack flash — the NVMe takes over after. |
 | USB keyboard + HDMI monitor | For initial setup only. The Oracle runs headless after. |
 | Ethernet cable or WiFi adapter | For initial setup and downloading. Not needed after. |
@@ -190,11 +190,14 @@ removed). What that changes relative to the description above:
 - Saying the wake word while the radio is answering stops it and opens
   the mic again (`ORACLE_VOICE_BARGE_IN`, default on). The button does the
   same and is the reliable one while the speaker is loud.
-- The amplifier is powered from USB 5 V and a 4 Ω load draws about twice
-  the current of 8 Ω at the same level. `ORACLE_SPEAKER_MAX_VOLUME_PCT`
-  (default 80) is the sink volume at full knob. If the board drops off
-  USB on loud passages (`dmesg` shows a disconnect; mic and speaker both
-  disappear), lower it.
+- `ORACLE_SPEAKER_MAX_VOLUME_PCT` (default 60) is the sink volume at
+  full knob. With the speaker fitted 2026-11-27 the on-chip echo
+  canceller holds to 65 % and is lost at 70 % (table in
+  `firmware/README.md`), so going higher trades the top of the knob for
+  a radio that cannot hear the wake word while it plays. The amplifier
+  runs off USB 5 V; 100 % for 5 s did not reset the board, but if it ever
+  drops off USB on loud passages (`dmesg` shows a disconnect; mic and
+  speaker both disappear), lower it.
 
 Setup (run once on the Jetson):
 

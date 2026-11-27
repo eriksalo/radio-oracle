@@ -139,7 +139,7 @@ def test_stream_play_pads_by_the_streams_real_latency(monkeypatch):
 
 
 def test_full_knob_stops_at_the_speaker_ceiling(monkeypatch):
-    """The 4 ohm speaker runs off the ReSpeaker Lite's USB-powered amp;
+    """The echo canceller only holds to a ceiling below full scale;
     the knob's travel maps onto 0..speaker_max_volume_pct."""
     monkeypatch.setattr(volume_bridge.settings, "speaker_max_volume_pct", 80)
     assert volume_bridge.sink_percent(0.0) == 0

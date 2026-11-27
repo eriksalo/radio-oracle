@@ -189,12 +189,15 @@ class OracleSettings(BaseSettings):
     audio_output_device: str = "ReSpeaker"
     audio_capture_sample_rate: int = 16000
     audio_playback_sample_rate: int = 16000
-    # Sink volume (percent) at full knob. The speaker is 4 ohm on the
-    # ReSpeaker Lite's 5 V USB-powered amplifier: full scale into 4 ohm
-    # pulls roughly twice the current of an 8 ohm load, and a sagging 5 V
-    # rail resets the XU316 (mic and speaker both vanish). The knob's
-    # whole travel maps onto 0..this.
-    speaker_max_volume_pct: int = 80
+    # Sink volume (percent) at full knob; the knob's whole travel maps onto
+    # 0..this. Set by the echo canceller, not by power: with the speaker
+    # fitted 2026-11-27 the board's AEC (firmware v2.0.8) keeps the radio's
+    # own voice at about -32 dBFS on the mic up to 65 %, and loses it
+    # completely at 70 % (-15 dBFS, mic peaks 0.9) -- above that the wake
+    # word cannot be heard over playback. 100 % for 5 s did not reset the
+    # board. Numbers in firmware/README.md; re-measure after any speaker
+    # or enclosure change.
+    speaker_max_volume_pct: int = 60
 
     # RAG
     chroma_path: Path = Path("data/chroma")

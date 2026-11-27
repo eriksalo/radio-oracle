@@ -65,6 +65,19 @@ therefore ramps the knob upward. Not measured: whether a person talking
 during playback comes through, and wake-word / transcription quality on a
 real voice with this build.
 
+**Speaker replaced 2026-11-27** (a better driver, same connector; the
+numbers above are the first 4 Ω speaker). Same test, v2.0.8, mic level in
+dBFS once locked (quiet room −53):
+
+| Sink volume | 30 % | 45 % | 60 % | 65 % | 70 % | 75–100 % |
+|---|---|---|---|---|---|---|
+| Echo at mic | −40 | −34…−39 | −30…−34 | −32…−34 | −16…−26 | −15 (peaks 0.9) |
+
+The new speaker is louder at the mic: the locked residual at 30 % is 8 dB
+higher than before, lock takes ~12 s, and cancellation is lost outright
+between 65 and 70 % (before: a few dB worse up to 80 %). Hence
+`speaker_max_volume_pct = 60`. 100 % for 5 s did not reset the board.
+
 Roll back with the Flashing command above and the v2.0.7 file.
 
 ## Upstream
