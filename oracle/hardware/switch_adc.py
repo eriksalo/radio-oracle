@@ -28,6 +28,9 @@ from oracle.hardware.pot import ADS1115
 _THRESH_LOW = 0.8
 _THRESH_HIGH = 2.5
 
+# Poll cycle while the chip does not answer (normal cycle: 0.1 s).
+_DOWN_PERIOD_S = 2.0
+
 
 @dataclass(frozen=True)
 class SwitchReading:
@@ -221,7 +224,8 @@ class SharedAdcPoller:
                 with self._cache_lock:
                     self._cache[ch] = v
             elapsed = time.monotonic() - cycle_start
-            sleep_left = self._period - elapsed
+            period = self._period if self._adc.responding else _DOWN_PERIOD_S
+            sleep_left = period - elapsed
             if sleep_left > 0:
                 self._stop.wait(sleep_left)
 

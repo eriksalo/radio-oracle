@@ -57,6 +57,11 @@ _VREF_NOMINAL = 3.3  # the rail across the pot, for percent calc
 # returning the stale result and caused channel-swapped readings).
 _CONV_WAIT_S = 0.020
 
+# While the chip does not answer, say so again this often (the first failure
+# and the recovery are always logged). Every failed read used to be logged:
+# 30 lines a second, 320 MB a day, for three days (2026-11-23..26).
+_DOWN_REMINDER_S = 600.0
+
 
 class ADS1115:
     """Single-ended one-shot reader for an ADS1115.
@@ -71,6 +76,9 @@ class ADS1115:
         self._bus = None
         self._lock = threading.Lock()
         self._error: str | None = None
+        self._down_since: float | None = None
+        self._down_logged_at = 0.0
+        self._failed_reads = 0
         self._open()
 
     @property
@@ -80,6 +88,40 @@ class ADS1115:
     @property
     def error(self) -> str | None:
         return self._error
+
+    @property
+    def responding(self) -> bool:
+        """False from the first failed read until the next good one."""
+        return self._bus is not None and self._down_since is None
+
+    def _note_failure(self, error: OSError) -> None:
+        now = time.monotonic()
+        self._error = repr(error)
+        self._failed_reads += 1
+        where = f"ADS1115 on i2c-{self._bus_num} addr=0x{self._addr:02x}"
+        if self._down_since is None:
+            self._down_since = self._down_logged_at = now
+            logger.warning(
+                f"{where} stopped answering ({error}): "
+                "the pot, button and power switch are not being read"
+            )
+        elif now - self._down_logged_at >= _DOWN_REMINDER_S:
+            self._down_logged_at = now
+            logger.warning(
+                f"{where} still not answering after {now - self._down_since:.0f} s "
+                f"({self._failed_reads} failed reads): {error}"
+            )
+
+    def _note_success(self) -> None:
+        if self._down_since is None:
+            return
+        logger.info(
+            f"ADS1115 answering again after {time.monotonic() - self._down_since:.0f} s "
+            f"({self._failed_reads} failed reads)"
+        )
+        self._down_since = None
+        self._failed_reads = 0
+        self._error = None
 
     def _open(self) -> None:
         try:
@@ -144,9 +186,9 @@ class ADS1115:
                     return None
                 hi, lo = self._bus.read_i2c_block_data(self._addr, _REG_CONVERSION, 2)
             except OSError as e:
-                self._error = repr(e)
-                logger.debug(f"ADS1115 read failed: {e}")
+                self._note_failure(e)
                 return None
+            self._note_success()
         raw = (hi << 8) | lo
         if raw & 0x8000:  # two's-complement
             raw -= 1 << 16
